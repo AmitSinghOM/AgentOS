@@ -1,0 +1,7 @@
+{
+  "name": "hello",
+  "nodes": [
+    {"id": "a", "agent": "greeter", "depends_on": []},
+    {"id": "b", "agent": "greeter", "depends_on": ["a"]}
+  ]
+}
