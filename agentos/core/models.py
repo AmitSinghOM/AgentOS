@@ -1,8 +1,11 @@
-"""Core domain types. Phase 0 keeps these in-memory; the store layer abstracts
-persistence so Phase 1 can move state to Postgres without touching the engine."""
+"""Core domain types.
+
+Phase 0 keeps these in memory; the store layer abstracts persistence so
+Phase 1 can move state to Postgres without touching the engine.
+"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from uuid import uuid4
 
@@ -10,7 +13,7 @@ from pydantic import BaseModel, Field
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _id() -> str:
@@ -45,7 +48,9 @@ class WorkflowDefinition(BaseModel):
         for n in self.nodes:
             for dep in n.depends_on:
                 if dep not in ids:
-                    raise ValueError(f"node {n.id!r} depends on unknown node {dep!r}")
+                    raise ValueError(
+                        f"node {n.id!r} depends on unknown node {dep!r}"
+                    )
         # cycle check via DFS
         edges = {n.id: n.depends_on for n in self.nodes}
         WHITE, GREY, BLACK = 0, 1, 2
@@ -55,7 +60,9 @@ class WorkflowDefinition(BaseModel):
             color[node] = GREY
             for dep in edges[node]:
                 if color[dep] == GREY:
-                    raise ValueError(f"workflow {self.name!r} has a cycle at {node!r}")
+                    raise ValueError(
+                        f"workflow {self.name!r} has a cycle at {node!r}"
+                    )
                 if color[dep] == WHITE:
                     visit(dep)
             color[node] = BLACK
@@ -68,7 +75,8 @@ class WorkflowDefinition(BaseModel):
 class RunStatus(str, Enum):
     pending = "pending"
     running = "running"
-    suspended = "suspended"   # Phase 3: awaiting human approval
+    # Phase 3: awaiting human approval.
+    suspended = "suspended"
     completed = "completed"
     failed = "failed"
 
