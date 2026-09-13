@@ -121,14 +121,7 @@ class SqliteStore:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                (current,) = self._conn.execute(
-                    "SELECT COALESCE(MAX(seq), 0) FROM run_events WHERE run_id = ?", (run_id,)
-                ).fetchone()
-                if current != expected_seq:
-                    raise ConflictError(
-                        f"run {run_id!r}: expected seq {expected_seq}, log is at {current}"
-                    )
-                if fence is not None:
+                if fence is not None:                          # fence first (see MemoryStore)
                     row = self._conn.execute(
                         "SELECT max_fence FROM runs WHERE run_id = ?", (run_id,)
                     ).fetchone()
@@ -136,6 +129,13 @@ class SqliteStore:
                     if fence < seen:
                         raise ConflictError(f"run {run_id!r}: fence {fence} is stale "
                                             f"(highest seen {seen})")
+                (current,) = self._conn.execute(
+                    "SELECT COALESCE(MAX(seq), 0) FROM run_events WHERE run_id = ?", (run_id,)
+                ).fetchone()
+                if current != expected_seq:
+                    raise ConflictError(
+                        f"run {run_id!r}: expected seq {expected_seq}, log is at {current}"
+                    )
                 out: list[Event] = []
                 for i, ev in enumerate(events, start=expected_seq + 1):
                     stamped = ev.model_copy(update={"seq": i})
@@ -228,6 +228,13 @@ class SqliteStore:
                     "ON CONFLICT(run_id) DO UPDATE SET holder = excluded.holder, "
                     "fence = excluded.fence, expires_at = excluded.expires_at",
                     (run_id, holder, fence, now + ttl_seconds),
+                )
+                # Record the fence at acquire time (see MemoryStore.acquire). The run row
+                # may not exist yet for a brand-new run; that is fine — the first append
+                # creates it and carries the fence.
+                self._conn.execute(
+                    "UPDATE runs SET max_fence = MAX(max_fence, ?) WHERE run_id = ?",
+                    (fence, run_id),
                 )
                 self._conn.execute("COMMIT")
                 return LeaseToken(run_id=run_id, holder=holder, fence=fence)

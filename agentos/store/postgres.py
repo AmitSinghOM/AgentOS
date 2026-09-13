@@ -136,13 +136,13 @@ class PostgresStore:
                 "SELECT last_seq, max_fence FROM runs WHERE run_id = %s FOR UPDATE", (run_id,)
             ).fetchone()
             current, seen_fence = (row[0], row[1]) if row else (0, 0)
+            if fence is not None and fence < seen_fence:   # fence first (see MemoryStore)
+                raise ConflictError(f"run {run_id!r}: fence {fence} is stale "
+                                    f"(highest seen {seen_fence})")
             if current != expected_seq:
                 raise ConflictError(
                     f"run {run_id!r}: expected seq {expected_seq}, log is at {current}"
                 )
-            if fence is not None and fence < seen_fence:
-                raise ConflictError(f"run {run_id!r}: fence {fence} is stale "
-                                    f"(highest seen {seen_fence})")
             out: list[Event] = []
             for i, ev in enumerate(events, start=expected_seq + 1):
                 stamped = ev.model_copy(update={"seq": i})
@@ -237,6 +237,11 @@ class PostgresStore:
                 "ON CONFLICT (run_id) DO UPDATE SET holder = EXCLUDED.holder, "
                 "fence = EXCLUDED.fence, expires_at = EXCLUDED.expires_at",
                 (run_id, holder, fence, ttl_seconds),
+            )
+            # Record the fence at acquire time (see MemoryStore.acquire).
+            conn.execute(
+                "UPDATE runs SET max_fence = GREATEST(max_fence, %s) WHERE run_id = %s",
+                (fence, run_id),
             )
             return LeaseToken(run_id=run_id, holder=holder, fence=fence)
 

@@ -65,7 +65,40 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
-      - run: pytest -v tests/chaos
+      - run: pytest -v tests/chaos --ignore=tests/chaos/network
+
+  chaos-network:
+    # Layer 2: Toxiproxy between the worker and Postgres. The lease-expiry race must end
+    # with the stale worker FENCED, never merged.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agentos
+          POSTGRES_PASSWORD: agentos
+          POSTGRES_DB: agentos_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U agentos" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+      toxiproxy:
+        image: ghcr.io/shopify/toxiproxy:2.12.0
+        ports: ["8474:8474", "15432:15432"]
+    env:
+      AGENTOS_TEST_PG_DSN: postgresql://agentos:agentos@127.0.0.1:5432/agentos_test
+      AGENTOS_TEST_TOXIPROXY_API: http://127.0.0.1:8474
+      # Inside the toxiproxy container, Postgres is reachable by its service name.
+      AGENTOS_TEST_TOXIPROXY_UPSTREAM: postgres:5432
+      AGENTOS_TEST_TOXIPROXY_LISTEN: 0.0.0.0:15432
+      AGENTOS_TEST_TOXIPROXY_CLIENT: 127.0.0.1:15432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - run: pytest -v tests/chaos/network -rs
 
   compose:
     # Phase 0 gate: `docker compose up` brings up Postgres + Redis and both pass
