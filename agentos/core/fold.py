@@ -19,6 +19,7 @@ from agentos.core.events import (
     StepDeadLettered,
     StepFailed,
     StepProgress,
+    StepRetryRequested,
     StepStarted,
 )
 from agentos.core.models import RunStatus, StepRecord, WorkflowRun
@@ -61,6 +62,7 @@ def fold(events: Iterable[Event]) -> WorkflowRun:
 
         if isinstance(ev, StepStarted):
             run.attempts[ev.step_id] = ev.attempt
+            run.pending_retries.pop(ev.step_id, None)
         elif isinstance(ev, StepProgress):
             run.progress[ev.step_id] = ev.fraction
         elif isinstance(ev, StepCompleted):
@@ -85,7 +87,18 @@ def fold(events: Iterable[Event]) -> WorkflowRun:
             total += ev.cost.decimal()
         elif isinstance(ev, StepFailed):
             if ev.terminal:
+                run.failed_steps[ev.step_id] = ev.error
                 run.error = f"step {ev.step_id!r}: {ev.error}"
+            elif ev.retry_at is not None:
+                run.pending_retries[ev.step_id] = ev.retry_at
+        elif isinstance(ev, StepRetryRequested):
+            # Reopen: the run is running again and the step may be attempted once more.
+            run.status = RunStatus.running
+            run.error = None
+            run.ended_at = None
+            run.dead_lettered.pop(ev.step_id, None)
+            run.failed_steps.pop(ev.step_id, None)
+            run.pending_retries.pop(ev.step_id, None)
         elif isinstance(ev, RunCompleted):
             run.status = RunStatus.completed
             run.ended_at = ev.occurred_at
