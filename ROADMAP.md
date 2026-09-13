@@ -47,7 +47,14 @@ wins interviews.
 - [ ] Idempotency keys on step execution; re-run after crash = no double call
 - [ ] Redis execution lock per run (exactly-one-worker advancement)
 - [ ] State snapshots to bound replay cost
-- [ ] **Chaos test:** kill the worker mid-run; on restart it resumes correctly
+- [ ] **Chaos suite** (`tests/chaos/`): deterministic fault points in the worker, run in CI on every PR — see *Chaos engineering plan* below. The `kill -9` demo is one case of it, not a one-off script.
+  - [ ] `FaultInjector` port consulted at named points; production binding is a no-op
+  - [ ] `crash_before_effect_commit` → step re-runs, exactly one `effect` event (C1)
+  - [ ] `crash_after_commit_before_ack` → redelivery hits `UNIQUE(run_id, seq)`, no-op (C2)
+  - [ ] `crash_after_lock_acquire` + start a 2nd worker → exactly one advancement per step (C6)
+  - [ ] `redis_flush_mid_run` → run completes from the Postgres log alone (README claim: Redis is safe to flush)
+  - [ ] `pg_connection_drop_mid_txn` → no partial event written; worker reconnects and resumes
+  - [ ] Property test over the event log (Hypothesis): random fault schedule × random 1–5 step workflow → invariants hold (see plan)
 - [ ] **C1** — effects recorded before ack; replay never re-executes user code ([#1](https://github.com/AmitSinghOM/AgentOS/issues/1))
 - [ ] **C2** — idempotent enqueue and append, `UNIQUE(run_id, seq)` ([#2](https://github.com/AmitSinghOM/AgentOS/issues/2))
 - [ ] **C3** — replay by `step_id` + `workflow_version`, never by position ([#3](https://github.com/AmitSinghOM/AgentOS/issues/3))
@@ -73,6 +80,7 @@ without repeating step 2. Show the event log.
 - [ ] **C5** — first-class cancel/pause; client disconnect never changes run state ([#5](https://github.com/AmitSinghOM/AgentOS/issues/5))
 - [ ] **C9** — one execution model: every DAG node is a durable step ([#9](https://github.com/AmitSinghOM/AgentOS/issues/9))
 - [ ] **C11** — `DEAD_LETTERED` step state with cause and a retry path ([#11](https://github.com/AmitSinghOM/AgentOS/issues/11))
+- [ ] **Chaos, network class:** Toxiproxy in compose between worker ↔ Postgres/Redis; `lease_expiry_race` (add 2 s latency to Postgres so a live worker's lease lapses while a 2nd worker starts) → exactly one advancement, the stale worker's write is rejected (C6 split-brain); `redis_partition_mid_run` → retry timers survive; `pg_latency_under_fanout` → fan-in waits, no branch output lost (C4)
 
 **Demo:** a fan-out/fan-in workflow (1 → [2,3,4 parallel] → 5) with one branch failing
 and retrying.
@@ -104,6 +112,94 @@ Jaeger trace and the cost breakdown.
 - [ ] Cost + latency panel per run
 
 **Tag:** `v0.5.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
+
+---
+
+## Chaos engineering plan
+
+Netflix's Chaos Monkey is the right *idea* and the wrong *tool* for this project. The tool
+randomly terminates instances in a production fleet so engineers are forced to tolerate
+instance loss; it needs a fleet to hunt in and knows nothing about where a worker's commit
+boundaries are. AgentOS is one API, one worker, Postgres, Redis. What carries over is the
+discipline underneath it — the Principles of Chaos Engineering: state a steady-state
+hypothesis, inject a real-world fault, observe whether the hypothesis held, bound the blast
+radius. Applied here, the hypotheses are the C1–C15 invariants and the faults are crashes
+and partitions at the exact boundaries where a durable-execution engine can go wrong.
+
+Three layers, each earned by the phase that needs it.
+
+### Layer 1 — Deterministic fault points (Phase 1, in-process, runs in CI)
+
+The worker consults a `FaultInjector` port at named points. Tests bind a fixture that
+raises or `os._exit`s at a chosen point; production binds a no-op. Named points:
+
+| Fault point | Where | Invariant it tests | Issue |
+| --- | --- | --- | --- |
+| `crash_before_effect_commit` | after the agent produced output, before `effect` event commit | step re-runs; exactly one `effect` per `(run_id, step_id)` | #1 |
+| `crash_after_commit_before_ack` | after `effect` commit, before queue ack | redelivered message is a no-op via `UNIQUE(run_id, seq)` | #2 |
+| `crash_after_lock_acquire` | after lease taken, before first event | a 2nd worker takes over after expiry; one advancement per step | #6 |
+| `crash_mid_snapshot` | while writing a snapshot | replay from log still correct; snapshot is never the source of truth | #15 |
+| `redis_flush_mid_run` | between two steps | run completes from the Postgres log alone | README claim |
+| `pg_connection_drop_mid_txn` | inside the event-append transaction | no partial event; worker reconnects and resumes | #10 |
+| `definition_changed_between_crash_and_resume` | swap the workflow definition on disk before restart | resume refused with a version error, never positional | #3 |
+
+Steady-state invariants asserted after every fault (also the Hypothesis property test):
+
+1. `seq` is dense and monotonic per run with no gaps.
+2. Exactly one `effect` event per `(run_id, step_id)`; effect counter in the fake agent = 1.
+3. Every `completed` step's `started` seq precedes its `effect` seq.
+4. Terminal run state is `COMPLETED`, `FAILED`, or `DEAD_LETTERED` — never stuck `RUNNING`
+   with no lease holder.
+5. Folding the log from seq 0 equals folding from the latest snapshot.
+
+The property test (`hypothesis`) draws a random 1–5 step workflow and a random schedule of
+fault points, runs it to termination with automatic restarts, and checks the five
+invariants. This is the Python-sized version of what Jepsen does: Jepsen is the gold
+standard for exactly-once and no-lost-write claims, but it is Clojure and heavyweight;
+a property test over our own event log gets most of the value at a fraction of the cost.
+If AgentOS ever claims linearizable semantics publicly, that is when Jepsen earns its keep.
+
+### Layer 2 — Network faults via Toxiproxy (Phase 2, compose service, runs in CI)
+
+Some faults cannot be produced by a code hook because they are about *time*, not order.
+Toxiproxy (Shopify, ~12k★, actively maintained) sits between the worker and Postgres/Redis
+in `docker-compose.yml` and injects latency, connection resets, bandwidth limits and full
+partitions without touching AgentOS code. Scenarios:
+
+| Toxic | Target | Invariant | Issue |
+| --- | --- | --- | --- |
+| `latency 2000ms` | Postgres | a live worker's lease lapses; a 2nd worker takes over; the stale worker's write is **rejected** (fencing token), not merged | #6 |
+| `reset_peer` | Redis, mid-run | retry timers and locks are rebuilt from Postgres; no step lost | README claim |
+| `timeout` (blackhole) | Redis, during approval wait | `SUSPENDED` run resumes correctly when Redis returns (Phase 3) | #7 |
+| `latency 500ms` | Postgres, during fan-out | fan-in waits; no branch output lost | #4 |
+| `bandwidth 1KB/s` | Postgres | large step outputs commit atomically or not at all | #10 |
+
+Toxics are toggled via Toxiproxy's HTTP API from the test, so each scenario is a normal
+pytest case. Add a `chaos-network` CI job that brings up compose with the proxy and runs
+`tests/chaos/network/`.
+
+### Layer 3 — Fleet-level chaos (only if AgentOS ever runs on Kubernetes; probably never)
+
+LitmusChaos and kube-monkey randomly kill pods and are the true descendants of Chaos
+Monkey. They become relevant only with multiple worker replicas on a cluster, which is
+Phase 2 at the earliest and unlikely for a portfolio project. Not planned; recorded here
+so the omission is deliberate rather than forgotten. If it happens: one experiment,
+`pod-delete` on the worker deployment during a 100-run soak, invariants 1–5 checked
+against the log afterwards.
+
+### What we deliberately do not do
+
+- No random chaos in a "production" environment — there is none, and randomness only
+  pays off with many instances and many hours of operation.
+- No Netflix `chaosmonkey` binary: it requires Spinnaker and a fleet.
+- No chaos tooling before Phase 1's event log exists; there is nothing to assert against.
+
+### Definition of done for the chaos work
+
+- Every Layer 1 fault point has a test, and the `kill -9` demo in Phase 1 is
+  `tests/chaos/test_crash_after_step_2.py` recorded on video, not a shell script.
+- The blog post claims exactly what CI proves: "every fault point in the commit path is
+  exercised on every merge."
 
 ---
 
