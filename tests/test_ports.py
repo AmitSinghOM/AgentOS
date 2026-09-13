@@ -32,7 +32,8 @@ class FakeStore:
     def put_workflow(self, wf): self.workflows[wf.name] = wf
     def get_workflow(self, name): return self.workflows.get(name)
 
-    def append_events(self, run_id: str, expected_seq: int, events: Sequence[Event]):
+    def append_events(self, run_id: str, expected_seq: int, events: Sequence[Event],
+                      *, fence: int | None = None):
         log = self.logs.setdefault(run_id, [])
         if len(log) != expected_seq:
             raise ConflictError("stale")

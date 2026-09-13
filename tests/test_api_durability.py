@@ -29,7 +29,8 @@ def test_run_survives_app_restart_and_events_page_by_seq(app_factory):
     c1.post("/agents", json={"name": "g", "type": "echo", "config": {"message": "hi"}})
     c1.post("/workflows", json={"name": "w", "nodes": [
         {"id": "a", "agent": "g"}, {"id": "b", "agent": "g", "depends_on": ["a"]}]})
-    run = c1.post("/workflows/w/runs", headers={"Idempotency-Key": "k-1"}).json()
+    run = c1.post("/workflows/w/runs", params={"sync": "true"},
+                  headers={"Idempotency-Key": "k-1"}).json()
     assert run["status"] == "completed"
     events_before = c1.get(f"/runs/{run['id']}/events").json()
 
@@ -47,7 +48,8 @@ def test_run_survives_app_restart_and_events_page_by_seq(app_factory):
     page2 = c2.get(f"/runs/{run['id']}/events", params={"after": 4}).json()
     assert [e["seq"] for e in page2["data"]] == [5, 6]
 
-    # Idempotency-Key survives the restart too: same key → same run, no new log.
-    again = c2.post("/workflows/w/runs", headers={"Idempotency-Key": "k-1"}).json()
-    assert again["id"] == run["id"]
+    # Idempotency-Key survives the restart too: same key → same run, no new log —
+    # whether the retry is sync or async.
+    again = c2.post("/workflows/w/runs", headers={"Idempotency-Key": "k-1"})
+    assert again.status_code == 202 and again.json()["id"] == run["id"]
     assert c2.get("/runs/nope/events").status_code == 404
