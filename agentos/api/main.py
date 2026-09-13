@@ -38,7 +38,7 @@ def build_store():
 store = build_store()
 engine = Engine(store=store, blobs=store, executors={AgentType.echo.value: EchoExecutor()})
 
-app = FastAPI(title="AgentOS", version="0.2.0-dev")
+app = FastAPI(title="AgentOS", version="0.2.0")
 
 
 @app.get("/health")
