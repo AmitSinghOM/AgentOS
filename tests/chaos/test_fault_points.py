@@ -32,7 +32,8 @@ def test_crash_before_effect_commit_reruns_step_but_records_one_completion(store
         w1.run_once()
     assert injector.fired
     mid = store.read_events(run_id)
-    assert [type(e).__name__ for e in mid][-1] == "StepStarted"       # s2 started, not done
+    assert not any(isinstance(e, StepCompleted) and e.step_id == "s2" for e in mid)  # s2 not done
+    assert [e.step_id for e in mid if isinstance(e, StepCompleted)] == ["s1"]
     assert executor.calls == {"s1": 1, "s2": 1}
 
     # w1 is "dead": its lease is still live (TTL 30 s) so a second worker must wait…

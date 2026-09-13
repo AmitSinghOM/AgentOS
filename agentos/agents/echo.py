@@ -1,17 +1,26 @@
-"""Deterministic stand-in executor for Phase 0 — proves the pipe without a provider.
-Implements `agentos.core.ports.Executor`. Phase 1 adds a `tool` executor (HTTP/subprocess)
-here and moves model-vendor executors into separate `agentos-provider-*` distributions."""
+"""Deterministic stand-in executor — proves the pipe without a provider.
+Implements `agentos.core.ports.Executor`. Reports zero cost, `compute` as its only
+effect, and honest provenance. Phase 2 adds a `tool` executor (HTTP/subprocess) here;
+model-vendor executors live in separate `agentos-provider-*` distributions."""
 from __future__ import annotations
 
-from agentos.core.models import Agent
+from agentos.core.models import Cost, Effect, EffectClass, Provenance, StepRequest, StepResult
+from agentos.core.ports import ProgressFn
+
+VERSION = "0.3.0"
 
 
 class EchoExecutor:
-    def execute(self, agent: Agent, upstream: dict[str, dict]) -> dict:
-        message = agent.config.get("message", "hello from agentos")
-        return {"agent": agent.name, "message": message, "received": upstream}
+    name = "echo"
+    version = VERSION
 
-
-def run_echo(agent: Agent, upstream: dict[str, dict]) -> dict:
-    """Function form kept for callers that predate the Executor port."""
-    return EchoExecutor().execute(agent, upstream)
+    def execute(self, req: StepRequest, progress: ProgressFn) -> StepResult:
+        progress(0.0, "echo start")
+        message = req.agent.config.get("message", "hello from agentos")
+        output = {"agent": req.agent.name, "message": message, "received": req.inputs}
+        return StepResult(
+            output=output,
+            effects=[Effect(effect_class=EffectClass.compute, description="echo")],
+            cost=Cost(),
+            provenance=Provenance(executor=self.name, executor_version=self.version),
+        )
