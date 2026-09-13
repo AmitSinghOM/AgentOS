@@ -11,19 +11,46 @@ import pytest
 
 from agentos.core.events import from_record
 from agentos.core.fold import fold
-from agentos.core.models import WorkflowRun
 
 GOLDEN = Path(__file__).resolve().parent
 FILES = sorted(GOLDEN.glob("*.json"))
+
+
+def _subset_drift(recorded, folded, path="$") -> list[str]:
+    """Recorded must be a recursive subset of folded: every recorded key present with an
+    equal value; lists compared element-wise with equal length. Extra keys in `folded`
+    are additive and allowed. Returns human-readable drift descriptions."""
+    if isinstance(recorded, dict) and isinstance(folded, dict):
+        out = []
+        for k, v in recorded.items():
+            if k not in folded:
+                out.append(f"{path}.{k}: recorded field vanished")
+            else:
+                out += _subset_drift(v, folded[k], f"{path}.{k}")
+        return out
+    if isinstance(recorded, list) and isinstance(folded, list):
+        if len(recorded) != len(folded):
+            return [f"{path}: length {len(recorded)} → {len(folded)}"]
+        out = []
+        for i, (r, f) in enumerate(zip(recorded, folded, strict=True)):
+            out += _subset_drift(r, f, f"{path}[{i}]")
+        return out
+    return [] if recorded == folded else [f"{path}: {recorded!r} → {folded!r}"]
 
 
 @pytest.mark.parametrize("path", FILES, ids=[p.stem for p in FILES])
 def test_golden_log_folds_to_recorded_state(path: Path):
     doc = json.loads(path.read_text())
     events = [from_record(r) for r in doc["events"]]
-    folded = fold(events)
-    expected = WorkflowRun.model_validate(doc["expected"])
-    assert folded == expected, f"{path.name}: fold drifted from recorded state"
+    folded = fold(events).model_dump(mode="json")
+    recorded = doc["expected"]
+    # Every field the recording build knew about must fold identically, at any depth.
+    # Fields added since (derived views such as `progress`, `total_cost`, per-step
+    # `effects`/`cost`/`provenance`) may appear — that is additive and allowed. A
+    # recorded field going missing or changing value is the compatibility break this
+    # test exists to catch.
+    drift = _subset_drift(recorded, folded)
+    assert not drift, f"{path.name}: fold drifted from recorded state:\n  " + "\n  ".join(drift)
     # Structural invariants every corpus entry must satisfy.
     assert [e.seq for e in events] == list(range(1, len(events) + 1))
     assert len({(e.run_id, e.seq) for e in events}) == len(events)
@@ -31,3 +58,17 @@ def test_golden_log_folds_to_recorded_state(path: Path):
 
 def test_corpus_is_not_empty():
     assert FILES, "record at least one golden log: python scripts/record_golden.py <label>"
+
+
+def test_subset_drift_allows_additive_fields_but_catches_changes():
+    """The comparator must tolerate fields added since a recording, and nothing else."""
+    rec = {"status": "completed", "steps": [{"node_id": "a", "attempt": 1}]}
+    assert _subset_drift(rec, {"status": "completed", "progress": {},
+                               "steps": [{"node_id": "a", "attempt": 1, "cost": {}}]}) == []
+    assert _subset_drift(rec, {"status": "failed", "steps": [{"node_id": "a", "attempt": 1}]}) \
+        == ["$.status: 'completed' → 'failed'"]
+    assert _subset_drift(rec, {"steps": [{"node_id": "a", "attempt": 1}]}) \
+        == ["$.status: recorded field vanished"]
+    assert _subset_drift(rec, {"status": "completed", "steps": []}) == ["$.steps: length 1 → 0"]
+    assert _subset_drift(rec, {"status": "completed", "steps": [{"node_id": "b", "attempt": 1}]}) \
+        == ["$.steps[0].node_id: 'a' → 'b'"]

@@ -46,8 +46,8 @@ def test_kill_9_after_step_2_then_restart_finishes_without_repeating_step_2(stor
     from agentos.store.sqlite import SqliteStore
     s = SqliteStore(db_path)
     mid = s.read_events(run_id)
-    assert [type(e).__name__ for e in mid] == [
-        "RunStarted", "StepStarted", "StepCompleted", "StepStarted", "StepCompleted"]
+    assert [e.step_id for e in mid if isinstance(e, StepCompleted)] == ["s1", "s2"]
+    assert not any(isinstance(e, StepStarted) and e.step_id == "s3" for e in mid)
     assert fold(mid).status.value == "running"
     assert s.acquire(run_id, "probe", 0.01) is None, "dead worker's lease should still be live"
     s.close()

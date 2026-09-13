@@ -7,11 +7,11 @@ See docs/DEVELOPMENT_STRUCTURE.md §1-2.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from agentos.core.events import Event
-from agentos.core.models import Agent, BlobRef, WorkflowDefinition
+from agentos.core.models import Agent, BlobRef, StepRequest, StepResult, WorkflowDefinition
 
 
 class ConflictError(Exception):
@@ -58,13 +58,23 @@ class BlobStore(Protocol):
     def exists(self, ref: BlobRef) -> bool: ...
 
 
+ProgressFn = Callable[[float, str], None]
+
+
 class Executor(Protocol):
-    """Step-execution port. The core hands an executor an agent definition and the
-    upstream outputs, and records whatever comes back. It never inspects the payload
-    beyond hashing it, so a model generation change is an adapter change.
+    """Step-execution port (docs/DEVELOPMENT_STRUCTURE.md §2.1, §11).
 
-    Phase 1 (next slice) widens this to StepRequest/StepResult with declared effects,
-    metered cost, provenance and a progress callback (docs/DEVELOPMENT_STRUCTURE.md
-    §2.1, §11); the shape here is the Phase 0 subset."""
+    The core hands an executor a `StepRequest` — hydrated inputs, the effects the agent
+    DECLARED, the budget and deadline — and a `progress(fraction, note)` callback that
+    renews the worker's lease and may append a rate-limited `step.progress` event. The
+    executor returns a `StepResult`: opaque output, the effects it actually caused, its
+    metered cost, and provenance. The core never inspects the output beyond hashing it,
+    so a model generation change is an adapter change.
 
-    def execute(self, agent: Agent, upstream: dict[str, dict]) -> dict: ...
+    Contract the core enforces (never trusts): reported effect classes ⊆ declared;
+    cost ≤ budget; wall time ≤ budget. Violations dead-letter the step."""
+
+    name: str
+    version: str
+
+    def execute(self, req: StepRequest, progress: ProgressFn) -> StepResult: ...

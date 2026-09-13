@@ -46,18 +46,18 @@ forward — see the dated decision at the end of this phase.
 - [x] Event-sourced run state: `run_events` table, fold-to-state replay (`core/events.py`, `core/fold.py`)
 - [ ] **Longevity structure** (`docs/DEVELOPMENT_STRUCTURE.md`): ports + injected adapters, import-linter contract, CI matrix 3.11/3.14 — **shipped at Phase 0 close**; remaining Phase 1 items:
   - [x] `schema_version`, `event_type`, `parent_run_id` on every event; upcaster registry (`core/upcast.py`)
-  - [ ] ⏭ `StepRequest`/`StepResult` with `effects`, `cost`, `provenance` (§2.1); budget enforced by the core
+  - [x] `StepRequest`/`StepResult` with `effects`, `cost`, `provenance` (§2.1); budget enforced by the core — **done in Phase 2 slice 1** (`core/engine.py` gate → dispatch → verify → record)
   - [ ] ⏭ Model-vendor executors as `agentos-provider-*` plugins via entry points; core ships `echo` + `tool` only — the Phase 1 demo needs no vendor key
   - [x] SQLite (`store/sqlite.py`, stdlib), Postgres (`store/postgres.py`, psycopg 3) and Memory adapters all pass `tests/contract/` (store + coordination suites; Postgres leg runs in CI against a service container)
   - [~] golden corpus mechanism live (`tests/golden/`, `scripts/record_golden.py`, `v0.2.0-dev.json`); record `v0.2.0.json` at release
   - [ ] ⏭ ADR 0006 core-depends-on-nothing, 0007 log-is-the-API, 0008 providers-are-plugins, 0009 queue-and-lease-are-ports
   - [ ] **AI-engineering pass (§11)** — `EffectClass`, `Principal`, `BlobRef`, `BlobStore` port **shipped at Phase 0 close**; Phase 1 items:
-    - [ ] ⏭ A1 declare-then-do: `declared_effects` on the agent definition, checked before dispatch; undeclared effect → dead-letter + suspend
+    - [x] A1 declare-then-do: `Agent.declared_effects` checked against `WorkflowDefinition.budget.allowed_effect_classes` BEFORE dispatch; undeclared reported effect → `step.dead_lettered` + run failed (Phase 3 turns the failure into SUSPENDED-for-approval)
     - [ ] ⏭ A2 `Principal` on every approve/cancel/resume event; `spend`/`write_external` gates require a human unless the workflow opts out
     - [ ] ⏭ A3 capability aliases (`chat.fast`, …) resolved by provider plugins; `ExecutorSubstituted` event on change
     - [~] A4 events carry `BlobRef`; SQLite + Memory `BlobStore` adapters; filesystem adapter still to add
-    - [ ] ⏭ A5 `progress()` callback renews the lease; rate-limited `StepProgress` events; expiry measured from last heartbeat
-    - [ ] ⏭ A6 metered `Cost{units, amount, currency, pricing_snapshot_hash}`; pricing table stored as a blob
+    - [x] A5 `progress(fraction, note)` renews the lease on every call and appends `step.progress` at most once per second; lease loss mid-step raises `LeaseLost` before any write (proven over Toxiproxy alongside the fence)
+    - [~] A6 metered `Cost{units: [Meter], amount (decimal string), currency, pricing_snapshot_hash}`; per-step and rolling run ceilings enforced; dead-lettered cost still counted. Pricing table as a blob: with the first provider plugin
     - [ ] ⏭ A10 provider plugins tested against recorded cassettes; live re-record is a nightly opt-in job
 - [x] Worker process consuming a run queue, decoupled from the API (`agentos/worker/`; queue is a `Queue` port with SQLite/Postgres/Memory adapters — Redis is now an optional adapter, not a requirement: see ADR note below)
 - [ ] ⏭ Real tool agent (HTTP/subprocess) in core; LLM executors live in provider plugins (see longevity structure)
@@ -111,7 +111,7 @@ first write left a takeover window that only designing the Toxiproxy test made v
 - [ ] Topological scheduler: run all ready nodes, parallelize independent branches
 - [ ] Agent versioning: pin a run to a specific `agent_version`
 - [ ] Retry with exponential backoff (Redis-tracked) + max attempts
-- [ ] Dead-letter state for poison steps; run fails cleanly with cause in the log
+- [~] Dead-letter state for poison steps; run fails cleanly with cause in the log — `step.dead_lettered` event + `WorkflowRun.dead_lettered` in the fold; retry path (`POST /runs/{id}/steps/{step}/retry`) still to add
 - [ ] Pass outputs along edges (step N output → step M input)
 - [ ] **C4** — event per step transition; cancellation is a persisted event ([#4](https://github.com/AmitSinghOM/AgentOS/issues/4))
 - [ ] **C5** — first-class cancel/pause; client disconnect never changes run state ([#5](https://github.com/AmitSinghOM/AgentOS/issues/5))

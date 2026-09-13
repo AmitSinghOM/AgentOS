@@ -10,7 +10,18 @@ import pytest
 
 from agentos.core.engine import Engine
 from agentos.core.events import Event, RunStarted, from_record
-from agentos.core.models import Agent, AgentType, BlobRef, RunStatus, WorkflowDefinition
+from agentos.core.models import (
+    Agent,
+    AgentType,
+    BlobRef,
+    Effect,
+    EffectClass,
+    Provenance,
+    RunStatus,
+    StepRequest,
+    StepResult,
+    WorkflowDefinition,
+)
 from agentos.core.ports import ConflictError
 
 
@@ -63,17 +74,24 @@ class FakeStore:
 
 
 class CountingExecutor:
-    """Stands in for any future model: the core only sees an opaque dict come back."""
+    """Stands in for any future model: the core only sees an opaque output come back."""
+
+    name = "counting"
+    version = "test"
 
     def __init__(self, fail_on: set[str] | None = None) -> None:
         self.calls: list[tuple[str, dict]] = []
         self.fail_on = fail_on or set()
 
-    def execute(self, agent: Agent, upstream: dict[str, dict]) -> dict:
-        self.calls.append((agent.name, upstream))
-        if agent.name in self.fail_on:
-            raise RuntimeError(f"{agent.name} exploded")
-        return {"n": len(self.calls), "from": sorted(upstream)}
+    def execute(self, req: StepRequest, progress) -> StepResult:
+        self.calls.append((req.agent.name, req.inputs))
+        if req.agent.name in self.fail_on:
+            raise RuntimeError(f"{req.agent.name} exploded")
+        return StepResult(
+            output={"n": len(self.calls), "from": sorted(req.inputs)},
+            effects=[Effect(effect_class=EffectClass.compute)],
+            provenance=Provenance(executor=self.name, executor_version=self.version),
+        )
 
 
 def _diamond(agent="x") -> WorkflowDefinition:

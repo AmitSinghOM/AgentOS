@@ -30,11 +30,11 @@ class CountingEcho(EchoExecutor):
     def __init__(self) -> None:
         self.calls: Counter[str] = Counter()
 
-    def execute(self, agent, upstream):
+    def execute(self, req, progress):
         # Which step is this? The upstream keys tell us (s1 has none).
-        step = {(): "s1", ("s1",): "s2", ("s2",): "s3"}[tuple(sorted(upstream))]
+        step = {(): "s1", ("s1",): "s2", ("s2",): "s3"}[tuple(sorted(req.inputs))]
         self.calls[step] += 1
-        return super().execute(agent, upstream)
+        return super().execute(req, progress)
 
 
 @pytest.fixture
