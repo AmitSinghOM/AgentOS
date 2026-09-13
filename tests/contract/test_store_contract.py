@@ -2,6 +2,7 @@
 one fixture below, nothing else (docs/DEVELOPMENT_STRUCTURE.md §5.2)."""
 from __future__ import annotations
 
+import os
 import threading
 
 import pytest
@@ -12,8 +13,17 @@ from agentos.core.ports import ConflictError
 from agentos.store.memory import MemoryStore
 from agentos.store.sqlite import SqliteStore
 
+PG_DSN = os.environ.get("AGENTOS_TEST_PG_DSN")  # e.g. postgresql://localhost/agentos_test
 
-@pytest.fixture(params=["memory", "sqlite-file", "sqlite-memory"])
+ADAPTERS = ["memory", "sqlite-file", "sqlite-memory"] + (["postgres"] if PG_DSN else [])
+
+
+def _postgres_store(schema: str):
+    from agentos.store.postgres import PostgresStore
+    return PostgresStore(PG_DSN, schema=schema, max_size=4)
+
+
+@pytest.fixture(params=ADAPTERS)
 def store(request, tmp_path):
     if request.param == "memory":
         yield MemoryStore()
@@ -21,10 +31,27 @@ def store(request, tmp_path):
         s = SqliteStore(tmp_path / "agentos.db")
         yield s
         s.close()
-    else:
+    elif request.param == "sqlite-memory":
         s = SqliteStore(":memory:")
         yield s
         s.close()
+    else:
+        # One throwaway schema per test = isolation without a DB per test.
+        schema = f"t_{tmp_path.name.lower().replace('-', '_')}"[:60]
+        s = _postgres_store(schema)
+        try:
+            yield s
+        finally:
+            with s.connection() as conn:
+                conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            s.close()
+
+
+def test_postgres_adapter_is_exercised_when_dsn_is_set():
+    """Guard against the Postgres leg silently vanishing from CI."""
+    if not PG_DSN:
+        pytest.skip("AGENTOS_TEST_PG_DSN not set — Postgres leg skipped (CI sets it)")
+    assert "postgres" in ADAPTERS
 
 
 def _started(run_id="r1", request_id="req-1"):
