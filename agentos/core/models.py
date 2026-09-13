@@ -214,15 +214,27 @@ class Effect(BaseModel):
 class Budget(BaseModel):
     """Limits the core enforces — never trusted to the executor (§2.1).
 
-    `allowed_effect_classes` is the declare-then-do gate: an agent whose declared effects
-    exceed it is refused BEFORE dispatch. Phase 3 turns that refusal into SUSPENDED for
-    approval; today it dead-letters the step and fails the run."""
+    Declare-then-do gate, three tiers by declared effect class:
+      allowed_effect_classes      → runs freely
+      approval_required_for       → SUSPENDED before dispatch until a principal approves (C7)
+      anything else               → refused: dead-lettered before dispatch
+    Approval on `spend` / `write_external` requires a human principal unless the workflow
+    sets `allow_agent_approval` (§11 A2). `approval_timeout_seconds` expires a pending
+    approval as a rejection by the `system` principal."""
 
     allowed_effect_classes: set[EffectClass] = Field(
         default_factory=lambda: {EffectClass.read, EffectClass.compute})
+    approval_required_for: set[EffectClass] = Field(
+        default_factory=lambda: {EffectClass.write_external, EffectClass.spend,
+                                 EffectClass.send_message, EffectClass.execute_code})
+    allow_agent_approval: bool = False
+    approval_timeout_seconds: float | None = None
     max_step_cost: str | None = None        # decimal string
     max_run_cost: str | None = None         # decimal string; rolling total across steps
     max_step_wall_seconds: float | None = None
+
+
+HUMAN_ONLY_EFFECTS = frozenset({EffectClass.spend, EffectClass.write_external})
 
 
 class StepRequest(BaseModel):
@@ -240,6 +252,7 @@ class StepRequest(BaseModel):
     declared_effects: frozenset[EffectClass]
     budget: Budget
     deadline: datetime | None = None
+    approval_id: str | None = None     # set when this step runs under a granted approval
 
 
 class StepResult(BaseModel):
@@ -268,6 +281,28 @@ class StepState(str, Enum):
     dead_lettered = "dead_lettered"       # C11: poison step; cause in the log
 
 
+class ApprovalStatus(str, Enum):
+    pending = "pending"
+    granted = "granted"
+    rejected = "rejected"
+
+
+class Approval(BaseModel):
+    """Folded view of one approval gate (C7). Lives in the log as
+    approval.requested / approval.granted / approval.rejected."""
+
+    approval_id: str
+    step_id: str
+    effect_classes: list[EffectClass]
+    status: ApprovalStatus = ApprovalStatus.pending
+    reason: str = ""                       # why it was requested
+    requested_at: datetime
+    expires_at: datetime | None = None
+    decided_by: Principal | None = None
+    decision_reason: str = ""
+    decided_at: datetime | None = None
+
+
 class WorkflowRun(BaseModel):
     """Folded view of a run's event log. Never persisted directly — always derived
     by `agentos.core.fold.fold` from `run_events`."""
@@ -287,6 +322,7 @@ class WorkflowRun(BaseModel):
     cancelled_steps: list[str] = Field(default_factory=list)     # steps interrupted by a cancel
     cancel_requested: bool = False                            # request persisted, not yet finalized
     pause_requested: bool = False
+    approvals: dict[str, Approval] = Field(default_factory=dict)  # approval_id → gate
     total_cost: str = "0"                                     # decimal string, rolled up
     started_at: datetime = Field(default_factory=_now)
     ended_at: datetime | None = None
@@ -299,6 +335,6 @@ class WorkflowRun(BaseModel):
 # `EffectClass`, `WorkflowDefinition` → `Budget`). Pydantic defers building those until
 # first use; complete them here so a framework that snapshots a model's serializer at
 # import time (FastAPI's response fields) never sees a half-built model.
-for _model in (Agent, WorkflowNode, WorkflowDefinition, StepRequest, StepResult, StepRecord,
+for _model in (Agent, WorkflowNode, WorkflowDefinition, StepRequest, StepResult, StepRecord, Approval,
                WorkflowRun):
     _model.model_rebuild()
