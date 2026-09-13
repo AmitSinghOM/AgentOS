@@ -41,7 +41,7 @@ store = build_store()
 engine = Engine(store=store, blobs=store, executors={AgentType.echo.value: EchoExecutor()},
                 lease=store if hasattr(store, "acquire") else None)
 
-app = FastAPI(title="AgentOS", version="0.3.0-dev")
+app = FastAPI(title="AgentOS", version="0.3.0")
 
 
 @app.get("/health")
