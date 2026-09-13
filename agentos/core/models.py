@@ -113,6 +113,9 @@ class RunStatus(str, Enum):
     running = "running"
     # Phase 3: awaiting human approval.
     suspended = "suspended"
+    # Phase 2 (C5): operator control. `paused` is not terminal; `cancelled` is.
+    paused = "paused"
+    cancelled = "cancelled"
     completed = "completed"
     failed = "failed"
 
@@ -274,6 +277,9 @@ class WorkflowRun(BaseModel):
     dead_lettered: dict[str, str] = Field(default_factory=dict)  # step_id → cause
     failed_steps: dict[str, str] = Field(default_factory=dict)   # step_id → last error (terminal)
     pending_retries: dict[str, datetime] = Field(default_factory=dict)  # step_id → not before
+    cancelled_steps: list[str] = Field(default_factory=list)     # steps interrupted by a cancel
+    cancel_requested: bool = False                            # request persisted, not yet finalized
+    pause_requested: bool = False
     total_cost: str = "0"                                     # decimal string, rolled up
     started_at: datetime = Field(default_factory=_now)
     ended_at: datetime | None = None

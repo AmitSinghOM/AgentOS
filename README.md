@@ -75,6 +75,12 @@ curl -X POST localhost:8000/runs/{run_id}/steps/{step_id}/retry \
      -H 'Content-Type: application/json' \
      -d '{"principal": {"kind": "human", "id": "amit"}, "reason": "fixed the agent"}'
 
+# operator control: each is a persisted request, finalized at the worker's next
+# boundary (or immediately if nothing is running). Completed steps are never lost.
+curl -X POST localhost:8000/runs/{run_id}/pause
+curl -X POST localhost:8000/runs/{run_id}/resume
+curl -X POST localhost:8000/runs/{run_id}/cancel
+
 # or run synchronously in the API process (Phase 0 behaviour)
 curl -X POST 'localhost:8000/workflows/hello/runs?sync=true'
 ```
