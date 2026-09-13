@@ -230,9 +230,16 @@ class Engine:
         if existing is not None:
             return existing
         run_id = uuid4().hex
+        # Pin the current version of every agent the workflow references (DESIGN §5).
+        # Missing agents are pinned as 0 so the failure surfaces at dispatch, in the log.
+        pins: dict[str, int] = {}
+        for node in wf.nodes:
+            if node.agent not in pins:
+                agent = self._store.get_agent(node.agent)
+                pins[node.agent] = agent.version if agent is not None else 0
         self._store.append_events(run_id, 0, [RunStarted(
             run_id=run_id, workflow=wf.name, workflow_version=wf.version,
-            request_id=request_id, principal=principal,
+            request_id=request_id, principal=principal, agent_versions=pins,
         )])
         return run_id
 
@@ -402,7 +409,8 @@ class Engine:
                 # ---- one wave: start all, execute concurrently, settle sequentially.
                 started: list[tuple[WorkflowNode, StepRequest, Executor]] = []
                 for node in ready:
-                    prepared = self._prepare(log, run_id, node, attempts, outputs, budget)
+                    prepared = self._prepare(log, run_id, node, attempts, outputs, budget,
+                                             run.agent_versions)
                     if isinstance(prepared, str):          # unrecoverable definition error
                         return self._fail(log, prepared, step_id=node.id)
                     started.append(prepared)
@@ -454,12 +462,16 @@ class Engine:
 
     # ---------------------------------------------------------------- one step
     def _prepare(self, log: _Log, run_id: str, node: WorkflowNode, attempts: dict[str, int],
-                 outputs: dict[str, dict], budget: Budget):
-        """Resolve agent + executor, append step.started. Returns (node, req, executor)
-        or an error string for definition problems that no retry can fix."""
-        agent = self._store.get_agent(node.agent)
+                 outputs: dict[str, dict], budget: Budget, pins: dict[str, int]):
+        """Resolve the PINNED agent version + executor, append step.started. Returns
+        (node, req, executor) or an error string for definition problems that no retry
+        can fix. Runs that predate pinning (empty pins) resolve the latest version."""
+        pinned = pins.get(node.agent)
+        agent = self._store.get_agent(node.agent, version=pinned) if pinned else \
+            self._store.get_agent(node.agent)
         if agent is None:
-            return f"node {node.id!r} references unknown agent {node.agent!r}"
+            which = f" v{pinned}" if pinned else ""
+            return f"node {node.id!r} references unknown agent {node.agent!r}{which}"
         executor = self._executors.get(agent.type.value)
         if executor is None:
             return f"no executor registered for agent type {agent.type.value!r}"
@@ -471,7 +483,7 @@ class Engine:
         declared = frozenset(agent.declared_effects)
         log.append(StepStarted(
             run_id=run_id, step_id=node.id, attempt=attempt, agent=agent.name,
-            idempotency_key=key, declared_effects=sorted(declared),
+            idempotency_key=key, declared_effects=sorted(declared), agent_version=agent.version,
         ))
         deadline = (self._wall() + timedelta(seconds=budget.max_step_wall_seconds)
                     if budget.max_step_wall_seconds else None)

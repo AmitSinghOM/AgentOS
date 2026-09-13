@@ -48,6 +48,7 @@ def fold(events: Iterable[Event]) -> WorkflowRun:
         workflow=first.workflow,
         workflow_version=first.workflow_version,
         request_id=first.request_id,
+        agent_versions=dict(first.agent_versions),
         status=RunStatus.running,
         started_at=first.occurred_at,
         parent_run_id=first.parent_run_id,

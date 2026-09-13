@@ -18,7 +18,7 @@ from agentos.core.ports import ConflictError
 
 class MemoryStore:
     def __init__(self) -> None:
-        self._agents: dict[str, Agent] = {}
+        self._agents: dict[tuple[str, int], Agent] = {}
         self._workflows: dict[str, WorkflowDefinition] = {}
         self._events: dict[str, list[dict]] = {}          # run_id → records in seq order
         self._requests: dict[str, str] = {}               # request_id → run_id
@@ -32,15 +32,30 @@ class MemoryStore:
         self._cv = threading.Condition(self._lock)
         self.visibility_seconds = 30.0
 
-    # definitions
+    # definitions (agents immutable per (name, version))
     def put_agent(self, agent: Agent) -> None:
-        self._agents[agent.name] = agent
+        key = (agent.name, agent.version)
+        with self._lock:
+            existing = self._agents.get(key)
+            if existing is not None:
+                if existing != agent:
+                    raise ConflictError(f"agent {agent.name!r} v{agent.version} already exists "
+                                        f"with a different definition; bump the version")
+                return
+            self._agents[key] = agent
 
-    def get_agent(self, name: str) -> Agent | None:
-        return self._agents.get(name)
+    def get_agent(self, name: str, version: int | None = None) -> Agent | None:
+        if version is not None:
+            return self._agents.get((name, version))
+        versions = [v for (n, v) in self._agents if n == name]
+        return self._agents[(name, max(versions))] if versions else None
 
     def list_agents(self) -> list[Agent]:
-        return list(self._agents.values())
+        names = sorted({n for (n, _) in self._agents})
+        return [self.get_agent(n) for n in names]  # type: ignore[misc]
+
+    def list_agent_versions(self, name: str) -> list[int]:
+        return sorted(v for (n, v) in self._agents if n == name)
 
     def put_workflow(self, wf: WorkflowDefinition) -> None:
         self._workflows[wf.name] = wf
