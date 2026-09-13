@@ -1,0 +1,436 @@
+{
+  "events": [
+    {
+      "agent_versions": {
+        "greeter": 1
+      },
+      "event_type": "run.started",
+      "occurred_at": "2026-09-13T12:31:14.245215Z",
+      "parent_run_id": null,
+      "principal": null,
+      "request_id": "golden-v0.3.0",
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 1,
+      "workflow": "diamond",
+      "workflow_version": 1
+    },
+    {
+      "agent": "greeter",
+      "agent_version": 1,
+      "attempt": 1,
+      "declared_effects": [
+        "compute"
+      ],
+      "event_type": "step.started",
+      "idempotency_key": "e41d8a18ef4940b5931e0ae5792585b7:a:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "occurred_at": "2026-09-13T12:31:14.246873Z",
+      "parent_run_id": null,
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 2,
+      "step_id": "a"
+    },
+    {
+      "attempt": 1,
+      "event_type": "step.progress",
+      "fraction": 0.0,
+      "note": "echo start",
+      "occurred_at": "2026-09-13T12:31:14.247082Z",
+      "parent_run_id": null,
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 3,
+      "step_id": "a"
+    },
+    {
+      "attempt": 1,
+      "cost": {
+        "amount": "0",
+        "currency": "USD",
+        "pricing_snapshot_hash": null,
+        "units": []
+      },
+      "effects": [
+        {
+          "description": "echo",
+          "effect_class": "compute",
+          "external_ref": null
+        }
+      ],
+      "event_type": "step.completed",
+      "idempotency_key": "e41d8a18ef4940b5931e0ae5792585b7:a:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "occurred_at": "2026-09-13T12:31:14.247176Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "59fde9b3624eebac211f7bb4045958a18c6d0b43d5622cc3207436a57269be72",
+        "size": 48
+      },
+      "parent_run_id": null,
+      "provenance": {
+        "executor": "echo",
+        "executor_version": "0.3.0",
+        "model_id": null,
+        "prompt_hash": null
+      },
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 4,
+      "step_id": "a"
+    },
+    {
+      "agent": "greeter",
+      "agent_version": 1,
+      "attempt": 1,
+      "declared_effects": [
+        "compute"
+      ],
+      "event_type": "step.started",
+      "idempotency_key": "e41d8a18ef4940b5931e0ae5792585b7:b:30ddccd38a6a8b374ec48a0d7767b5364f0102558f12d9c179e733de6d460752",
+      "occurred_at": "2026-09-13T12:31:14.247251Z",
+      "parent_run_id": null,
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 5,
+      "step_id": "b"
+    },
+    {
+      "agent": "greeter",
+      "agent_version": 1,
+      "attempt": 1,
+      "declared_effects": [
+        "compute"
+      ],
+      "event_type": "step.started",
+      "idempotency_key": "e41d8a18ef4940b5931e0ae5792585b7:c:30ddccd38a6a8b374ec48a0d7767b5364f0102558f12d9c179e733de6d460752",
+      "occurred_at": "2026-09-13T12:31:14.247288Z",
+      "parent_run_id": null,
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 6,
+      "step_id": "c"
+    },
+    {
+      "attempt": 1,
+      "event_type": "step.progress",
+      "fraction": 0.0,
+      "note": "echo start",
+      "occurred_at": "2026-09-13T12:31:14.247372Z",
+      "parent_run_id": null,
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 7,
+      "step_id": "b"
+    },
+    {
+      "attempt": 1,
+      "event_type": "step.progress",
+      "fraction": 0.0,
+      "note": "echo start",
+      "occurred_at": "2026-09-13T12:31:14.247411Z",
+      "parent_run_id": null,
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 8,
+      "step_id": "c"
+    },
+    {
+      "attempt": 1,
+      "cost": {
+        "amount": "0",
+        "currency": "USD",
+        "pricing_snapshot_hash": null,
+        "units": []
+      },
+      "effects": [
+        {
+          "description": "echo",
+          "effect_class": "compute",
+          "external_ref": null
+        }
+      ],
+      "event_type": "step.completed",
+      "idempotency_key": "e41d8a18ef4940b5931e0ae5792585b7:b:30ddccd38a6a8b374ec48a0d7767b5364f0102558f12d9c179e733de6d460752",
+      "occurred_at": "2026-09-13T12:31:14.247477Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "3e9b44c31697c0e72c80a910ce77ae2b0cab394748ad17e1b1ade11c4c095b16",
+        "size": 100
+      },
+      "parent_run_id": null,
+      "provenance": {
+        "executor": "echo",
+        "executor_version": "0.3.0",
+        "model_id": null,
+        "prompt_hash": null
+      },
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 9,
+      "step_id": "b"
+    },
+    {
+      "attempt": 1,
+      "cost": {
+        "amount": "0",
+        "currency": "USD",
+        "pricing_snapshot_hash": null,
+        "units": []
+      },
+      "effects": [
+        {
+          "description": "echo",
+          "effect_class": "compute",
+          "external_ref": null
+        }
+      ],
+      "event_type": "step.completed",
+      "idempotency_key": "e41d8a18ef4940b5931e0ae5792585b7:c:30ddccd38a6a8b374ec48a0d7767b5364f0102558f12d9c179e733de6d460752",
+      "occurred_at": "2026-09-13T12:31:14.247504Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "3e9b44c31697c0e72c80a910ce77ae2b0cab394748ad17e1b1ade11c4c095b16",
+        "size": 100
+      },
+      "parent_run_id": null,
+      "provenance": {
+        "executor": "echo",
+        "executor_version": "0.3.0",
+        "model_id": null,
+        "prompt_hash": null
+      },
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 10,
+      "step_id": "c"
+    },
+    {
+      "agent": "greeter",
+      "agent_version": 1,
+      "attempt": 1,
+      "declared_effects": [
+        "compute"
+      ],
+      "event_type": "step.started",
+      "idempotency_key": "e41d8a18ef4940b5931e0ae5792585b7:d:7513163d3e6381afe2334821522cbfb04a9f58bc40ffc87550fd67006d324193",
+      "occurred_at": "2026-09-13T12:31:14.247531Z",
+      "parent_run_id": null,
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 11,
+      "step_id": "d"
+    },
+    {
+      "attempt": 1,
+      "event_type": "step.progress",
+      "fraction": 0.0,
+      "note": "echo start",
+      "occurred_at": "2026-09-13T12:31:14.247570Z",
+      "parent_run_id": null,
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 12,
+      "step_id": "d"
+    },
+    {
+      "attempt": 1,
+      "cost": {
+        "amount": "0",
+        "currency": "USD",
+        "pricing_snapshot_hash": null,
+        "units": []
+      },
+      "effects": [
+        {
+          "description": "echo",
+          "effect_class": "compute",
+          "external_ref": null
+        }
+      ],
+      "event_type": "step.completed",
+      "idempotency_key": "e41d8a18ef4940b5931e0ae5792585b7:d:7513163d3e6381afe2334821522cbfb04a9f58bc40ffc87550fd67006d324193",
+      "occurred_at": "2026-09-13T12:31:14.247633Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "5aa4312eb46bdf7a31db9aaecf4b7b0d07f43a9b5d4d15c3c7944aa9a148be80",
+        "size": 257
+      },
+      "parent_run_id": null,
+      "provenance": {
+        "executor": "echo",
+        "executor_version": "0.3.0",
+        "model_id": null,
+        "prompt_hash": null
+      },
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 13,
+      "step_id": "d"
+    },
+    {
+      "event_type": "run.completed",
+      "occurred_at": "2026-09-13T12:31:14.247657Z",
+      "parent_run_id": null,
+      "run_id": "e41d8a18ef4940b5931e0ae5792585b7",
+      "schema_version": 1,
+      "seq": 14
+    }
+  ],
+  "expected": {
+    "agent_versions": {
+      "greeter": 1
+    },
+    "attempts": {
+      "a": 1,
+      "b": 1,
+      "c": 1,
+      "d": 1
+    },
+    "cancel_requested": false,
+    "cancelled_steps": [],
+    "dead_lettered": {},
+    "ended_at": "2026-09-13T12:31:14.247657Z",
+    "error": null,
+    "failed_steps": {},
+    "id": "e41d8a18ef4940b5931e0ae5792585b7",
+    "last_seq": 14,
+    "parent_run_id": null,
+    "pause_requested": false,
+    "pending_retries": {},
+    "progress": {
+      "a": 1.0,
+      "b": 1.0,
+      "c": 1.0,
+      "d": 1.0
+    },
+    "request_id": "golden-v0.3.0",
+    "started_at": "2026-09-13T12:31:14.245215Z",
+    "status": "completed",
+    "steps": [
+      {
+        "attempt": 1,
+        "cost": {
+          "amount": "0",
+          "currency": "USD",
+          "pricing_snapshot_hash": null,
+          "units": []
+        },
+        "effects": [
+          {
+            "description": "echo",
+            "effect_class": "compute",
+            "external_ref": null
+          }
+        ],
+        "finished_at": "2026-09-13T12:31:14.247176Z",
+        "node_id": "a",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "59fde9b3624eebac211f7bb4045958a18c6d0b43d5622cc3207436a57269be72",
+          "size": 48
+        },
+        "provenance": {
+          "executor": "echo",
+          "executor_version": "0.3.0",
+          "model_id": null,
+          "prompt_hash": null
+        }
+      },
+      {
+        "attempt": 1,
+        "cost": {
+          "amount": "0",
+          "currency": "USD",
+          "pricing_snapshot_hash": null,
+          "units": []
+        },
+        "effects": [
+          {
+            "description": "echo",
+            "effect_class": "compute",
+            "external_ref": null
+          }
+        ],
+        "finished_at": "2026-09-13T12:31:14.247477Z",
+        "node_id": "b",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "3e9b44c31697c0e72c80a910ce77ae2b0cab394748ad17e1b1ade11c4c095b16",
+          "size": 100
+        },
+        "provenance": {
+          "executor": "echo",
+          "executor_version": "0.3.0",
+          "model_id": null,
+          "prompt_hash": null
+        }
+      },
+      {
+        "attempt": 1,
+        "cost": {
+          "amount": "0",
+          "currency": "USD",
+          "pricing_snapshot_hash": null,
+          "units": []
+        },
+        "effects": [
+          {
+            "description": "echo",
+            "effect_class": "compute",
+            "external_ref": null
+          }
+        ],
+        "finished_at": "2026-09-13T12:31:14.247504Z",
+        "node_id": "c",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "3e9b44c31697c0e72c80a910ce77ae2b0cab394748ad17e1b1ade11c4c095b16",
+          "size": 100
+        },
+        "provenance": {
+          "executor": "echo",
+          "executor_version": "0.3.0",
+          "model_id": null,
+          "prompt_hash": null
+        }
+      },
+      {
+        "attempt": 1,
+        "cost": {
+          "amount": "0",
+          "currency": "USD",
+          "pricing_snapshot_hash": null,
+          "units": []
+        },
+        "effects": [
+          {
+            "description": "echo",
+            "effect_class": "compute",
+            "external_ref": null
+          }
+        ],
+        "finished_at": "2026-09-13T12:31:14.247633Z",
+        "node_id": "d",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "5aa4312eb46bdf7a31db9aaecf4b7b0d07f43a9b5d4d15c3c7944aa9a148be80",
+          "size": 257
+        },
+        "provenance": {
+          "executor": "echo",
+          "executor_version": "0.3.0",
+          "model_id": null,
+          "prompt_hash": null
+        }
+      }
+    ],
+    "total_cost": "0",
+    "workflow": "diamond",
+    "workflow_version": 1
+  },
+  "label": "v0.3.0"
+}
