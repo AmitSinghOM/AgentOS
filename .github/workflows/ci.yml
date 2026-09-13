@@ -30,6 +30,20 @@ jobs:
         # Floor we promise and the newest interpreter we develop on
         # (docs/DEVELOPMENT_STRUCTURE.md §4). Both must stay green.
         python: ["3.11", "3.14"]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agentos
+          POSTGRES_PASSWORD: agentos
+          POSTGRES_DB: agentos_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U agentos" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    env:
+      # Enables the Postgres leg of tests/contract/ (skipped when unset).
+      AGENTOS_TEST_PG_DSN: postgresql://agentos:agentos@localhost:5432/agentos_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,6 +53,7 @@ jobs:
       - run: ruff check .
       - run: lint-imports
       - run: pytest -q
+      - run: pytest -q tests/contract -k postgres --no-header -rN | tail -1
 
   compose:
     # Phase 0 gate: `docker compose up` brings up Postgres + Redis and both pass
