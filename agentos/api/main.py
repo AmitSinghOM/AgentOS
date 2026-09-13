@@ -17,7 +17,7 @@ from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel
 
 from agentos.agents.echo import EchoExecutor
-from agentos.core.engine import Engine, RetryNotAllowed
+from agentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
 from agentos.core.models import Agent, AgentType, Principal, WorkflowDefinition
 from agentos.store.memory import MemoryStore
 from agentos.store.sqlite import SqliteStore
@@ -37,7 +37,8 @@ def build_store():
 
 
 store = build_store()
-engine = Engine(store=store, blobs=store, executors={AgentType.echo.value: EchoExecutor()})
+engine = Engine(store=store, blobs=store, executors={AgentType.echo.value: EchoExecutor()},
+                lease=store if hasattr(store, "acquire") else None)
 
 app = FastAPI(title="AgentOS", version="0.3.0-dev")
 
@@ -133,3 +134,43 @@ def get_run_events(run_id: str, after: int = 0) -> dict:
         raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
     return {"data": [e.to_record() for e in events],
             "last_seq": events[-1].seq if events else after}
+
+
+class ControlBody(BaseModel):
+    principal: Principal | None = None
+    reason: str = ""
+
+
+def _control(action, run_id: str, body: ControlBody | None) -> dict:
+    body = body or ControlBody()
+    try:
+        return action(run_id, principal=body.principal, reason=body.reason).model_dump()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ControlNotAllowed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/runs/{run_id}/cancel", status_code=202)
+def cancel_run(run_id: str, body: ControlBody | None = None) -> dict:
+    """Persist a cancel request (C5). An idle or paused run is cancelled immediately; a
+    running one at the worker's next boundary — the in-flight step is interrupted at its
+    next progress() call or recorded if it finishes first (C4). Idempotent. 409 if the
+    run is already terminal. A client disconnect never changes run state; only this
+    endpoint does."""
+    return _control(engine.request_cancel, run_id, body)
+
+
+@app.post("/runs/{run_id}/pause", status_code=202)
+def pause_run(run_id: str, body: ControlBody | None = None) -> dict:
+    """Persist a pause request: the current wave finishes and is recorded, then the run
+    is `paused` and leaves the queue. 409 if terminal or already paused."""
+    return _control(engine.request_pause, run_id, body)
+
+
+@app.post("/runs/{run_id}/resume", status_code=202)
+def resume_run(run_id: str, body: ControlBody | None = None) -> dict:
+    """Append run.resumed and re-enqueue. 409 unless the run is paused."""
+    out = _control(engine.resume, run_id, body)
+    store.push(run_id)
+    return out
