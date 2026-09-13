@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 
 from agentos.agents.echo import EchoExecutor
 from agentos.core.engine import Engine
@@ -28,7 +28,11 @@ def build_store():
         return MemoryStore()
     if kind == "sqlite":
         return SqliteStore(os.environ.get("AGENTOS_SQLITE_PATH", "agentos.db"))
-    raise RuntimeError(f"unknown AGENTOS_STORE {kind!r} (memory | sqlite)")
+    if kind == "postgres":
+        from agentos.store.postgres import PostgresStore
+        return PostgresStore(os.environ["AGENTOS_PG_DSN"],
+                             schema=os.environ.get("AGENTOS_PG_SCHEMA"))
+    raise RuntimeError(f"unknown AGENTOS_STORE {kind!r} (memory | sqlite | postgres)")
 
 
 store = build_store()
@@ -63,16 +67,24 @@ def define_workflow(wf: WorkflowDefinition) -> WorkflowDefinition:
     return wf
 
 
-@app.post("/workflows/{name}/runs", status_code=201)
-def start_run(name: str,
+@app.post("/workflows/{name}/runs", status_code=202)
+def start_run(name: str, response: Response, sync: bool = False,
               idempotency_key: str | None = Header(default=None,
                                                    alias="Idempotency-Key")) -> dict:
-    """Start a run. Repeating the call with the same `Idempotency-Key` header returns
-    the same run instead of starting another (DESIGN §6)."""
+    """Enqueue a run and return 202 with its id; a worker (`python -m agentos.worker`)
+    advances it. `?sync=true` runs it in-process and returns 201 with the finished run
+    (the Phase 0 behaviour, kept for the quick start and tests). Repeating the call with
+    the same `Idempotency-Key` header returns the same run (DESIGN §6)."""
     try:
-        run = engine.start_run(name, request_id=idempotency_key)
+        if sync:
+            response.status_code = 201
+            return engine.start_run(name, request_id=idempotency_key).model_dump()
+        run_id = engine.create_run(name, request_id=idempotency_key)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    store.push(run_id)
+    run = engine.get_run(run_id)
+    assert run is not None
     return run.model_dump()
 
 

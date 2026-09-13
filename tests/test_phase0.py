@@ -19,7 +19,7 @@ def test_end_to_end_run():
     ]}
     assert client.post("/workflows", json=wf).status_code == 201
 
-    run = client.post("/workflows/hello/runs", json={}).json()
+    run = client.post("/workflows/hello/runs?sync=true", json={}).json()
     assert run["status"] == "completed"
     assert [s["node_id"] for s in run["steps"]] == ["a", "b"]
 

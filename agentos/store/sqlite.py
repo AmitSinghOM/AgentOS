@@ -17,9 +17,11 @@ import hashlib
 import json
 import sqlite3
 import threading
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
+from agentos.core.coordination import LeaseToken
 from agentos.core.events import Event, RunStarted, from_record
 from agentos.core.models import Agent, BlobRef, WorkflowDefinition
 from agentos.core.ports import ConflictError
@@ -37,7 +39,19 @@ CREATE TABLE IF NOT EXISTS runs (
     run_id     TEXT PRIMARY KEY,
     request_id TEXT NOT NULL UNIQUE,
     workflow   TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    max_fence  INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS leases (
+    run_id     TEXT PRIMARY KEY,
+    holder     TEXT NOT NULL,
+    fence      INTEGER NOT NULL,
+    expires_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS queue (
+    run_id     TEXT PRIMARY KEY,
+    visible_at REAL NOT NULL,
+    deliveries INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS run_events (
     run_id         TEXT    NOT NULL,
@@ -103,7 +117,7 @@ class SqliteStore:
 
     # run log
     def append_events(self, run_id: str, expected_seq: int,
-                      events: Sequence[Event]) -> list[Event]:
+                      events: Sequence[Event], *, fence: int | None = None) -> list[Event]:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -114,6 +128,14 @@ class SqliteStore:
                     raise ConflictError(
                         f"run {run_id!r}: expected seq {expected_seq}, log is at {current}"
                     )
+                if fence is not None:
+                    row = self._conn.execute(
+                        "SELECT max_fence FROM runs WHERE run_id = ?", (run_id,)
+                    ).fetchone()
+                    seen = row[0] if row else 0
+                    if fence < seen:
+                        raise ConflictError(f"run {run_id!r}: fence {fence} is stale "
+                                            f"(highest seen {seen})")
                 out: list[Event] = []
                 for i, ev in enumerate(events, start=expected_seq + 1):
                     stamped = ev.model_copy(update={"seq": i})
@@ -140,6 +162,10 @@ class SqliteStore:
                     except sqlite3.IntegrityError as exc:  # PRIMARY KEY(run_id, seq)
                         raise ConflictError(f"run {run_id!r}: seq {i} already exists") from exc
                     out.append(stamped)
+                if fence is not None:
+                    self._conn.execute(
+                        "UPDATE runs SET max_fence = ? WHERE run_id = ?", (fence, run_id)
+                    )
                 self._conn.execute("COMMIT")
                 return out
             except BaseException:
@@ -183,6 +209,93 @@ class SqliteStore:
         return self._conn.execute(
             "SELECT 1 FROM blobs WHERE sha256 = ?", (ref.sha256,)
         ).fetchone() is not None
+
+    # lease (wall clock, so a lease outlives the process that took it)
+    def acquire(self, run_id: str, holder: str, ttl_seconds: float) -> LeaseToken | None:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                now = time.time()
+                row = self._conn.execute(
+                    "SELECT holder, fence, expires_at FROM leases WHERE run_id = ?", (run_id,)
+                ).fetchone()
+                if row is not None and row[2] > now and row[0] != holder:
+                    self._conn.execute("COMMIT")
+                    return None
+                fence = (row[1] if row else 0) + 1
+                self._conn.execute(
+                    "INSERT INTO leases(run_id, holder, fence, expires_at) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(run_id) DO UPDATE SET holder = excluded.holder, "
+                    "fence = excluded.fence, expires_at = excluded.expires_at",
+                    (run_id, holder, fence, now + ttl_seconds),
+                )
+                self._conn.execute("COMMIT")
+                return LeaseToken(run_id=run_id, holder=holder, fence=fence)
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+
+    def renew(self, token: LeaseToken, ttl_seconds: float) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE leases SET expires_at = ? WHERE run_id = ? AND holder = ? "
+                "AND fence = ? AND expires_at > ?",
+                (time.time() + ttl_seconds, token.run_id, token.holder, token.fence, time.time()),
+            )
+            return cur.rowcount == 1
+
+    def release(self, token: LeaseToken) -> None:
+        # Expire, never delete: the row carries the fence counter, which must stay
+        # monotonic for the life of the run.
+        with self._lock:
+            self._conn.execute(
+                "UPDATE leases SET expires_at = 0 WHERE run_id = ? AND holder = ? AND fence = ?",
+                (token.run_id, token.holder, token.fence),
+            )
+
+    # queue (at-least-once; visibility timeout redelivers un-acked runs)
+    visibility_seconds = 30.0
+
+    def push(self, run_id: str) -> None:
+        """Enqueue, or make an in-flight delivery visible again. Re-pushing a run that
+        someone is currently processing is harmless: the lease refuses the second
+        worker and the delivery is retried later."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO queue(run_id, visible_at) VALUES (?, ?) "
+                "ON CONFLICT(run_id) DO UPDATE SET visible_at = excluded.visible_at",
+                (run_id, time.time()),
+            )
+
+    def pull(self, timeout: float) -> str | None:
+        deadline = time.time() + timeout
+        while True:
+            with self._lock:
+                self._conn.execute("BEGIN IMMEDIATE")
+                try:
+                    now = time.time()
+                    row = self._conn.execute(
+                        "SELECT run_id FROM queue WHERE visible_at <= ? "
+                        "ORDER BY visible_at LIMIT 1", (now,)
+                    ).fetchone()
+                    if row is not None:
+                        self._conn.execute(
+                            "UPDATE queue SET visible_at = ?, deliveries = deliveries + 1 "
+                            "WHERE run_id = ?", (now + self.visibility_seconds, row[0]),
+                        )
+                    self._conn.execute("COMMIT")
+                except BaseException:
+                    self._conn.execute("ROLLBACK")
+                    raise
+            if row is not None:
+                return row[0]
+            if time.time() >= deadline:
+                return None
+            time.sleep(0.05)
+
+    def ack(self, run_id: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM queue WHERE run_id = ?", (run_id,))
 
     def close(self) -> None:
         self._conn.close()
