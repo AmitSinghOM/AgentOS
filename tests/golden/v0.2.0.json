@@ -1,0 +1,205 @@
+{
+  "events": [
+    {
+      "event_type": "run.started",
+      "occurred_at": "2026-09-13T11:19:54.668136Z",
+      "parent_run_id": null,
+      "principal": null,
+      "request_id": "golden-v0.2.0",
+      "run_id": "fcc3977fd68e48eb89daf0aab50d30ef",
+      "schema_version": 1,
+      "seq": 1,
+      "workflow": "diamond",
+      "workflow_version": 1
+    },
+    {
+      "agent": "greeter",
+      "attempt": 1,
+      "declared_effects": [],
+      "event_type": "step.started",
+      "idempotency_key": "fcc3977fd68e48eb89daf0aab50d30ef:a:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "occurred_at": "2026-09-13T11:19:54.671740Z",
+      "parent_run_id": null,
+      "run_id": "fcc3977fd68e48eb89daf0aab50d30ef",
+      "schema_version": 1,
+      "seq": 2,
+      "step_id": "a"
+    },
+    {
+      "attempt": 1,
+      "event_type": "step.completed",
+      "idempotency_key": "fcc3977fd68e48eb89daf0aab50d30ef:a:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "occurred_at": "2026-09-13T11:19:54.671815Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "59fde9b3624eebac211f7bb4045958a18c6d0b43d5622cc3207436a57269be72",
+        "size": 48
+      },
+      "parent_run_id": null,
+      "run_id": "fcc3977fd68e48eb89daf0aab50d30ef",
+      "schema_version": 1,
+      "seq": 3,
+      "step_id": "a"
+    },
+    {
+      "agent": "greeter",
+      "attempt": 1,
+      "declared_effects": [],
+      "event_type": "step.started",
+      "idempotency_key": "fcc3977fd68e48eb89daf0aab50d30ef:b:30ddccd38a6a8b374ec48a0d7767b5364f0102558f12d9c179e733de6d460752",
+      "occurred_at": "2026-09-13T11:19:54.671859Z",
+      "parent_run_id": null,
+      "run_id": "fcc3977fd68e48eb89daf0aab50d30ef",
+      "schema_version": 1,
+      "seq": 4,
+      "step_id": "b"
+    },
+    {
+      "attempt": 1,
+      "event_type": "step.completed",
+      "idempotency_key": "fcc3977fd68e48eb89daf0aab50d30ef:b:30ddccd38a6a8b374ec48a0d7767b5364f0102558f12d9c179e733de6d460752",
+      "occurred_at": "2026-09-13T11:19:54.671893Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "3e9b44c31697c0e72c80a910ce77ae2b0cab394748ad17e1b1ade11c4c095b16",
+        "size": 100
+      },
+      "parent_run_id": null,
+      "run_id": "fcc3977fd68e48eb89daf0aab50d30ef",
+      "schema_version": 1,
+      "seq": 5,
+      "step_id": "b"
+    },
+    {
+      "agent": "greeter",
+      "attempt": 1,
+      "declared_effects": [],
+      "event_type": "step.started",
+      "idempotency_key": "fcc3977fd68e48eb89daf0aab50d30ef:c:30ddccd38a6a8b374ec48a0d7767b5364f0102558f12d9c179e733de6d460752",
+      "occurred_at": "2026-09-13T11:19:54.671926Z",
+      "parent_run_id": null,
+      "run_id": "fcc3977fd68e48eb89daf0aab50d30ef",
+      "schema_version": 1,
+      "seq": 6,
+      "step_id": "c"
+    },
+    {
+      "attempt": 1,
+      "event_type": "step.completed",
+      "idempotency_key": "fcc3977fd68e48eb89daf0aab50d30ef:c:30ddccd38a6a8b374ec48a0d7767b5364f0102558f12d9c179e733de6d460752",
+      "occurred_at": "2026-09-13T11:19:54.671957Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "3e9b44c31697c0e72c80a910ce77ae2b0cab394748ad17e1b1ade11c4c095b16",
+        "size": 100
+      },
+      "parent_run_id": null,
+      "run_id": "fcc3977fd68e48eb89daf0aab50d30ef",
+      "schema_version": 1,
+      "seq": 7,
+      "step_id": "c"
+    },
+    {
+      "agent": "greeter",
+      "attempt": 1,
+      "declared_effects": [],
+      "event_type": "step.started",
+      "idempotency_key": "fcc3977fd68e48eb89daf0aab50d30ef:d:7513163d3e6381afe2334821522cbfb04a9f58bc40ffc87550fd67006d324193",
+      "occurred_at": "2026-09-13T11:19:54.672006Z",
+      "parent_run_id": null,
+      "run_id": "fcc3977fd68e48eb89daf0aab50d30ef",
+      "schema_version": 1,
+      "seq": 8,
+      "step_id": "d"
+    },
+    {
+      "attempt": 1,
+      "event_type": "step.completed",
+      "idempotency_key": "fcc3977fd68e48eb89daf0aab50d30ef:d:7513163d3e6381afe2334821522cbfb04a9f58bc40ffc87550fd67006d324193",
+      "occurred_at": "2026-09-13T11:19:54.672064Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "5aa4312eb46bdf7a31db9aaecf4b7b0d07f43a9b5d4d15c3c7944aa9a148be80",
+        "size": 257
+      },
+      "parent_run_id": null,
+      "run_id": "fcc3977fd68e48eb89daf0aab50d30ef",
+      "schema_version": 1,
+      "seq": 9,
+      "step_id": "d"
+    },
+    {
+      "event_type": "run.completed",
+      "occurred_at": "2026-09-13T11:19:54.672160Z",
+      "parent_run_id": null,
+      "run_id": "fcc3977fd68e48eb89daf0aab50d30ef",
+      "schema_version": 1,
+      "seq": 10
+    }
+  ],
+  "expected": {
+    "attempts": {
+      "a": 1,
+      "b": 1,
+      "c": 1,
+      "d": 1
+    },
+    "ended_at": "2026-09-13T11:19:54.672160Z",
+    "error": null,
+    "id": "fcc3977fd68e48eb89daf0aab50d30ef",
+    "last_seq": 10,
+    "parent_run_id": null,
+    "request_id": "golden-v0.2.0",
+    "started_at": "2026-09-13T11:19:54.668136Z",
+    "status": "completed",
+    "steps": [
+      {
+        "attempt": 1,
+        "finished_at": "2026-09-13T11:19:54.671815Z",
+        "node_id": "a",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "59fde9b3624eebac211f7bb4045958a18c6d0b43d5622cc3207436a57269be72",
+          "size": 48
+        }
+      },
+      {
+        "attempt": 1,
+        "finished_at": "2026-09-13T11:19:54.671893Z",
+        "node_id": "b",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "3e9b44c31697c0e72c80a910ce77ae2b0cab394748ad17e1b1ade11c4c095b16",
+          "size": 100
+        }
+      },
+      {
+        "attempt": 1,
+        "finished_at": "2026-09-13T11:19:54.671957Z",
+        "node_id": "c",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "3e9b44c31697c0e72c80a910ce77ae2b0cab394748ad17e1b1ade11c4c095b16",
+          "size": 100
+        }
+      },
+      {
+        "attempt": 1,
+        "finished_at": "2026-09-13T11:19:54.672064Z",
+        "node_id": "d",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "5aa4312eb46bdf7a31db9aaecf4b7b0d07f43a9b5d4d15c3c7944aa9a148be80",
+          "size": 257
+        }
+      }
+    ],
+    "workflow": "diamond",
+    "workflow_version": 1
+  },
+  "label": "v0.2.0"
+}
