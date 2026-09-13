@@ -37,9 +37,16 @@ class FakeStore:
         self.blobs: dict[str, bytes] = {}
         self.appends = 0
 
-    def put_agent(self, agent): self.agents[agent.name] = agent
-    def get_agent(self, name): return self.agents.get(name)
+    def put_agent(self, agent): self.agents[(agent.name, agent.version)] = agent
+
+    def get_agent(self, name, version=None):
+        if version is not None:
+            return self.agents.get((name, version))
+        vs = [v for (n, v) in self.agents if n == name]
+        return self.agents[(name, max(vs))] if vs else None
+
     def list_agents(self): return list(self.agents.values())
+    def list_agent_versions(self, name): return sorted(v for (n, v) in self.agents if n == name)
     def put_workflow(self, wf): self.workflows[wf.name] = wf
     def get_workflow(self, name): return self.workflows.get(name)
 

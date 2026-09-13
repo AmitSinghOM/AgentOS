@@ -27,9 +27,11 @@ from agentos.core.models import Agent, BlobRef, WorkflowDefinition
 from agentos.core.ports import ConflictError
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS agents (
-    name TEXT PRIMARY KEY,
-    body TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS agent_versions (
+    name    TEXT    NOT NULL,
+    version INTEGER NOT NULL,
+    body    TEXT    NOT NULL,
+    PRIMARY KEY (name, version)
 );
 CREATE TABLE IF NOT EXISTS workflows (
     name TEXT PRIMARY KEY,
@@ -84,22 +86,48 @@ class SqliteStore:
         self._conn.executescript(SCHEMA)
         self._lock = threading.RLock()
 
-    # definitions
+    # definitions (agents immutable per (name, version))
     def put_agent(self, agent: Agent) -> None:
         with self._lock:
+            row = self._conn.execute(
+                "SELECT body FROM agent_versions WHERE name = ? AND version = ?",
+                (agent.name, agent.version),
+            ).fetchone()
+            if row is not None:
+                if Agent.model_validate_json(row[0]) != agent:
+                    raise ConflictError(f"agent {agent.name!r} v{agent.version} already exists "
+                                        f"with a different definition; bump the version")
+                return
             self._conn.execute(
-                "INSERT INTO agents(name, body) VALUES (?, ?) "
-                "ON CONFLICT(name) DO UPDATE SET body = excluded.body",
-                (agent.name, agent.model_dump_json()),
+                "INSERT INTO agent_versions(name, version, body) VALUES (?, ?, ?)",
+                (agent.name, agent.version, agent.model_dump_json()),
             )
 
-    def get_agent(self, name: str) -> Agent | None:
-        row = self._conn.execute("SELECT body FROM agents WHERE name = ?", (name,)).fetchone()
+    def get_agent(self, name: str, version: int | None = None) -> Agent | None:
+        if version is None:
+            row = self._conn.execute(
+                "SELECT body FROM agent_versions WHERE name = ? ORDER BY version DESC LIMIT 1",
+                (name,),
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT body FROM agent_versions WHERE name = ? AND version = ?", (name, version),
+            ).fetchone()
         return Agent.model_validate_json(row[0]) if row else None
 
     def list_agents(self) -> list[Agent]:
-        rows = self._conn.execute("SELECT body FROM agents ORDER BY name").fetchall()
+        rows = self._conn.execute(
+            "SELECT a.body FROM agent_versions a JOIN (SELECT name, MAX(version) v "
+            "FROM agent_versions GROUP BY name) m ON a.name = m.name AND a.version = m.v "
+            "ORDER BY a.name"
+        ).fetchall()
         return [Agent.model_validate_json(r[0]) for r in rows]
+
+    def list_agent_versions(self, name: str) -> list[int]:
+        rows = self._conn.execute(
+            "SELECT version FROM agent_versions WHERE name = ? ORDER BY version", (name,)
+        ).fetchall()
+        return [r[0] for r in rows]
 
     def put_workflow(self, wf: WorkflowDefinition) -> None:
         with self._lock:

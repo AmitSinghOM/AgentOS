@@ -49,6 +49,7 @@ class RunStarted(Event):
     workflow_version: int
     request_id: str                       # client-supplied; run start is idempotent on it
     principal: Principal | None = None
+    agent_versions: dict[str, int] = Field(default_factory=dict)  # name → pinned version
 
 
 class StepStarted(Event):
@@ -58,6 +59,7 @@ class StepStarted(Event):
     agent: str
     idempotency_key: str                  # run_id:step_id:sha256(inputs)
     declared_effects: list[EffectClass] = Field(default_factory=list)
+    agent_version: int = 1                # the pinned definition this attempt ran against
 
 
 class StepCompleted(Event):

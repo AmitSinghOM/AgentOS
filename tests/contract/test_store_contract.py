@@ -74,6 +74,25 @@ def test_agent_and_workflow_round_trip_with_enums(store):
     assert store.get_workflow("wf").version == 4  # upsert
 
 
+def test_agent_versions_are_immutable_and_latest_wins(store):
+    v1 = Agent(name="a", version=1, type=AgentType.echo, config={"m": "one"})
+    store.put_agent(v1)
+    store.put_agent(v1)                                            # identical: no-op
+    with pytest.raises(ConflictError, match="bump the version"):
+        store.put_agent(v1.model_copy(update={"config": {"m": "changed"}}))
+    assert store.get_agent("a").config == {"m": "one"}              # unchanged
+
+    v2 = Agent(name="a", version=2, type=AgentType.echo, config={"m": "two"})
+    store.put_agent(v2)
+    assert store.get_agent("a") == v2                               # latest by default
+    assert store.get_agent("a", version=1) == v1                    # pinned lookup
+    assert store.get_agent("a", version=9) is None
+    assert store.list_agent_versions("a") == [1, 2]
+    assert store.list_agent_versions("nope") == []
+    store.put_agent(Agent(name="b", version=1, type=AgentType.echo))
+    assert [(x.name, x.version) for x in store.list_agents()] == [("a", 2), ("b", 1)]
+
+
 # ------------------------------------------------------------------ run log
 
 def test_append_assigns_dense_monotonic_seq(store):
