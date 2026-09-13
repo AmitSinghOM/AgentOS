@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from agentos.agents.echo import EchoExecutor
 from agentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
 from agentos.core.models import Agent, AgentType, Principal, WorkflowDefinition
+from agentos.core.ports import ConflictError
 from agentos.store.memory import MemoryStore
 from agentos.store.sqlite import SqliteStore
 
@@ -50,13 +51,28 @@ def health() -> dict:
 
 @app.post("/agents", status_code=201)
 def register_agent(agent: Agent) -> Agent:
-    store.put_agent(agent)
+    """Register an immutable agent version. Re-posting the identical definition is a
+    no-op; a different body under an existing (name, version) is 409 — bump the version."""
+    try:
+        store.put_agent(agent)
+    except ConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return agent
 
 
 @app.get("/agents")
 def list_agents() -> dict:
+    """Latest version of every agent."""
     return {"data": store.list_agents()}
+
+
+@app.get("/agents/{name}")
+def get_agent(name: str, version: int | None = None) -> dict:
+    agent = store.get_agent(name, version=version)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"unknown agent {name!r}"
+                            + (f" v{version}" if version else ""))
+    return {"agent": agent, "versions": store.list_agent_versions(name)}
 
 
 @app.post("/workflows", status_code=201)

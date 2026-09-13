@@ -29,9 +29,11 @@ from agentos.core.models import Agent, BlobRef, WorkflowDefinition
 from agentos.core.ports import ConflictError
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS agents (
-    name TEXT PRIMARY KEY,
-    body JSONB NOT NULL
+CREATE TABLE IF NOT EXISTS agent_versions (
+    name    TEXT    NOT NULL,
+    version INTEGER NOT NULL,
+    body    JSONB   NOT NULL,
+    PRIMARY KEY (name, version)
 );
 CREATE TABLE IF NOT EXISTS workflows (
     name TEXT PRIMARY KEY,
@@ -92,24 +94,55 @@ class PostgresStore:
                 conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{self._schema}"')
             conn.execute(SCHEMA)
 
-    # definitions
+    # definitions (agents immutable per (name, version))
     def put_agent(self, agent: Agent) -> None:
-        with self._pool.connection() as conn:
-            conn.execute(
-                "INSERT INTO agents(name, body) VALUES (%s, %s::jsonb) "
-                "ON CONFLICT (name) DO UPDATE SET body = EXCLUDED.body",
-                (agent.name, agent.model_dump_json()),
-            )
+        with self._pool.connection() as conn, conn.transaction():
+            row = conn.execute(
+                "SELECT body FROM agent_versions WHERE name = %s AND version = %s FOR UPDATE",
+                (agent.name, agent.version),
+            ).fetchone()
+            if row is not None:
+                if Agent.model_validate(row[0]) != agent:
+                    raise ConflictError(f"agent {agent.name!r} v{agent.version} already exists "
+                                        f"with a different definition; bump the version")
+                return
+            try:
+                conn.execute(
+                    "INSERT INTO agent_versions(name, version, body) VALUES (%s, %s, %s::jsonb)",
+                    (agent.name, agent.version, agent.model_dump_json()),
+                )
+            except errors.UniqueViolation as exc:
+                raise ConflictError(f"agent {agent.name!r} v{agent.version} raced another "
+                                    f"writer") from exc
 
-    def get_agent(self, name: str) -> Agent | None:
+    def get_agent(self, name: str, version: int | None = None) -> Agent | None:
         with self._pool.connection() as conn:
-            row = conn.execute("SELECT body FROM agents WHERE name = %s", (name,)).fetchone()
+            if version is None:
+                row = conn.execute(
+                    "SELECT body FROM agent_versions WHERE name = %s "
+                    "ORDER BY version DESC LIMIT 1", (name,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT body FROM agent_versions WHERE name = %s AND version = %s",
+                    (name, version),
+                ).fetchone()
         return Agent.model_validate(row[0]) if row else None
 
     def list_agents(self) -> list[Agent]:
         with self._pool.connection() as conn:
-            rows = conn.execute("SELECT body FROM agents ORDER BY name").fetchall()
+            rows = conn.execute(
+                "SELECT DISTINCT ON (name) body FROM agent_versions "
+                "ORDER BY name, version DESC"
+            ).fetchall()
         return [Agent.model_validate(r[0]) for r in rows]
+
+    def list_agent_versions(self, name: str) -> list[int]:
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT version FROM agent_versions WHERE name = %s ORDER BY version", (name,)
+            ).fetchall()
+        return [r[0] for r in rows]
 
     def put_workflow(self, wf: WorkflowDefinition) -> None:
         with self._pool.connection() as conn:

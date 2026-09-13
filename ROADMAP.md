@@ -109,7 +109,7 @@ first write left a takeover window that only designing the Toxiproxy test made v
 
 - [ ] Workflow = DAG (nodes + dependency edges); validate acyclic
 - [x] Topological scheduler: run all ready nodes, parallelize independent branches — wave scheduler in `core/engine.py`, bounded by `WorkflowDefinition.max_parallelism` (default 4); appends serialized through one `_Log` per `advance()`
-- [ ] Agent versioning: pin a run to a specific `agent_version`
+- [x] Agent versioning: `Agent.version`, immutable per `(name, version)` in every store (409 on a changed body — bump the version); `run.started.agent_versions` pins every agent at start and each attempt resolves against the pin (`step.started.agent_version`), so redeploying an agent never changes a running workflow; `GET /agents/{name}?version=N`
 - [x] Retry with exponential backoff + max attempts — `WorkflowNode.retry: RetryPolicy{max_attempts, backoff_seconds, backoff_multiplier, max_backoff_seconds}`; `step.failed(terminal=False, retry_at)`; the worker re-pushes with `delay_seconds` (queue-tracked, no Redis needed)
 - [x] Dead-letter state for poison steps; run fails cleanly with cause in the log — after the last attempt a step is dead-lettered with `failed after N attempt(s): <error>`; `POST /runs/{id}/steps/{step}/retry` appends `step.retry_requested` with the `Principal` and reopens the run (409 for a healthy step)
 - [x] Pass outputs along edges (step N output → step M input) — `StepRequest.inputs` is the map of upstream outputs; fan-in sees all three branches
