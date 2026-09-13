@@ -9,3 +9,8 @@ venv/
 .DS_Store
 dist/
 build/
+
+# local SQLite store (default AGENTOS_STORE=sqlite)
+agentos.db
+agentos.db-wal
+agentos.db-shm
