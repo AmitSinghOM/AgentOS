@@ -40,6 +40,7 @@ class WorkflowNode(BaseModel):
 
 class WorkflowDefinition(BaseModel):
     name: str
+    version: int = 1                 # bumped on any change; runs pin it (C3)
     nodes: list[WorkflowNode]
 
     def topological_order(self) -> list[str]:
@@ -138,15 +139,25 @@ class BlobRef(BaseModel):
 
 class StepResult(BaseModel):
     node_id: str
-    output: dict
+    attempt: int = 1
+    output_ref: BlobRef | None = None     # what the log records (§11 A4)
+    output: dict = Field(default_factory=dict)  # hydrated from the BlobStore for callers
     finished_at: datetime = Field(default_factory=_now)
 
 
 class WorkflowRun(BaseModel):
+    """Folded view of a run's event log. Never persisted directly — always derived
+    by `agentos.core.fold.fold` from `run_events`."""
+
     id: str = Field(default_factory=_id)
     workflow: str
+    workflow_version: int = 1
+    request_id: str = Field(default_factory=_id)
     status: RunStatus = RunStatus.pending
     steps: list[StepResult] = Field(default_factory=list)
+    attempts: dict[str, int] = Field(default_factory=dict)   # step_id → latest attempt
     started_at: datetime = Field(default_factory=_now)
     ended_at: datetime | None = None
     error: str | None = None
+    parent_run_id: str | None = None
+    last_seq: int = 0
