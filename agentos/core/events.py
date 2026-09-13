@@ -125,15 +125,58 @@ class RunFailed(Event):
     step_id: str | None = None
 
 
+# ---- operator control (C5). Requests are persisted intent; the worker (or, for an
+# idle run, the API under a lease) appends the finalizing event at the next boundary.
+
+class ControlEvent(Event):
+    principal: Principal | None = None
+    reason: str = ""
+
+
+class RunCancelRequested(ControlEvent):
+    event_type: ClassVar[str] = "run.cancel_requested"
+
+
+class RunCancelled(Event):
+    """Terminal. Every step that completed before this point is in the log (C4)."""
+    event_type: ClassVar[str] = "run.cancelled"
+
+
+class StepCancelled(Event):
+    """A step interrupted cooperatively (its progress() raised Cancelled)."""
+    event_type: ClassVar[str] = "step.cancelled"
+    step_id: str
+    attempt: int
+
+
+class RunPauseRequested(ControlEvent):
+    event_type: ClassVar[str] = "run.pause_requested"
+
+
+class RunPaused(Event):
+    """Not terminal. The current wave finished and was recorded; nothing new starts
+    until run.resumed. The lease is released; the run leaves the queue."""
+    event_type: ClassVar[str] = "run.paused"
+
+
+class RunResumed(ControlEvent):
+    event_type: ClassVar[str] = "run.resumed"
+
+
+CONTROL_REQUEST_TYPES = (RunCancelRequested, RunPauseRequested)
+
+
 EVENT_TYPES: dict[str, type[Event]] = {
     cls.event_type: cls
     for cls in (RunStarted, StepStarted, StepProgress, StepCompleted, StepDeadLettered,
-                StepFailed, StepRetryRequested, RunCompleted, RunFailed)
+                StepFailed, StepRetryRequested, StepCancelled, RunCompleted, RunFailed,
+                RunCancelRequested, RunCancelled, RunPauseRequested, RunPaused, RunResumed)
 }
 
 EventTypeName = Literal[
     "run.started", "step.started", "step.progress", "step.completed", "step.dead_lettered",
-    "step.failed", "step.retry_requested", "run.completed", "run.failed",
+    "step.failed", "step.retry_requested", "step.cancelled", "run.completed", "run.failed",
+    "run.cancel_requested", "run.cancelled", "run.pause_requested", "run.paused", "run.resumed",
 ]
 
 
