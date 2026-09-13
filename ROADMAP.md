@@ -46,7 +46,7 @@ wins interviews.
   - [x] `schema_version`, `event_type`, `parent_run_id` on every event; upcaster registry (`core/upcast.py`)
   - [ ] `StepRequest`/`StepResult` with `effects`, `cost`, `provenance` (§2.1); budget enforced by the core
   - [ ] Model-vendor executors as `agentos-provider-*` plugins via entry points; core ships `echo` + `tool` only — the Phase 1 demo needs no vendor key
-  - [~] SQLite store adapter (`store/sqlite.py`, stdlib) + Memory pass `tests/contract/`; Postgres adapter still to add to the same suite
+  - [x] SQLite (`store/sqlite.py`, stdlib), Postgres (`store/postgres.py`, psycopg 3) and Memory adapters all pass `tests/contract/` (store + coordination suites; Postgres leg runs in CI against a service container)
   - [~] golden corpus mechanism live (`tests/golden/`, `scripts/record_golden.py`, `v0.2.0-dev.json`); record `v0.2.0.json` at release
   - [ ] ADR 0006 core-depends-on-nothing, 0007 log-is-the-API, 0008 providers-are-plugins
   - [ ] **AI-engineering pass (§11)** — `EffectClass`, `Principal`, `BlobRef`, `BlobStore` port **shipped at Phase 0 close**; Phase 1 items:
@@ -57,17 +57,19 @@ wins interviews.
     - [ ] A5 `progress()` callback renews the lease; rate-limited `StepProgress` events; expiry measured from last heartbeat
     - [ ] A6 metered `Cost{units, amount, currency, pricing_snapshot_hash}`; pricing table stored as a blob
     - [ ] A10 provider plugins tested against recorded cassettes; live re-record is a nightly opt-in job
-- [ ] Worker process consuming a Redis run queue (decoupled from the API)
+- [x] Worker process consuming a run queue, decoupled from the API (`agentos/worker/`; queue is a `Queue` port with SQLite/Postgres/Memory adapters — Redis is now an optional adapter, not a requirement: see ADR note below)
 - [ ] Real tool agent (HTTP/subprocess) in core; LLM executors live in provider plugins (see longevity structure)
-- [~] Idempotency keys on step execution (`run_id:step_id:sha256(inputs)`); completed steps replayed from the log, never re-executed — crash test itself lands with the worker
-- [ ] Redis execution lock per run (exactly-one-worker advancement)
+- [x] Idempotency keys on step execution (`run_id:step_id:sha256(inputs)`); completed steps replayed from the log, never re-executed
+- [x] Per-run lease with **fencing tokens** (`Lease` port; a stale holder cannot append) — SQLite/Postgres/Memory adapters, one contract suite
 - [ ] State snapshots to bound replay cost
-- [ ] **Chaos suite** (`tests/chaos/`): deterministic fault points in the worker, run in CI on every PR — see *Chaos engineering plan* below. The `kill -9` demo is one case of it, not a one-off script.
-  - [ ] `FaultInjector` port consulted at named points; production binding is a no-op
-  - [ ] `crash_before_effect_commit` → step re-runs, exactly one `effect` event (C1)
-  - [ ] `crash_after_commit_before_ack` → redelivery hits `UNIQUE(run_id, seq)`, no-op (C2)
-  - [ ] `crash_after_lock_acquire` + start a 2nd worker → exactly one advancement per step (C6)
-  - [ ] `redis_flush_mid_run` → run completes from the Postgres log alone (README claim: Redis is safe to flush)
+- [x] **Chaos suite** (`tests/chaos/`): deterministic fault points in the worker, run in CI on every PR — see *Chaos engineering plan* below. The `kill -9` demo is `tests/chaos/test_kill9_real_process.py` (real subprocess, exit 137).
+  - [x] `FaultInjector` port consulted at named points; production binding is a no-op (`core/faults.py`)
+  - [x] `before_effect_commit` → step re-runs, exactly one completion (C1)
+  - [x] `after_effect_commit` → step replayed, executor not called again (C1)
+  - [x] `after_run_commit_before_ack` → redelivery is a no-op, nothing appended (C2)
+  - [x] stall after lock acquire past TTL + 2nd worker → exactly one advancement per step, stale worker fenced (C6)
+  - [x] definition changed between crash and resume → refused with version error (C3)
+  - [ ] `coordination_reset_mid_run` → run completes from the log alone (leases/queue rebuilt by the recovery sweep)
   - [ ] `pg_connection_drop_mid_txn` → no partial event written; worker reconnects and resumes
   - [ ] Property test over the event log (Hypothesis): random fault schedule × random 1–5 step workflow → invariants hold (see plan)
 - [ ] **C1** — effects recorded before ack; replay never re-executes user code ([#1](https://github.com/AmitSinghOM/AgentOS/issues/1))
@@ -79,7 +81,12 @@ wins interviews.
 - [ ] **C15** — append-only log; snapshots bounded, never the source of truth ([#15](https://github.com/AmitSinghOM/AgentOS/issues/15))
 
 **Demo:** start a 3-step run, `kill -9` the worker after step 2, restart → it finishes
-without repeating step 2. Show the event log.
+without repeating step 2. Show the event log. **Now a test:** `pytest tests/chaos/test_kill9_real_process.py`.
+
+> ADR note (to become ADR 0009): DESIGN.md §3 names Redis as the queue/lock layer. Phase 1
+> ships queue and lease as *ports* with SQL adapters so `pip install agentos` needs no
+> infrastructure (docs/DEVELOPMENT_STRUCTURE.md §7). Redis becomes an optional adapter for
+> deployments that want lower queue latency; correctness never depends on it.
 **Tag:** `v0.2.0-durable`. **Post:** "Durable Execution: Resuming Agent Workflows After a Crash."
 
 ## Phase 2 — DAG Orchestration  ·  ~2-3 weekends

@@ -52,8 +52,20 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: lint-imports
-      - run: pytest -q
+      - run: pytest -q --ignore=tests/chaos
       - run: pytest -q tests/contract -k postgres --no-header -rN | tail -1
+
+  chaos:
+    # Layer 1 fault points + the real-process kill -9 demo (ROADMAP → Chaos engineering
+    # plan). Separate job so the evidence for "no step runs twice" is a named check.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - run: pytest -v tests/chaos
 
   compose:
     # Phase 0 gate: `docker compose up` brings up Postgres + Redis and both pass
