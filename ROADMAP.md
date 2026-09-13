@@ -37,31 +37,33 @@ Google ADK, mastra, Temporal, DBOS, Hatchet — with each con cited to an open i
 documented rule. Survey: `Study/AGENTOS_LANDSCAPE.md` §4. Each con is a GitHub issue
 labelled `landscape-con`; an issue closes only when its acceptance test is in the suite.
 
-## Phase 1 — Durable Execution  ·  ~2 weekends   ← the flagship
+## Phase 1 — Durable Execution  ·  ~2 weekends   ← the flagship  ·  ✅ shipped `v0.2.0-durable` (2026-09-13)
 **Goal:** a run survives a crash and resumes. No step runs twice. This is the demo that
-wins interviews.
+wins interviews. **Met:** `tests/chaos/test_kill9_real_process.py` + five in-process fault
+points + the Toxiproxy lease-expiry race, all in CI. Items below marked ⏭ were carried
+forward — see the dated decision at the end of this phase.
 
 - [x] Event-sourced run state: `run_events` table, fold-to-state replay (`core/events.py`, `core/fold.py`)
 - [ ] **Longevity structure** (`docs/DEVELOPMENT_STRUCTURE.md`): ports + injected adapters, import-linter contract, CI matrix 3.11/3.14 — **shipped at Phase 0 close**; remaining Phase 1 items:
   - [x] `schema_version`, `event_type`, `parent_run_id` on every event; upcaster registry (`core/upcast.py`)
-  - [ ] `StepRequest`/`StepResult` with `effects`, `cost`, `provenance` (§2.1); budget enforced by the core
-  - [ ] Model-vendor executors as `agentos-provider-*` plugins via entry points; core ships `echo` + `tool` only — the Phase 1 demo needs no vendor key
+  - [ ] ⏭ `StepRequest`/`StepResult` with `effects`, `cost`, `provenance` (§2.1); budget enforced by the core
+  - [ ] ⏭ Model-vendor executors as `agentos-provider-*` plugins via entry points; core ships `echo` + `tool` only — the Phase 1 demo needs no vendor key
   - [x] SQLite (`store/sqlite.py`, stdlib), Postgres (`store/postgres.py`, psycopg 3) and Memory adapters all pass `tests/contract/` (store + coordination suites; Postgres leg runs in CI against a service container)
   - [~] golden corpus mechanism live (`tests/golden/`, `scripts/record_golden.py`, `v0.2.0-dev.json`); record `v0.2.0.json` at release
-  - [ ] ADR 0006 core-depends-on-nothing, 0007 log-is-the-API, 0008 providers-are-plugins
+  - [ ] ⏭ ADR 0006 core-depends-on-nothing, 0007 log-is-the-API, 0008 providers-are-plugins, 0009 queue-and-lease-are-ports
   - [ ] **AI-engineering pass (§11)** — `EffectClass`, `Principal`, `BlobRef`, `BlobStore` port **shipped at Phase 0 close**; Phase 1 items:
-    - [ ] A1 declare-then-do: `declared_effects` on the agent definition, checked before dispatch; undeclared effect → dead-letter + suspend
-    - [ ] A2 `Principal` on every approve/cancel/resume event; `spend`/`write_external` gates require a human unless the workflow opts out
-    - [ ] A3 capability aliases (`chat.fast`, …) resolved by provider plugins; `ExecutorSubstituted` event on change
+    - [ ] ⏭ A1 declare-then-do: `declared_effects` on the agent definition, checked before dispatch; undeclared effect → dead-letter + suspend
+    - [ ] ⏭ A2 `Principal` on every approve/cancel/resume event; `spend`/`write_external` gates require a human unless the workflow opts out
+    - [ ] ⏭ A3 capability aliases (`chat.fast`, …) resolved by provider plugins; `ExecutorSubstituted` event on change
     - [~] A4 events carry `BlobRef`; SQLite + Memory `BlobStore` adapters; filesystem adapter still to add
-    - [ ] A5 `progress()` callback renews the lease; rate-limited `StepProgress` events; expiry measured from last heartbeat
-    - [ ] A6 metered `Cost{units, amount, currency, pricing_snapshot_hash}`; pricing table stored as a blob
-    - [ ] A10 provider plugins tested against recorded cassettes; live re-record is a nightly opt-in job
+    - [ ] ⏭ A5 `progress()` callback renews the lease; rate-limited `StepProgress` events; expiry measured from last heartbeat
+    - [ ] ⏭ A6 metered `Cost{units, amount, currency, pricing_snapshot_hash}`; pricing table stored as a blob
+    - [ ] ⏭ A10 provider plugins tested against recorded cassettes; live re-record is a nightly opt-in job
 - [x] Worker process consuming a run queue, decoupled from the API (`agentos/worker/`; queue is a `Queue` port with SQLite/Postgres/Memory adapters — Redis is now an optional adapter, not a requirement: see ADR note below)
-- [ ] Real tool agent (HTTP/subprocess) in core; LLM executors live in provider plugins (see longevity structure)
+- [ ] ⏭ Real tool agent (HTTP/subprocess) in core; LLM executors live in provider plugins (see longevity structure)
 - [x] Idempotency keys on step execution (`run_id:step_id:sha256(inputs)`); completed steps replayed from the log, never re-executed
 - [x] Per-run lease with **fencing tokens** (`Lease` port; a stale holder cannot append) — SQLite/Postgres/Memory adapters, one contract suite
-- [ ] State snapshots to bound replay cost
+- [ ] ⏭ State snapshots to bound replay cost (log stays the source of truth; replay of tens of steps is sub-millisecond today, so this is an optimization not a correctness gap)
 - [x] **Chaos suite** (`tests/chaos/`): deterministic fault points in the worker, run in CI on every PR — see *Chaos engineering plan* below. The `kill -9` demo is `tests/chaos/test_kill9_real_process.py` (real subprocess, exit 137).
   - [x] `FaultInjector` port consulted at named points; production binding is a no-op (`core/faults.py`)
   - [x] `before_effect_commit` → step re-runs, exactly one completion (C1)
@@ -69,13 +71,13 @@ wins interviews.
   - [x] `after_run_commit_before_ack` → redelivery is a no-op, nothing appended (C2)
   - [x] stall after lock acquire past TTL + 2nd worker → exactly one advancement per step, stale worker fenced (C6)
   - [x] definition changed between crash and resume → refused with version error (C3)
-  - [ ] `coordination_reset_mid_run` → run completes from the log alone (leases/queue rebuilt by the recovery sweep)
-  - [ ] `pg_connection_drop_mid_txn` → no partial event written; worker reconnects and resumes
-  - [ ] Property test over the event log (Hypothesis): random fault schedule × random 1–5 step workflow → invariants hold (see plan)
-- [ ] **C1** — effects recorded before ack; replay never re-executes user code ([#1](https://github.com/AmitSinghOM/AgentOS/issues/1))
-- [ ] **C2** — idempotent enqueue and append, `UNIQUE(run_id, seq)` ([#2](https://github.com/AmitSinghOM/AgentOS/issues/2))
-- [ ] **C3** — replay by `step_id` + `workflow_version`, never by position ([#3](https://github.com/AmitSinghOM/AgentOS/issues/3))
-- [ ] **C6** — separate API/worker, per-run lease, no process-local live state ([#6](https://github.com/AmitSinghOM/AgentOS/issues/6))
+  - [ ] ⏭ `coordination_reset_mid_run` → run completes from the log alone (leases/queue rebuilt by the recovery sweep)
+  - [ ] ⏭ `pg_connection_drop_mid_txn` → no partial event written; worker reconnects and resumes
+  - [ ] ⏭ Property test over the event log (Hypothesis): random fault schedule × random 1–5 step workflow → invariants hold (see plan)
+- [x] **C1** — effects recorded before ack; replay never re-executes user code ([#1](https://github.com/AmitSinghOM/AgentOS/issues/1))
+- [x] **C2** — idempotent enqueue and append, `UNIQUE(run_id, seq)` ([#2](https://github.com/AmitSinghOM/AgentOS/issues/2))
+- [x] **C3** — replay by `step_id` + `workflow_version`, never by position ([#3](https://github.com/AmitSinghOM/AgentOS/issues/3))
+- [x] **C6** — separate API/worker, per-run lease, no process-local live state ([#6](https://github.com/AmitSinghOM/AgentOS/issues/6))
 - [ ] **C10** — persistence behind a port; typed serialization round-trips ([#10](https://github.com/AmitSinghOM/AgentOS/issues/10))
 - [ ] **C14** — event-sourced *state* replay, not replay-the-code determinism; written into DESIGN.md ([#14](https://github.com/AmitSinghOM/AgentOS/issues/14))
 - [ ] **C15** — append-only log; snapshots bounded, never the source of truth ([#15](https://github.com/AmitSinghOM/AgentOS/issues/15))
@@ -88,6 +90,19 @@ without repeating step 2. Show the event log. **Now a test:** `pytest tests/chao
 > infrastructure (docs/DEVELOPMENT_STRUCTURE.md §7). Redis becomes an optional adapter for
 > deployments that want lower queue latency; correctness never depends on it.
 **Tag:** `v0.2.0-durable`. **Post:** "Durable Execution: Resuming Agent Workflows After a Crash."
+
+**Carry-forward decision (2026-09-13).** Phase 1 is tagged with its goal met and proven by
+tests, and with the items marked ⏭ above *not* done. They are not silently dropped: each
+stays a checkbox here and moves to the top of Phase 2, because they are all the same
+change — widening the `Executor` port to `StepRequest`/`StepResult` (declared effects,
+metered cost, provenance, progress heartbeat), which is also what Phase 2's retries,
+dead-lettering and cancel need. Doing it once, with those consumers, beats doing it twice.
+Snapshots are deferred because replay is sub-millisecond at Phase 2 scale; the golden
+corpus keeps the log-is-truth invariant honest meanwhile. Provider plugins are deferred
+because no vendor key is needed for anything Phase 2 proves.
+
+**What I'd do differently:** record the fence at `acquire()` from the start. Recording it on
+first write left a takeover window that only designing the Toxiproxy test made visible.
 
 ## Phase 2 — DAG Orchestration  ·  ~2-3 weekends
 **Goal:** real multi-agent workflows, not just sequences.

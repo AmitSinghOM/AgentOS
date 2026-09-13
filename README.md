@@ -94,7 +94,7 @@ See [ROADMAP.md](./ROADMAP.md).
 | Phase | Ships | Status |
 |-------|-------|--------|
 | 0 · Walking skeleton | API + Postgres + Redis up, single-step run end-to-end | ✅ `v0.1.0-skeleton` |
-| 1 · Durable execution | Event-sourced state, idempotent steps, crash-resume | ⚪ planned |
+| 1 · Durable execution | Event-sourced state, idempotent steps, crash-resume | ✅ `v0.2.0-durable` |
 | 2 · DAG orchestration | Parallel branches, agent versioning, retries + DLQ | ⚪ planned |
 | 3 · HITL + observability | Approval gates, OpenTelemetry, cost dashboard | ⚪ planned |
 | 4 · UI (optional) | React run visualizer over the event log | ⚪ planned |
