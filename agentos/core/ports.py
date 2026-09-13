@@ -11,7 +11,14 @@ from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from agentos.core.events import Event
-from agentos.core.models import Agent, BlobRef, StepRequest, StepResult, WorkflowDefinition
+from agentos.core.models import (
+    Agent,
+    BlobRef,
+    StepRequest,
+    StepResult,
+    WorkflowDefinition,
+    WorkflowRun,
+)
 
 
 class ConflictError(Exception):
@@ -80,3 +87,14 @@ class Executor(Protocol):
     version: str
 
     def execute(self, req: StepRequest, progress: ProgressFn) -> StepResult: ...
+
+
+class Observer(Protocol):
+    """Telemetry port. Receives every event the engine appends, in seq order, after the
+    store has committed it. Observability is a CONSUMER of the log — spans and metrics
+    are derived from events, so the core imports no telemetry SDK, timings come from
+    `occurred_at` rather than export-time wall clock, and anything that can read the log
+    (including a later replay) can rebuild the same telemetry
+    (docs/DEVELOPMENT_STRUCTURE.md §11 A9). Must never raise into the engine."""
+
+    def observe(self, event: Event, run: WorkflowRun | None = None) -> None: ...

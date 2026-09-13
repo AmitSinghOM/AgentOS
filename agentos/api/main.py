@@ -20,6 +20,7 @@ from agentos.agents.echo import EchoExecutor
 from agentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
 from agentos.core.models import Agent, AgentType, Principal, WorkflowDefinition
 from agentos.core.ports import ConflictError
+from agentos.observability import build_observers
 from agentos.store.memory import MemoryStore
 from agentos.store.sqlite import SqliteStore
 
@@ -38,8 +39,9 @@ def build_store():
 
 
 store = build_store()
+observers, prometheus = build_observers()
 engine = Engine(store=store, blobs=store, executors={AgentType.echo.value: EchoExecutor()},
-                lease=store if hasattr(store, "acquire") else None)
+                lease=store if hasattr(store, "acquire") else None, observers=observers)
 
 app = FastAPI(title="AgentOS", version="0.4.0-dev")
 
@@ -47,6 +49,15 @@ app = FastAPI(title="AgentOS", version="0.4.0-dev")
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    """Prometheus exposition. Every number here is derived from the event log."""
+    if prometheus is None:
+        raise HTTPException(status_code=404, detail="prometheus-client not installed or disabled")
+    body, content_type = prometheus.render()
+    return Response(content=body, media_type=content_type)
 
 
 @app.post("/agents", status_code=201)
