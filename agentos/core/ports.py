@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from agentos.core.models import Agent, WorkflowDefinition, WorkflowRun
+from agentos.core.models import Agent, BlobRef, WorkflowDefinition, WorkflowRun
 
 
 class Store(Protocol):
@@ -30,7 +30,18 @@ class Executor(Protocol):
     upstream outputs, and records whatever comes back. It never inspects the payload
     beyond hashing it, so a model generation change is an adapter change.
 
-    Phase 1 widens this to StepRequest/StepResult with effects, cost and provenance
-    (docs/DEVELOPMENT_STRUCTURE.md §2.1); the shape here is the Phase 0 subset."""
+    Phase 1 widens this to StepRequest/StepResult with declared effects, metered cost,
+    provenance and a progress callback (docs/DEVELOPMENT_STRUCTURE.md §2.1, §11);
+    the shape here is the Phase 0 subset."""
 
     def execute(self, agent: Agent, upstream: dict[str, dict]) -> dict: ...
+
+
+class BlobStore(Protocol):
+    """Content-addressed payload storage. Events carry a BlobRef; bytes live here.
+    Adapters: filesystem, SQLite, S3-compatible. Phase 2 wraps `put` in per-run
+    encryption so erasure = key destruction (§11 A7) while the log stays append-only."""
+
+    def put(self, data: bytes, media_type: str = "application/json") -> BlobRef: ...
+    def get(self, ref: BlobRef) -> bytes: ...
+    def exists(self, ref: BlobRef) -> bool: ...

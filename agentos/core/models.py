@@ -90,6 +90,52 @@ class RunStatus(str, Enum):
     failed = "failed"
 
 
+class EffectClass(str, Enum):
+    """Closed vocabulary of side-effect classes a step may DECLARE before it runs.
+
+    Owned by the core so the governor (budget + approval policy) can refuse a step
+    before dispatch rather than audit it afterwards. An executor reporting an effect
+    outside its declaration is dead-lettered. See docs/DEVELOPMENT_STRUCTURE.md §11 A1.
+    Values are part of the event-log contract: add, never rename or remove.
+    """
+
+    read = "read"                     # observes external state only
+    compute = "compute"               # pure transformation, model inference included
+    write_external = "write_external"  # mutates a system outside AgentOS
+    spend = "spend"                   # commits money beyond the step's own inference cost
+    send_message = "send_message"     # email, chat, webhook to a human or system
+    execute_code = "execute_code"     # runs generated code
+    spawn_run = "spawn_run"           # requests a child run (dynamic DAG)
+
+
+class PrincipalKind(str, Enum):
+    human = "human"
+    agent = "agent"
+    system = "system"
+
+
+class Principal(BaseModel):
+    """Who performed a governance action (approve, reject, cancel, resume, pause).
+
+    Recorded on the event so a 2033 reader can tell whether a human or another agent
+    approved a spend. Gates on `spend` / `write_external` require `kind == human` unless
+    the workflow explicitly opts out (docs/DEVELOPMENT_STRUCTURE.md §11 A2).
+    """
+
+    kind: PrincipalKind
+    id: str
+    attestation: str | None = None    # e.g. OIDC subject, signature, or session ref
+
+
+class BlobRef(BaseModel):
+    """Content-addressed reference to a payload held in the BlobStore, so events stay
+    small and the log stays replayable without the bytes (§11 A4)."""
+
+    sha256: str
+    size: int
+    media_type: str = "application/json"
+
+
 class StepResult(BaseModel):
     node_id: str
     output: dict
