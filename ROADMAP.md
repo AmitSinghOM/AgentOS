@@ -42,8 +42,23 @@ labelled `landscape-con`; an issue closes only when its acceptance test is in th
 wins interviews.
 
 - [ ] Event-sourced run state: `run_events` table, fold-to-state replay
+- [ ] **Longevity structure** (`docs/DEVELOPMENT_STRUCTURE.md`): ports + injected adapters, import-linter contract, CI matrix 3.11/3.14 — **shipped at Phase 0 close**; remaining Phase 1 items:
+  - [ ] `schema_version`, `event_type`, `parent_run_id` on every event; upcaster registry
+  - [ ] `StepRequest`/`StepResult` with `effects`, `cost`, `provenance` (§2.1); budget enforced by the core
+  - [ ] Model-vendor executors as `agentos-provider-*` plugins via entry points; core ships `echo` + `tool` only — the Phase 1 demo needs no vendor key
+  - [ ] SQLite store adapter beside Postgres; `tests/contract/` runs the same suite against both
+  - [ ] `tests/golden/v0.2.0.json` recorded at release; replay-compat CI job
+  - [ ] ADR 0006 core-depends-on-nothing, 0007 log-is-the-API, 0008 providers-are-plugins
+  - [ ] **AI-engineering pass (§11)** — `EffectClass`, `Principal`, `BlobRef`, `BlobStore` port **shipped at Phase 0 close**; Phase 1 items:
+    - [ ] A1 declare-then-do: `declared_effects` on the agent definition, checked before dispatch; undeclared effect → dead-letter + suspend
+    - [ ] A2 `Principal` on every approve/cancel/resume event; `spend`/`write_external` gates require a human unless the workflow opts out
+    - [ ] A3 capability aliases (`chat.fast`, …) resolved by provider plugins; `ExecutorSubstituted` event on change
+    - [ ] A4 events carry `BlobRef`; filesystem + SQLite `BlobStore` adapters; golden corpus stays small
+    - [ ] A5 `progress()` callback renews the lease; rate-limited `StepProgress` events; expiry measured from last heartbeat
+    - [ ] A6 metered `Cost{units, amount, currency, pricing_snapshot_hash}`; pricing table stored as a blob
+    - [ ] A10 provider plugins tested against recorded cassettes; live re-record is a nightly opt-in job
 - [ ] Worker process consuming a Redis run queue (decoupled from the API)
-- [ ] Real LLM agent (Bedrock or OpenAI) + a tool agent
+- [ ] Real tool agent (HTTP/subprocess) in core; LLM executors live in provider plugins (see longevity structure)
 - [ ] Idempotency keys on step execution; re-run after crash = no double call
 - [ ] Redis execution lock per run (exactly-one-worker advancement)
 - [ ] State snapshots to bound replay cost
@@ -81,6 +96,9 @@ without repeating step 2. Show the event log.
 - [ ] **C9** — one execution model: every DAG node is a durable step ([#9](https://github.com/AmitSinghOM/AgentOS/issues/9))
 - [ ] **C11** — `DEAD_LETTERED` step state with cause and a retry path ([#11](https://github.com/AmitSinghOM/AgentOS/issues/11))
 - [ ] **Chaos, network class:** Toxiproxy in compose between worker ↔ Postgres/Redis; `lease_expiry_race` (add 2 s latency to Postgres so a live worker's lease lapses while a 2nd worker starts) → exactly one advancement, the stale worker's write is rejected (C6 split-brain); `redis_partition_mid_run` → retry timers survive; `pg_latency_under_fanout` → fan-in waits, no branch output lost (C4)
+- [ ] **A7** crypto-shredding: per-run data key in a `KeyStore` port; erasure = destroy key + `RunErased` event; log stays append-only
+- [ ] **A8** `agentos/protocols/`: tools described by JSON Schema; MCP / A2A / vendor function-calling are adapters; tool results are data, never prompt
+- [ ] **A12** global pause: `agentos pause --all` / `resume --all` as `SchedulerPaused` / `SchedulerResumed` events; workers finish in-flight steps, dispatch nothing new
 
 **Demo:** a fan-out/fan-in workflow (1 → [2,3,4 parallel] → 5) with one branch failing
 and retrying.
@@ -98,6 +116,8 @@ and retrying.
 - [ ] **C7** — approval is a run state; a gated step cannot run before its approval event ([#7](https://github.com/AmitSinghOM/AgentOS/issues/7))
 - [ ] **C8** — per-step cost on `step.completed`; Prometheus + OTel only, no SaaS ([#8](https://github.com/AmitSinghOM/AgentOS/issues/8))
 - [ ] **C12** — trust boundary on resume payloads and replayed events ([#12](https://github.com/AmitSinghOM/AgentOS/issues/12))
+- [ ] **A9** OpenTelemetry GenAI semantic conventions (`gen_ai.*`) for spans; AgentOS-specific attributes under `agentos.*`; pinned semconv version
+- [ ] **A11** `agentos export-run --format jsonl`: inputs/outputs by hash + provenance for external evaluators (opik); AgentOS records, never scores
 
 **Demo:** run pauses at approval, approve from another terminal, run resumes; show the
 Jaeger trace and the cost breakdown.

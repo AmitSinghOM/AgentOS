@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.4"]
+dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.4", "import-linter>=2.0"]
 
 [tool.ruff]
 line-length = 100
@@ -21,6 +21,40 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# Layering contract (docs/DEVELOPMENT_STRUCTURE.md §1). `lint-imports` runs in CI;
+# a PR that makes the core depend on an adapter or an SDK fails.
+[tool.importlinter]
+root_package = "agentos"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "core depends on nothing inside agentos"
+type = "forbidden"
+source_modules = ["agentos.core"]
+forbidden_modules = [
+    "agentos.api",
+    "agentos.store",
+    "agentos.agents",
+    "agentos.observability",
+]
+
+[[tool.importlinter.contracts]]
+name = "core imports no framework or vendor SDK"
+type = "forbidden"
+source_modules = ["agentos.core"]
+forbidden_modules = [
+    "fastapi", "starlette", "uvicorn",
+    "sqlalchemy", "psycopg", "redis",
+    "openai", "anthropic", "boto3", "botocore",
+    "opentelemetry", "prometheus_client",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "adapters do not import each other"
+type = "independence"
+modules = ["agentos.store", "agentos.agents", "agentos.observability"]
 
 [build-system]
 requires = ["hatchling"]
