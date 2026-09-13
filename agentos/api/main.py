@@ -14,10 +14,11 @@ from __future__ import annotations
 import os
 
 from fastapi import FastAPI, Header, HTTPException, Response
+from pydantic import BaseModel
 
 from agentos.agents.echo import EchoExecutor
-from agentos.core.engine import Engine
-from agentos.core.models import Agent, AgentType, WorkflowDefinition
+from agentos.core.engine import Engine, RetryNotAllowed
+from agentos.core.models import Agent, AgentType, Principal, WorkflowDefinition
 from agentos.store.memory import MemoryStore
 from agentos.store.sqlite import SqliteStore
 
@@ -93,6 +94,33 @@ def get_run(run_id: str) -> dict:
     run = engine.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
+    return run.model_dump()
+
+
+class RetryBody(BaseModel):
+    principal: Principal | None = None
+    reason: str = ""
+
+
+@app.post("/runs/{run_id}/steps/{step_id}/retry", status_code=202)
+def retry_step(run_id: str, step_id: str, body: RetryBody | None = None,
+               sync: bool = False, response: Response = None) -> dict:  # type: ignore[assignment]
+    """Reopen a dead-lettered or failed step (C11). Records who asked (A2) as a
+    `step.retry_requested` event, then re-enqueues the run (or, with `?sync=true`,
+    advances it in-process). 409 if the step is not in a retryable state."""
+    body = body or RetryBody()
+    try:
+        engine.request_retry(run_id, step_id, principal=body.principal, reason=body.reason)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RetryNotAllowed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if sync:
+        response.status_code = 200
+        return engine.advance_until_terminal(run_id).model_dump()
+    store.push(run_id)
+    run = engine.get_run(run_id)
+    assert run is not None
     return run.model_dump()
 
 

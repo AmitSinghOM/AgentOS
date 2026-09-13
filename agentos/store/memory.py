@@ -139,14 +139,19 @@ class MemoryStore:
                 del self._leases[token.run_id]
 
     # queue
-    def push(self, run_id: str) -> None:
-        """Enqueue, or make an in-flight delivery visible again (see SqliteStore.push)."""
+    def push(self, run_id: str, *, delay_seconds: float = 0.0) -> None:
+        """Enqueue, or make an in-flight delivery visible again (see SqliteStore.push).
+        With a delay, the run is not deliverable before now+delay."""
         with self._cv:
             self._inflight = [(t, r) for t, r in self._inflight if r != run_id]
-            heapq.heapify(self._inflight)
-            if run_id not in self._queue:
+            if run_id in self._queue:
+                self._queue.remove(run_id)
+            if delay_seconds > 0:
+                heapq.heappush(self._inflight, (time.monotonic() + delay_seconds, run_id))
+            else:
+                heapq.heapify(self._inflight)
                 self._queue.append(run_id)
-                self._cv.notify()
+            self._cv.notify()
 
     def pull(self, timeout: float) -> str | None:
         deadline = time.monotonic() + timeout

@@ -108,15 +108,15 @@ first write left a takeover window that only designing the Toxiproxy test made v
 **Goal:** real multi-agent workflows, not just sequences.
 
 - [ ] Workflow = DAG (nodes + dependency edges); validate acyclic
-- [ ] Topological scheduler: run all ready nodes, parallelize independent branches
+- [x] Topological scheduler: run all ready nodes, parallelize independent branches — wave scheduler in `core/engine.py`, bounded by `WorkflowDefinition.max_parallelism` (default 4); appends serialized through one `_Log` per `advance()`
 - [ ] Agent versioning: pin a run to a specific `agent_version`
-- [ ] Retry with exponential backoff (Redis-tracked) + max attempts
-- [~] Dead-letter state for poison steps; run fails cleanly with cause in the log — `step.dead_lettered` event + `WorkflowRun.dead_lettered` in the fold; retry path (`POST /runs/{id}/steps/{step}/retry`) still to add
-- [ ] Pass outputs along edges (step N output → step M input)
-- [ ] **C4** — event per step transition; cancellation is a persisted event ([#4](https://github.com/AmitSinghOM/AgentOS/issues/4))
+- [x] Retry with exponential backoff + max attempts — `WorkflowNode.retry: RetryPolicy{max_attempts, backoff_seconds, backoff_multiplier, max_backoff_seconds}`; `step.failed(terminal=False, retry_at)`; the worker re-pushes with `delay_seconds` (queue-tracked, no Redis needed)
+- [x] Dead-letter state for poison steps; run fails cleanly with cause in the log — after the last attempt a step is dead-lettered with `failed after N attempt(s): <error>`; `POST /runs/{id}/steps/{step}/retry` appends `step.retry_requested` with the `Principal` and reopens the run (409 for a healthy step)
+- [x] Pass outputs along edges (step N output → step M input) — `StepRequest.inputs` is the map of upstream outputs; fan-in sees all three branches
+- [~] **C4** — event per step transition ✓ (started/progress/completed/failed/dead_lettered); a completed sibling of a dead-lettered wave-mate is always recorded ✓; cancellation as a persisted event — with C5 ([#4](https://github.com/AmitSinghOM/AgentOS/issues/4))
 - [ ] **C5** — first-class cancel/pause; client disconnect never changes run state ([#5](https://github.com/AmitSinghOM/AgentOS/issues/5))
-- [ ] **C9** — one execution model: every DAG node is a durable step ([#9](https://github.com/AmitSinghOM/AgentOS/issues/9))
-- [ ] **C11** — `DEAD_LETTERED` step state with cause and a retry path ([#11](https://github.com/AmitSinghOM/AgentOS/issues/11))
+- [x] **C9** — one execution model: every DAG node is a durable step — the wave scheduler and the single-step path are the same loop ([#9](https://github.com/AmitSinghOM/AgentOS/issues/9))
+- [x] **C11** — `DEAD_LETTERED` step state with cause and a retry path ([#11](https://github.com/AmitSinghOM/AgentOS/issues/11))
 - [~] **Chaos, network class:** Toxiproxy between worker ↔ Postgres (`tests/chaos/network/`, CI job `chaos-network` with Postgres + Toxiproxy service containers)
   - [x] `lease_expiry_race` — 2 s latency on worker A's link so its lease lapses mid-step; worker B finishes; A's late write is rejected **by the fence** (asserted on the rejection reason, not just seq) (C6 split-brain). Also fixed: fence now recorded at `acquire`, not first write, closing the window between takeover and B's first append
   - [ ] `coordination_partition_mid_run` → run resumes via recovery sweep once the link returns

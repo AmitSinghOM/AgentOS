@@ -267,12 +267,14 @@ class PostgresStore:
     # queue (at-least-once; SKIP LOCKED lets N workers pull without contention)
     visibility_seconds = 30.0
 
-    def push(self, run_id: str) -> None:
+    def push(self, run_id: str, *, delay_seconds: float = 0.0) -> None:
         """Enqueue, or make an in-flight delivery visible again (see SqliteStore.push)."""
         with self._pool.connection() as conn:
             conn.execute(
-                "INSERT INTO queue(run_id, visible_at) VALUES (%s, now()) "
-                "ON CONFLICT (run_id) DO UPDATE SET visible_at = now()", (run_id,),
+                "INSERT INTO queue(run_id, visible_at) "
+                "VALUES (%s, now() + make_interval(secs => %s)) "
+                "ON CONFLICT (run_id) DO UPDATE SET visible_at = EXCLUDED.visible_at",
+                (run_id, max(0.0, delay_seconds)),
             )
 
     def pull(self, timeout: float) -> str | None:

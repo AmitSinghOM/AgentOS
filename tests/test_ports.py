@@ -120,7 +120,16 @@ def test_engine_runs_against_unknown_adapters():
     assert run.steps[-1].output["from"] == ["b", "c"]      # outputs flow along edges
     assert all(s.output_ref is not None for s in run.steps)  # log holds refs, not bytes
     types = [r["event_type"] for r in store.logs[run.id]]
-    assert types == ["run.started", *["step.started", "step.completed"] * 4, "run.completed"]
+    assert types[0] == "run.started" and types[-1] == "run.completed"
+    assert types.count("step.started") == 4 and types.count("step.completed") == 4
+    # b and c are independent → they share a wave; every start precedes its completion.
+    for sid in "abcd":
+        recs = store.logs[run.id]
+        st = next(i for i, r in enumerate(recs) if r["event_type"] == "step.started"
+                  and r["step_id"] == sid)
+        co = next(i for i, r in enumerate(recs) if r["event_type"] == "step.completed"
+                  and r["step_id"] == sid)
+        assert st < co
     assert engine.get_run(run.id) == run                     # fold is the only truth
 
 
@@ -134,11 +143,14 @@ def test_completed_steps_are_replayed_not_re_executed():
     engine.advance(run.id)                                   # already terminal
     assert len(executor.calls) == calls_after_first
 
-    # Rewind the log to "a and b done, c not started" and advance: only c and d run.
-    store.logs[run.id] = store.logs[run.id][:5]              # started + 2×(started,completed)
+    # Rewind the log to just after `a` completed and advance: only b, c, d run.
+    recs = store.logs[run.id]
+    cut = next(i for i, r in enumerate(recs)
+               if r["event_type"] == "step.completed" and r["step_id"] == "a") + 1
+    store.logs[run.id] = recs[:cut]
     resumed = engine.advance(run.id)
     assert resumed.status is RunStatus.completed
-    assert [c[0] for c in executor.calls[calls_after_first:]] == ["x", "x"]  # c, d only
+    assert len(executor.calls) == calls_after_first + 3            # b, c, d — never a
     assert [s.node_id for s in resumed.steps] == ["a", "b", "c", "d"]
 
 
@@ -168,7 +180,11 @@ def test_step_failure_is_recorded_not_raised():
     assert run.status is RunStatus.failed
     assert "exploded" in (run.error or "")
     types = [r["event_type"] for r in store.logs[run.id]]
-    assert types == ["run.started", "step.started", "step.failed", "run.failed"]
+    # No retries configured → the crash is terminal → the poison step is dead-lettered
+    # with the cause, and the run fails. One code path for every poison step (C11).
+    assert types == ["run.started", "step.started", "step.failed", "step.dead_lettered",
+                     "run.failed"]
+    assert "exploded" in run.dead_lettered["a"]
 
 
 def test_missing_executor_fails_the_run_not_the_process():
@@ -195,15 +211,22 @@ def test_topological_order_is_deterministic_and_single_sourced():
 
 def test_core_package_imports_no_adapter():
     """Belt to import-linter's braces: loading the core must not drag an adapter or
-    framework module into sys.modules."""
+    framework module into sys.modules. Runs in a scratch module table and restores the
+    original afterwards so other tests keep a single identity for every class."""
     import importlib
     import sys
 
-    for mod in [m for m in sys.modules if m.startswith("agentos")]:
-        del sys.modules[mod]
-    for name in ("agentos.core.engine", "agentos.core.ports", "agentos.core.fold",
-                 "agentos.core.events", "agentos.core.upcast"):
-        importlib.import_module(name)
-    loaded = {m for m in sys.modules if m.startswith("agentos.")}
-    assert not {m for m in loaded if m.startswith(("agentos.api", "agentos.store",
-                                                   "agentos.agents"))}, loaded
+    saved = {m: mod for m, mod in sys.modules.items() if m.startswith("agentos")}
+    for m in saved:
+        del sys.modules[m]
+    try:
+        for name in ("agentos.core.engine", "agentos.core.ports", "agentos.core.fold",
+                     "agentos.core.events", "agentos.core.upcast"):
+            importlib.import_module(name)
+        loaded = {m for m in sys.modules if m.startswith("agentos.")}
+        assert not {m for m in loaded if m.startswith(("agentos.api", "agentos.store",
+                                                       "agentos.agents"))}, loaded
+    finally:
+        for m in [m for m in sys.modules if m.startswith("agentos")]:
+            del sys.modules[m]
+        sys.modules.update(saved)

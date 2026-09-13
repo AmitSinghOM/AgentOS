@@ -134,6 +134,18 @@ def test_push_of_inflight_run_makes_it_visible_now(coord):
     assert coord.pull(0.2) == "r1"
 
 
+def test_push_with_delay_defers_visibility(coord):
+    """Retry backoff primitive: the run is not deliverable before now + delay."""
+    coord.visibility_seconds = 30.0
+    coord.push("r1", delay_seconds=0.3)
+    assert coord.pull(0.1) is None                           # not yet
+    time.sleep(0.25)
+    assert coord.pull(0.3) == "r1"                           # now
+    # A delayed re-push of an in-flight run replaces its visibility time.
+    coord.push("r1", delay_seconds=5.0)
+    assert coord.pull(0.1) is None
+
+
 def test_queue_is_fifo_and_two_pullers_never_share_a_delivery(coord):
     coord.visibility_seconds = 5.0
     for r in ("a", "b", "c", "d"):
