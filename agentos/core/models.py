@@ -293,3 +293,12 @@ class WorkflowRun(BaseModel):
     error: str | None = None
     parent_run_id: str | None = None
     last_seq: int = 0
+
+
+# Several models above reference types defined later in this module (e.g. `Agent` →
+# `EffectClass`, `WorkflowDefinition` → `Budget`). Pydantic defers building those until
+# first use; complete them here so a framework that snapshots a model's serializer at
+# import time (FastAPI's response fields) never sees a half-built model.
+for _model in (Agent, WorkflowNode, WorkflowDefinition, StepRequest, StepResult, StepRecord,
+               WorkflowRun):
+    _model.model_rebuild()
