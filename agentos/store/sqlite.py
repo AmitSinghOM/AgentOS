@@ -263,15 +263,15 @@ class SqliteStore:
     # queue (at-least-once; visibility timeout redelivers un-acked runs)
     visibility_seconds = 30.0
 
-    def push(self, run_id: str) -> None:
+    def push(self, run_id: str, *, delay_seconds: float = 0.0) -> None:
         """Enqueue, or make an in-flight delivery visible again. Re-pushing a run that
         someone is currently processing is harmless: the lease refuses the second
-        worker and the delivery is retried later."""
+        worker and the delivery is retried later. `delay_seconds` defers visibility."""
         with self._lock:
             self._conn.execute(
                 "INSERT INTO queue(run_id, visible_at) VALUES (?, ?) "
                 "ON CONFLICT(run_id) DO UPDATE SET visible_at = excluded.visible_at",
-                (run_id, time.time()),
+                (run_id, time.time() + max(0.0, delay_seconds)),
             )
 
     def pull(self, timeout: float) -> str | None:

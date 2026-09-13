@@ -38,10 +38,28 @@ class Agent(BaseModel):
         default_factory=lambda: [EffectClass.compute])
 
 
+class RetryPolicy(BaseModel):
+    """Per-node retry with exponential backoff. `max_attempts=1` means no retry. After the
+    last attempt fails the step is dead-lettered (C11) and the run fails with the cause."""
+
+    max_attempts: int = 1
+    backoff_seconds: float = 0.0          # delay before attempt 2
+    backoff_multiplier: float = 2.0
+    max_backoff_seconds: float = 300.0
+
+    def delay_before(self, attempt: int) -> float:
+        """Seconds to wait before `attempt` (2-based: attempt 2 waits backoff_seconds)."""
+        if attempt <= 1:
+            return 0.0
+        return min(self.max_backoff_seconds,
+                   self.backoff_seconds * (self.backoff_multiplier ** (attempt - 2)))
+
+
 class WorkflowNode(BaseModel):
     id: str
     agent: str                       # agent name
     depends_on: list[str] = Field(default_factory=list)
+    retry: RetryPolicy = Field(default_factory=RetryPolicy)
 
 
 class WorkflowDefinition(BaseModel):
@@ -49,6 +67,7 @@ class WorkflowDefinition(BaseModel):
     version: int = 1                 # bumped on any change; runs pin it (C3)
     nodes: list[WorkflowNode]
     budget: Budget = Field(default_factory=lambda: Budget())
+    max_parallelism: int = 4         # independent branches run concurrently up to this
 
     def topological_order(self) -> list[str]:
         """Return node IDs in dependency order (Kahn's algorithm).
@@ -253,6 +272,8 @@ class WorkflowRun(BaseModel):
     attempts: dict[str, int] = Field(default_factory=dict)   # step_id → latest attempt
     progress: dict[str, float] = Field(default_factory=dict)  # step_id → last reported fraction
     dead_lettered: dict[str, str] = Field(default_factory=dict)  # step_id → cause
+    failed_steps: dict[str, str] = Field(default_factory=dict)   # step_id → last error (terminal)
+    pending_retries: dict[str, datetime] = Field(default_factory=dict)  # step_id → not before
     total_cost: str = "0"                                     # decimal string, rolled up
     started_at: datetime = Field(default_factory=_now)
     ended_at: datetime | None = None

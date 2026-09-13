@@ -100,7 +100,19 @@ class StepFailed(Event):
     step_id: str
     attempt: int
     error: str
-    terminal: bool = True                 # Phase 2: False while retries remain
+    terminal: bool = True                 # False while retries remain
+    retry_at: datetime | None = None      # when the next attempt may start (terminal=False)
+
+
+class StepRetryRequested(Event):
+    """A principal asked for a dead-lettered or failed step to be attempted again (C11).
+    Reopens the run: status back to running, the step's dead-letter cleared, and the
+    next attempt number continues from where it left off."""
+
+    event_type: ClassVar[str] = "step.retry_requested"
+    step_id: str
+    principal: Principal | None = None
+    reason: str = ""
 
 
 class RunCompleted(Event):
@@ -116,12 +128,12 @@ class RunFailed(Event):
 EVENT_TYPES: dict[str, type[Event]] = {
     cls.event_type: cls
     for cls in (RunStarted, StepStarted, StepProgress, StepCompleted, StepDeadLettered,
-                StepFailed, RunCompleted, RunFailed)
+                StepFailed, StepRetryRequested, RunCompleted, RunFailed)
 }
 
 EventTypeName = Literal[
     "run.started", "step.started", "step.progress", "step.completed", "step.dead_lettered",
-    "step.failed", "run.completed", "run.failed",
+    "step.failed", "step.retry_requested", "run.completed", "run.failed",
 ]
 
 

@@ -85,11 +85,17 @@ class Worker:
             return                            # redelivered after visibility timeout
         self._faults.at(faults.AFTER_LOCK_ACQUIRE, run_id=run_id, holder=self.holder)
         try:
-            self._engine.advance(run_id, fence=token.fence,
-                                 heartbeat=lambda: self._heartbeat(token))
+            run = self._engine.advance(run_id, fence=token.fence,
+                                       heartbeat=lambda: self._heartbeat(token))
             self._faults.at(faults.AFTER_RUN_COMMIT_BEFORE_ACK, run_id=run_id)
-            self._queue.ack(run_id)
-            self.processed += 1
+            delay = self._engine.next_retry_delay(run)
+            if delay is not None and run.status.value not in ("completed", "failed"):
+                # Waiting on a backoff: hand the run back to the queue, not before then.
+                self._queue.push(run_id, delay_seconds=delay)
+                log.info("run %s: retry scheduled in %.2fs", run_id, delay)
+            else:
+                self._queue.ack(run_id)
+                self.processed += 1
         except LeaseLost:
             log.warning("run %s: lease lost mid-run; another worker will continue", run_id)
         except ConflictError as exc:
