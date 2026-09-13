@@ -91,6 +91,23 @@ def test_stale_fence_cannot_append(coord):
     assert len(coord.read_events("r")) == 4
 
 
+def test_fence_is_recorded_at_acquire_not_first_write(coord):
+    """Closes the window between B taking the lease and B's first append: a stale A
+    that writes in that window must already be rejected."""
+    coord.append_events("r", 0, [RunStarted(run_id="r", workflow="w", workflow_version=1,
+                                            request_id="q")])
+    a = coord.acquire("r", "A", 0.05)
+    time.sleep(0.15)                                          # A stalls past its TTL
+    b = coord.acquire("r", "B", 5.0)                          # B takes over, writes nothing yet
+    assert b.fence > a.fence
+    with pytest.raises(ConflictError, match="fence"):
+        coord.append_events("r", 1, [StepStarted(run_id="r", step_id="a", attempt=1, agent="e",
+                                                 idempotency_key="k")], fence=a.fence)
+    assert len(coord.read_events("r")) == 1
+    coord.append_events("r", 1, [StepStarted(run_id="r", step_id="a", attempt=1, agent="e",
+                                             idempotency_key="k")], fence=b.fence)
+
+
 # ------------------------------------------------------------------- queue
 
 def test_queue_delivers_once_then_redelivers_if_unacked(coord):

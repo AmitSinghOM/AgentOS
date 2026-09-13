@@ -53,13 +53,15 @@ class MemoryStore:
                       events: Sequence[Event], *, fence: int | None = None) -> list[Event]:
         with self._lock:
             log = self._events.get(run_id, [])
+            # Fence first: a fenced-out writer is told so regardless of seq, because the
+            # fence is the guarantee that matters when seqs still happen to match.
+            if fence is not None and fence < self._fences.get(run_id, 0):
+                raise ConflictError(f"run {run_id!r}: fence {fence} is stale "
+                                    f"(highest seen {self._fences[run_id]})")
             if len(log) != expected_seq:
                 raise ConflictError(
                     f"run {run_id!r}: expected seq {expected_seq}, log is at {len(log)}"
                 )
-            if fence is not None and fence < self._fences.get(run_id, 0):
-                raise ConflictError(f"run {run_id!r}: fence {fence} is stale "
-                                    f"(highest seen {self._fences[run_id]})")
             out: list[Event] = []
             staged: list[dict] = []
             for i, ev in enumerate(events, start=expected_seq + 1):
@@ -115,6 +117,9 @@ class MemoryStore:
             fence = self._fence_counter.get(run_id, 0) + 1
             self._fence_counter[run_id] = fence
             self._leases[run_id] = (holder, fence, now + ttl_seconds)
+            # Record the fence at acquire time, not first write: from this instant any
+            # holder with a lower fence is stale, even if it writes before we do.
+            self._fences[run_id] = max(self._fences.get(run_id, 0), fence)
             return LeaseToken(run_id=run_id, holder=holder, fence=fence)
 
     def renew(self, token: LeaseToken, ttl_seconds: float) -> bool:
