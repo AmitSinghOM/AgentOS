@@ -12,9 +12,15 @@ from decimal import Decimal
 
 from agentos.core.events import (
     Event,
+    RunCancelled,
+    RunCancelRequested,
     RunCompleted,
     RunFailed,
+    RunPaused,
+    RunPauseRequested,
+    RunResumed,
     RunStarted,
+    StepCancelled,
     StepCompleted,
     StepDeadLettered,
     StepFailed,
@@ -106,6 +112,23 @@ def fold(events: Iterable[Event]) -> WorkflowRun:
             run.status = RunStatus.failed
             run.error = ev.error
             run.ended_at = ev.occurred_at
+        elif isinstance(ev, RunCancelRequested):
+            run.cancel_requested = True
+        elif isinstance(ev, StepCancelled):
+            run.cancelled_steps.append(ev.step_id)
+            run.pending_retries.pop(ev.step_id, None)
+        elif isinstance(ev, RunCancelled):
+            run.status = RunStatus.cancelled
+            run.cancel_requested = False
+            run.pause_requested = False
+            run.ended_at = ev.occurred_at
+        elif isinstance(ev, RunPauseRequested):
+            run.pause_requested = True
+        elif isinstance(ev, RunPaused):
+            run.status = RunStatus.paused
+            run.pause_requested = False
+        elif isinstance(ev, RunResumed):
+            run.status = RunStatus.running
         elif isinstance(ev, RunStarted):
             raise FoldError("run.started appears twice")
 

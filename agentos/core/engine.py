@@ -33,11 +33,19 @@ from decimal import Decimal
 from uuid import uuid4
 
 from agentos.core import faults
+from agentos.core.coordination import Lease
 from agentos.core.events import (
+    CONTROL_REQUEST_TYPES,
     Event,
+    RunCancelled,
+    RunCancelRequested,
     RunCompleted,
     RunFailed,
+    RunPaused,
+    RunPauseRequested,
+    RunResumed,
     RunStarted,
+    StepCancelled,
     StepCompleted,
     StepDeadLettered,
     StepFailed,
@@ -52,6 +60,7 @@ from agentos.core.models import (
     Cost,
     EffectClass,
     Principal,
+    RunStatus,
     StepRequest,
     StepResult,
     WorkflowDefinition,
@@ -60,7 +69,7 @@ from agentos.core.models import (
 )
 from agentos.core.ports import BlobStore, ConflictError, Executor, Store
 
-TERMINAL = frozenset({"completed", "failed"})
+TERMINAL = frozenset({"completed", "failed", "cancelled"})
 PROGRESS_MIN_INTERVAL = 1.0   # seconds between step.progress events (rate limit)
 
 
@@ -68,8 +77,18 @@ class LeaseLost(Exception):
     """The heartbeat reported the lease is gone; stop advancing immediately."""
 
 
+class Cancelled(Exception):
+    """Raised inside progress() when a cancel has been requested: the cooperative
+    cancellation token. Executors that heartbeat are interrupted at their next call;
+    executors that do not finish their step, and it is recorded before the run cancels."""
+
+
 class RetryNotAllowed(Exception):
     """The step is not in a retryable state (not dead-lettered / failed)."""
+
+
+class ControlNotAllowed(Exception):
+    """cancel/pause/resume is not valid for the run's current state."""
 
 
 class _Refused(Exception):
@@ -102,20 +121,49 @@ def idempotency_key(run_id: str, step_id: str, inputs: dict) -> str:
 class _Log:
     """Serialized appender for one advance() call. Concurrent steps' progress events and
     the scheduler's own writes all go through here, so `expected_seq` is always right.
-    Only the lease holder writes, so tracking last_seq locally is sound; a ConflictError
-    still surfaces if that assumption is ever violated (fence, another writer)."""
+
+    Single-writer with one exception: the API may append a *control request*
+    (run.cancel_requested / run.pause_requested) while we hold the lease. On a seq
+    conflict we re-read; if every foreign event is a control request we adopt the new
+    seq, remember the request, and retry once. Anything else is a real conflict."""
 
     def __init__(self, store: Store, run_id: str, last_seq: int, fence: int | None) -> None:
         self._store, self.run_id, self.last_seq, self._fence = store, run_id, last_seq, fence
         self._lock = threading.Lock()
         self._closed = False
+        self.cancel_requested = False
+        self.pause_requested = False
 
     def append(self, event: Event) -> None:
         with self._lock:
             if self._closed:
                 return  # advance() has returned; a straggler thread's progress is dropped
-            self._store.append_events(self.run_id, self.last_seq, [event], fence=self._fence)
+            try:
+                self._store.append_events(self.run_id, self.last_seq, [event], fence=self._fence)
+            except ConflictError:
+                if not self._adopt_control_events():
+                    raise
+                self._store.append_events(self.run_id, self.last_seq, [event], fence=self._fence)
             self.last_seq += 1
+
+    def poll_control(self) -> None:
+        """Pick up control requests appended since our last write (no conflict needed)."""
+        with self._lock:
+            self._adopt_control_events()
+
+    def _adopt_control_events(self) -> bool:
+        fresh = self._store.read_events(self.run_id, after_seq=self.last_seq)
+        if not fresh:
+            return False
+        if not all(isinstance(e, CONTROL_REQUEST_TYPES) for e in fresh):
+            return False
+        for e in fresh:
+            if isinstance(e, RunCancelRequested):
+                self.cancel_requested = True
+            elif isinstance(e, RunPauseRequested):
+                self.pause_requested = True
+        self.last_seq = fresh[-1].seq
+        return True
 
     def close(self) -> None:
         with self._lock:
@@ -126,16 +174,19 @@ class Engine:
     def __init__(self, store: Store, blobs: BlobStore, executors: Mapping[str, Executor],
                  faults: FaultInjector | None = None,
                  clock: Callable[[], float] = time.monotonic,
-                 wall: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
+                 wall: Callable[[], datetime] = lambda: datetime.now(UTC),
+                 lease: Lease | None = None) -> None:
         """`executors` maps an AgentType value (e.g. "echo") to the adapter that runs it.
         `clock` is monotonic (durations, rate limits); `wall` is the timestamp source for
-        `retry_at` so tests can pin it."""
+        `retry_at` so tests can pin it. `lease` lets control requests be finalized
+        immediately when no worker holds the run (idle/paused runs)."""
         self._store = store
         self._blobs = blobs
         self._executors = executors
         self._faults = faults or NoFaults()
         self._clock = clock
         self._wall = wall
+        self._lease = lease
 
     # ----------------------------------------------------------------- queries
     def get_run(self, run_id: str, *, hydrate: bool = True) -> WorkflowRun | None:
@@ -152,6 +203,12 @@ class Engine:
     def is_terminal(self, run_id: str) -> bool:
         run = self.get_run(run_id, hydrate=False)
         return run is not None and run.status.value in TERMINAL
+
+    def needs_worker(self, run_id: str) -> bool:
+        """True when a worker should be advancing this run: not terminal, not paused."""
+        run = self.get_run(run_id, hydrate=False)
+        return run is not None and run.status.value not in TERMINAL and \
+            run.status is not RunStatus.paused
 
     def next_retry_delay(self, run: WorkflowRun) -> float | None:
         """Seconds until the earliest pending retry may start; None if none pending."""
@@ -194,6 +251,76 @@ class Engine:
         )])
         return self.get_run(run_id)  # type: ignore[return-value]
 
+    # ------------------------------------------------------ operator control (C5)
+    def request_cancel(self, run_id: str, *, principal: Principal | None = None,
+                       reason: str = "") -> WorkflowRun:
+        """Persist the intent. If no worker holds the run, finalize immediately; otherwise
+        the worker finalizes at its next boundary (the in-flight step is interrupted at
+        its next progress() call, or recorded if it finishes first — C4)."""
+        run = self.get_run(run_id, hydrate=False)
+        if run is None:
+            raise KeyError(f"unknown run {run_id!r}")
+        if run.status.value in TERMINAL:
+            raise ControlNotAllowed(f"run {run_id!r} is already {run.status.value}")
+        if not run.cancel_requested:
+            self._store.append_events(run_id, run.last_seq, [RunCancelRequested(
+                run_id=run_id, principal=principal, reason=reason)])
+        self._finalize_if_idle(run_id)
+        return self.get_run(run_id)  # type: ignore[return-value]
+
+    def request_pause(self, run_id: str, *, principal: Principal | None = None,
+                      reason: str = "") -> WorkflowRun:
+        run = self.get_run(run_id, hydrate=False)
+        if run is None:
+            raise KeyError(f"unknown run {run_id!r}")
+        if run.status.value in TERMINAL or run.status is RunStatus.paused:
+            raise ControlNotAllowed(f"run {run_id!r} is {run.status.value}")
+        if not run.pause_requested:
+            self._store.append_events(run_id, run.last_seq, [RunPauseRequested(
+                run_id=run_id, principal=principal, reason=reason)])
+        self._finalize_if_idle(run_id)
+        return self.get_run(run_id)  # type: ignore[return-value]
+
+    def resume(self, run_id: str, *, principal: Principal | None = None,
+               reason: str = "") -> WorkflowRun:
+        run = self.get_run(run_id, hydrate=False)
+        if run is None:
+            raise KeyError(f"unknown run {run_id!r}")
+        if run.status is not RunStatus.paused:
+            raise ControlNotAllowed(f"run {run_id!r} is {run.status.value}, not paused")
+        self._store.append_events(run_id, run.last_seq, [RunResumed(
+            run_id=run_id, principal=principal, reason=reason)])
+        return self.get_run(run_id)  # type: ignore[return-value]
+
+    def _finalize_if_idle(self, run_id: str) -> None:
+        """Take the lease briefly; if we get it, nobody is executing, so apply the pending
+        control request now. If we don't, a worker holds it and will apply it."""
+        if self._lease is None:
+            return
+        token = self._lease.acquire(run_id, "control", 5.0)
+        if token is None:
+            return
+        try:
+            run = self.get_run(run_id, hydrate=False)
+            if run is None or run.status.value in TERMINAL:
+                return
+            log = _Log(self._store, run_id, run.last_seq, token.fence)
+            log.cancel_requested, log.pause_requested = run.cancel_requested, run.pause_requested
+            self._apply_control(log, run.status)
+        finally:
+            self._lease.release(token)
+
+    def _apply_control(self, log: _Log, status: RunStatus) -> bool:
+        """Append the finalizing control event if one is pending. Returns True if the run
+        should stop advancing."""
+        if log.cancel_requested:
+            log.append(RunCancelled(run_id=log.run_id))
+            return True
+        if log.pause_requested and status is not RunStatus.paused:
+            log.append(RunPaused(run_id=log.run_id))
+            return True
+        return status is RunStatus.paused
+
     def start_run(self, wf_name: str, *, request_id: str | None = None,
                   principal: Principal | None = None, max_wait: float = 60.0) -> WorkflowRun:
         """create_run + advance in-process, sleeping through retry backoffs (bounded by
@@ -230,6 +357,9 @@ class Engine:
             return self.get_run(run_id)  # type: ignore[return-value]
 
         log = _Log(self._store, run_id, run.last_seq, fence)
+        log.cancel_requested, log.pause_requested = run.cancel_requested, run.pause_requested
+        if run.status is RunStatus.paused and not run.cancel_requested:
+            return run                       # nothing to do until run.resumed
         wf = self._store.get_workflow(run.workflow)
         if wf is None:
             return self._fail(log, f"workflow {run.workflow!r} no longer exists")
@@ -254,6 +384,10 @@ class Engine:
             while len(done) < len(by_id):
                 if heartbeat is not None and not heartbeat():
                     raise LeaseLost(f"run {run_id!r}: lease lost")
+                # Control requests appended by the API since our last write (C5).
+                log.poll_control()
+                if self._apply_control(log, run.status):
+                    return self.get_run(run_id)  # type: ignore[return-value]
 
                 ready = [n for n in wf.nodes
                          if n.id not in done and all(d in done for d in n.depends_on)]
@@ -280,8 +414,14 @@ class Engine:
                 # Settle EVERY step of the wave before deciding the run's fate, so a
                 # completed sibling of a dead-lettered step is recorded, never lost (C4).
                 dead: list[tuple[str, str]] = []
+                interrupted = False
                 for node, req, executor in started:
                     outcome = futures[req.step_id].result()   # re-raises Crash/LeaseLost
+                    if outcome[0] == "cancelled":
+                        log.append(StepCancelled(run_id=run_id, step_id=req.step_id,
+                                                 attempt=req.attempt))
+                        interrupted = True
+                        continue
                     kind, payload = self._settle(log, node, req, executor, outcome, budget)
                     if kind == "retry":
                         pending[req.step_id] = payload
@@ -296,6 +436,13 @@ class Engine:
                     step_id, cause = dead[0]
                     return self._fail(log, f"step {step_id!r} dead-lettered: {cause}",
                                       step_id=step_id)
+                # A cancel that arrived mid-wave: every finished sibling is now recorded
+                # (C4); interrupted ones are step.cancelled; finalize.
+                log.poll_control()
+                if interrupted or log.cancel_requested:
+                    log.cancel_requested = True
+                    self._apply_control(log, run.status)
+                    return self.get_run(run_id)  # type: ignore[return-value]
                 if budget.max_run_cost is not None and total > Decimal(budget.max_run_cost):
                     return self._fail(log, f"run cost {total} exceeds max_run_cost "
                                            f"{budget.max_run_cost}")
@@ -350,6 +497,8 @@ class Engine:
             result = executor.execute(req, progress)
         except LeaseLost:
             raise
+        except Cancelled:
+            return ("cancelled",)
         except Exception as exc:  # noqa: BLE001 — step boundary; recorded, not raised
             return ("crashed", _StepCrashed(str(exc)))
         return ("ok", result, self._clock() - t0)
@@ -406,15 +555,22 @@ class Engine:
     # ---------------------------------------------------------------- helpers
     def _progress_fn(self, log: _Log, req: StepRequest, heartbeat: Callable[[], bool] | None):
         """progress(fraction, note): renew the lease every call; append step.progress at
-        most once per PROGRESS_MIN_INTERVAL so a chatty executor cannot flood the log."""
+        most once per PROGRESS_MIN_INTERVAL so a chatty executor cannot flood the log.
+        Also the cooperative cancellation token: raises Cancelled once a cancel request
+        has been seen (checked on the same rate limit)."""
         last_emit = [-1e9]
 
         def progress(fraction: float, note: str = "") -> None:
             if heartbeat is not None and not heartbeat():
                 raise LeaseLost(f"run {req.run_id!r}: lease lost during step {req.step_id!r}")
+            if log.cancel_requested:
+                raise Cancelled(f"run {req.run_id!r}: cancel requested")
             now = self._clock()
             if now - last_emit[0] >= PROGRESS_MIN_INTERVAL:
                 last_emit[0] = now
+                log.poll_control()
+                if log.cancel_requested:
+                    raise Cancelled(f"run {req.run_id!r}: cancel requested")
                 log.append(StepProgress(
                     run_id=req.run_id, step_id=req.step_id, attempt=req.attempt,
                     fraction=max(0.0, min(1.0, float(fraction))), note=note[:200],
@@ -429,5 +585,6 @@ class Engine:
         return self.get_run(log.run_id)  # type: ignore[return-value]
 
 
-__all__ = ["Budget", "Engine", "LeaseLost", "RetryNotAllowed", "WorkflowDefinition",
+__all__ = ["Budget", "Cancelled", "ControlNotAllowed", "Engine", "LeaseLost", "RetryNotAllowed",
+           "WorkflowDefinition",
            "idempotency_key"]

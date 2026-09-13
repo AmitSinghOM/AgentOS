@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     store = build_store()
     injector = from_env()
     engine = Engine(store=store, blobs=store, executors={AgentType.echo.value: EchoExecutor()},
-                    faults=injector)
+                    faults=injector, lease=store)
     worker = Worker(engine, store, lease=store, queue=store, holder=args.holder,
                     lease_ttl=args.lease_ttl, faults=injector)
     if args.once:

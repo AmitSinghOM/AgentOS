@@ -45,10 +45,11 @@ class Worker:
 
     # ------------------------------------------------------------------ sweep
     def recover(self) -> list[str]:
-        """Re-enqueue every non-terminal run. Idempotent: the queue de-duplicates."""
+        """Re-enqueue every run that needs a worker (not terminal, not paused).
+        Idempotent: the queue de-duplicates."""
         found = []
         for run_id in self._store.list_run_ids():
-            if not self._engine.is_terminal(run_id):
+            if self._engine.needs_worker(run_id):
                 self._queue.push(run_id)
                 found.append(run_id)
         if found:
@@ -76,8 +77,8 @@ class Worker:
 
     # ---------------------------------------------------------------- process
     def _process(self, run_id: str) -> None:
-        if self._engine.is_terminal(run_id):
-            self._queue.ack(run_id)          # duplicate/late delivery; nothing to do
+        if not self._engine.needs_worker(run_id):
+            self._queue.ack(run_id)          # terminal or paused; nothing to do
             return
         token = self._lease.acquire(run_id, self.holder, self.lease_ttl)
         if token is None:
@@ -89,12 +90,12 @@ class Worker:
                                        heartbeat=lambda: self._heartbeat(token))
             self._faults.at(faults.AFTER_RUN_COMMIT_BEFORE_ACK, run_id=run_id)
             delay = self._engine.next_retry_delay(run)
-            if delay is not None and run.status.value not in ("completed", "failed"):
+            if delay is not None and run.status.value == "running":
                 # Waiting on a backoff: hand the run back to the queue, not before then.
                 self._queue.push(run_id, delay_seconds=delay)
                 log.info("run %s: retry scheduled in %.2fs", run_id, delay)
             else:
-                self._queue.ack(run_id)
+                self._queue.ack(run_id)      # terminal, or paused until run.resumed
                 self.processed += 1
         except LeaseLost:
             log.warning("run %s: lease lost mid-run; another worker will continue", run_id)
