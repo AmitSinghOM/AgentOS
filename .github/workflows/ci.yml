@@ -1,10 +1,15 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
+    tags: ["v*"]
   pull_request:
     paths:
       - "agentos/**"
       - "tests/**"
+      - "examples/**"
+      - "docker-compose.yml"
       - "pyproject.toml"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
@@ -27,3 +32,16 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: pytest -q
+
+  compose:
+    # Phase 0 gate: `docker compose up` brings up Postgres + Redis and both pass
+    # their healthchecks. The API does not talk to them until Phase 1.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose up -d --wait --wait-timeout 90
+      - run: docker compose exec -T postgres pg_isready -U agentos
+      - run: docker compose exec -T redis redis-cli ping | grep -q PONG
+      - if: always()
+        run: docker compose down -v

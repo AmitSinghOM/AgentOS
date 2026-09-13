@@ -42,27 +42,29 @@ PostgreSQL is the source of truth (append-only event log). Redis is the speed la
 
 ```bash
 cp .env.example .env
-docker compose up -d            # postgres + redis
+docker compose up -d            # postgres + redis (unused until Phase 1; API is in-memory today)
 pip install -e ".[dev]"
-alembic upgrade head            # (Phase 1+) create schema
 uvicorn agentos.api.main:app --reload
 ```
 
-Define and run a workflow:
+Define and run a workflow (the `Content-Type` header matters — without it curl sends a
+form body and the API answers 422):
 
 ```bash
 # register an agent
-curl -X POST localhost:8000/agents -d @examples/echo_agent.json
+curl -X POST localhost:8000/agents -H 'Content-Type: application/json' -d @examples/echo_agent.json
 
 # define a workflow
-curl -X POST localhost:8000/workflows -d @examples/hello_workflow.json
+curl -X POST localhost:8000/workflows -H 'Content-Type: application/json' -d @examples/hello_workflow.json
 
-# start a run
+# start a run (Phase 0 runs synchronously and returns the finished run)
 curl -X POST localhost:8000/workflows/hello/runs
 
-# watch it
+# fetch it again by id
 curl localhost:8000/runs/{run_id}
 ```
+
+Or run the same walkthrough as a test: `pytest tests/test_quickstart.py`.
 
 ## Roadmap
 
@@ -71,11 +73,15 @@ See [ROADMAP.md](./ROADMAP.md).
 
 | Phase | Ships | Status |
 |-------|-------|--------|
-| 0 · Walking skeleton | API + Postgres + Redis up, single-step run end-to-end | 🟡 in progress |
+| 0 · Walking skeleton | API + Postgres + Redis up, single-step run end-to-end | ✅ `v0.1.0-skeleton` |
 | 1 · Durable execution | Event-sourced state, idempotent steps, crash-resume | ⚪ planned |
 | 2 · DAG orchestration | Parallel branches, agent versioning, retries + DLQ | ⚪ planned |
 | 3 · HITL + observability | Approval gates, OpenTelemetry, cost dashboard | ⚪ planned |
 | 4 · UI (optional) | React run visualizer over the event log | ⚪ planned |
+
+Phases 1–3 are scoped against a survey of what the popular agent runtimes get wrong
+(LangGraph, agno, Microsoft Agent Framework, crewAI, ADK, mastra, Temporal, Hatchet…).
+Each gap is a tracked issue labelled `landscape-con`; see [ROADMAP.md](./ROADMAP.md).
 
 ## Engineering writeups
 
