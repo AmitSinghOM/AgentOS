@@ -45,8 +45,11 @@ class Worker:
 
     # ------------------------------------------------------------------ sweep
     def recover(self) -> list[str]:
-        """Re-enqueue every run that needs a worker (not terminal, not paused).
-        Idempotent: the queue de-duplicates."""
+        """Re-enqueue every run that needs a worker (not terminal, not paused, not
+        suspended). Also expires timed-out approvals (C7). Idempotent."""
+        expired = self._engine.expire_approvals()
+        if expired:
+            log.info("expired %d approval(s)", len(expired))
         found = []
         for run_id in self._store.list_run_ids():
             if self._engine.needs_worker(run_id):

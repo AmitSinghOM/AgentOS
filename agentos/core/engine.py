@@ -36,6 +36,9 @@ from agentos.core import faults
 from agentos.core.coordination import Lease
 from agentos.core.events import (
     CONTROL_REQUEST_TYPES,
+    ApprovalGranted,
+    ApprovalRejected,
+    ApprovalRequested,
     Event,
     RunCancelled,
     RunCancelRequested,
@@ -45,6 +48,7 @@ from agentos.core.events import (
     RunPauseRequested,
     RunResumed,
     RunStarted,
+    RunSuspended,
     StepCancelled,
     StepCompleted,
     StepDeadLettered,
@@ -56,10 +60,14 @@ from agentos.core.events import (
 from agentos.core.faults import FaultInjector, NoFaults
 from agentos.core.fold import fold
 from agentos.core.models import (
+    HUMAN_ONLY_EFFECTS,
+    Approval,
+    ApprovalStatus,
     Budget,
     Cost,
     EffectClass,
     Principal,
+    PrincipalKind,
     RunStatus,
     StepRequest,
     StepResult,
@@ -205,10 +213,11 @@ class Engine:
         return run is not None and run.status.value in TERMINAL
 
     def needs_worker(self, run_id: str) -> bool:
-        """True when a worker should be advancing this run: not terminal, not paused."""
+        """True when a worker should be advancing this run: not terminal, not paused,
+        not suspended awaiting approval."""
         run = self.get_run(run_id, hydrate=False)
         return run is not None and run.status.value not in TERMINAL and \
-            run.status is not RunStatus.paused
+            run.status not in (RunStatus.paused, RunStatus.suspended)
 
     def next_retry_delay(self, run: WorkflowRun) -> float | None:
         """Seconds until the earliest pending retry may start; None if none pending."""
@@ -299,6 +308,78 @@ class Engine:
             run_id=run_id, principal=principal, reason=reason)])
         return self.get_run(run_id)  # type: ignore[return-value]
 
+    # ---------------------------------------------------- human-in-the-loop (C7)
+    def approve(self, run_id: str, approval_id: str, *, principal: Principal,
+                reason: str = "") -> WorkflowRun:
+        """Grant a pending approval. The decision needs a principal; `spend` and
+        `write_external` need a human unless the workflow allows agent approval (A2).
+        When no approvals remain pending the run is running again; the caller re-enqueues.
+        The gated step has never started, so it runs exactly once, after this event."""
+        run, approval = self._pending_approval(run_id, approval_id)
+        budget = self._budget_for(run)
+        if principal.kind is not PrincipalKind.human and (
+                set(approval.effect_classes) & HUMAN_ONLY_EFFECTS
+                and not budget.allow_agent_approval):
+            raise ControlNotAllowed(
+                f"approval {approval_id!r} covers "
+                f"{sorted(c.value for c in set(approval.effect_classes) & HUMAN_ONLY_EFFECTS)} "
+                f"and requires a human principal; got {principal.kind.value!r}")
+        self._store.append_events(run_id, run.last_seq, [ApprovalGranted(
+            run_id=run_id, approval_id=approval_id, step_id=approval.step_id,
+            principal=principal, reason=reason)])
+        return self.get_run(run_id)  # type: ignore[return-value]
+
+    def reject(self, run_id: str, approval_id: str, *, principal: Principal,
+               reason: str = "") -> WorkflowRun:
+        """Reject: the step is dead-lettered with the decider named and the run fails.
+        `POST …/steps/{step}/retry` reopens it and the step re-requests approval."""
+        run, approval = self._pending_approval(run_id, approval_id)
+        who = f"{principal.kind.value}:{principal.id}"
+        cause = f"approval rejected by {who}" + (f": {reason}" if reason else "")
+        self._store.append_events(run_id, run.last_seq, [
+            ApprovalRejected(run_id=run_id, approval_id=approval_id, step_id=approval.step_id,
+                             principal=principal, reason=reason),
+            StepDeadLettered(run_id=run_id, step_id=approval.step_id,
+                             attempt=run.attempts.get(approval.step_id, 0), cause=cause),
+            RunFailed(run_id=run_id, error=f"step {approval.step_id!r} dead-lettered: {cause}",
+                      step_id=approval.step_id),
+        ])
+        return self.get_run(run_id)  # type: ignore[return-value]
+
+    def expire_approvals(self, run_ids: list[str] | None = None) -> list[tuple[str, str]]:
+        """Reject every pending approval whose `expires_at` has passed, as the `system`
+        principal. Called by the worker's sweep. Returns (run_id, approval_id) pairs."""
+        now = self._wall()
+        expired: list[tuple[str, str]] = []
+        for run_id in run_ids if run_ids is not None else self._store.list_run_ids():
+            run = self.get_run(run_id, hydrate=False)
+            if run is None or run.status is not RunStatus.suspended:
+                continue
+            for a in list(run.approvals.values()):
+                if a.status is ApprovalStatus.pending and a.expires_at and a.expires_at <= now:
+                    self.reject(run_id, a.approval_id,
+                                principal=Principal(kind=PrincipalKind.system, id="expiry"),
+                                reason=f"expired at {a.expires_at.isoformat()}")
+                    expired.append((run_id, a.approval_id))
+                    break                                  # run is failed now
+        return expired
+
+    def _pending_approval(self, run_id: str, approval_id: str):
+        run = self.get_run(run_id, hydrate=False)
+        if run is None:
+            raise KeyError(f"unknown run {run_id!r}")
+        approval = run.approvals.get(approval_id)
+        if approval is None:
+            raise KeyError(f"unknown approval {approval_id!r} for run {run_id!r}")
+        if run.status is not RunStatus.suspended or approval.status is not ApprovalStatus.pending:
+            raise ControlNotAllowed(f"approval {approval_id!r} is {approval.status.value}; "
+                                    f"run is {run.status.value}")
+        return run, approval
+
+    def _budget_for(self, run: WorkflowRun) -> Budget:
+        wf = self._store.get_workflow(run.workflow)
+        return wf.budget if wf is not None else Budget()
+
     def _finalize_if_idle(self, run_id: str) -> None:
         """Take the lease briefly; if we get it, nobody is executing, so apply the pending
         control request now. If we don't, a worker holds it and will apply it."""
@@ -367,6 +448,8 @@ class Engine:
         log.cancel_requested, log.pause_requested = run.cancel_requested, run.pause_requested
         if run.status is RunStatus.paused and not run.cancel_requested:
             return run                       # nothing to do until run.resumed
+        if run.status is RunStatus.suspended and not run.cancel_requested:
+            return run                       # nothing to do until every approval is decided
         wf = self._store.get_workflow(run.workflow)
         if wf is None:
             return self._fail(log, f"workflow {run.workflow!r} no longer exists")
@@ -401,16 +484,49 @@ class Engine:
                 now = self._wall()
                 waiting = [n for n in ready if pending.get(n.id, now) > now]
                 ready = [n for n in ready if n not in waiting]
-                if not ready:
+
+                # ---- declare-then-do, tier 2 (C7): steps whose declared effects need a
+                # decision are suspended BEFORE dispatch — no step.started, no attempt.
+                runnable: list[tuple[WorkflowNode, str | None]] = []
+                requested_now = False
+                for node in ready:
+                    gate = self._approval_gate(node, run, budget)
+                    if gate == "run":
+                        runnable.append((node, None))
+                    elif gate == "pending":
+                        pass                              # already asked; keep waiting
+                    elif gate.startswith("granted:"):
+                        runnable.append((node, gate.split(":", 1)[1]))
+                    else:                                 # "request:<classes>"
+                        classes = [EffectClass(c) for c in gate.split(":", 1)[1].split(",")]
+                        approval_id = uuid4().hex
+                        expires = (now + timedelta(seconds=budget.approval_timeout_seconds)
+                                   if budget.approval_timeout_seconds else None)
+                        log.append(ApprovalRequested(
+                            run_id=run_id, approval_id=approval_id, step_id=node.id,
+                            effect_classes=classes, expires_at=expires,
+                            reason=f"step {node.id!r} declares "
+                                   f"{', '.join(c.value for c in classes)}",
+                        ))
+                        run.approvals[approval_id] = Approval(
+                            approval_id=approval_id, step_id=node.id, effect_classes=classes,
+                            requested_at=now, expires_at=expires)
+                        requested_now = True
+
+                if not runnable:
+                    if requested_now or any(a.status is ApprovalStatus.pending
+                                            for a in run.approvals.values()):
+                        log.append(RunSuspended(run_id=run_id))
+                        return self.get_run(run_id)  # type: ignore[return-value]
                     # Everything runnable is waiting on a backoff. Hand control back;
                     # the caller re-enqueues with next_retry_delay().
                     return self.get_run(run_id)  # type: ignore[return-value]
 
                 # ---- one wave: start all, execute concurrently, settle sequentially.
                 started: list[tuple[WorkflowNode, StepRequest, Executor]] = []
-                for node in ready:
+                for node, approval_id in runnable:
                     prepared = self._prepare(log, run_id, node, attempts, outputs, budget,
-                                             run.agent_versions)
+                                             run.agent_versions, approval_id)
                     if isinstance(prepared, str):          # unrecoverable definition error
                         return self._fail(log, prepared, step_id=node.id)
                     started.append(prepared)
@@ -451,6 +567,11 @@ class Engine:
                     log.cancel_requested = True
                     self._apply_control(log, run.status)
                     return self.get_run(run_id)  # type: ignore[return-value]
+                if requested_now:
+                    # Gated siblings were asked for while this wave ran; the wave is
+                    # recorded, now suspend until they are decided.
+                    log.append(RunSuspended(run_id=run_id))
+                    return self.get_run(run_id)  # type: ignore[return-value]
                 if budget.max_run_cost is not None and total > Decimal(budget.max_run_cost):
                     return self._fail(log, f"run cost {total} exceeds max_run_cost "
                                            f"{budget.max_run_cost}")
@@ -461,8 +582,32 @@ class Engine:
             pool.shutdown(wait=False, cancel_futures=True)
 
     # ---------------------------------------------------------------- one step
+    def _approval_gate(self, node: WorkflowNode, run: WorkflowRun, budget: Budget) -> str:
+        """Tier-2 gate. Returns "run" (no approval needed), "pending" (asked, undecided),
+        "granted:<approval_id>", or "request:<c1,c2>" (needs asking now). Steps with
+        classes outside both tiers are left to the tier-3 refusal in _execute."""
+        pinned = run.agent_versions.get(node.agent)
+        agent = self._store.get_agent(node.agent, version=pinned) if pinned else \
+            self._store.get_agent(node.agent)
+        if agent is None:
+            return "run"                                   # _prepare reports the error
+        declared = set(agent.declared_effects)
+        if declared - budget.allowed_effect_classes - budget.approval_required_for:
+            return "run"                                   # tier 3: _execute refuses it
+        needs = (declared - budget.allowed_effect_classes) & budget.approval_required_for
+        if not needs:
+            return "run"
+        mine = [a for a in run.approvals.values() if a.step_id == node.id]
+        for a in mine:
+            if a.status is ApprovalStatus.granted:
+                return f"granted:{a.approval_id}"
+        if any(a.status is ApprovalStatus.pending for a in mine):
+            return "pending"
+        return "request:" + ",".join(sorted(c.value for c in needs))
+
     def _prepare(self, log: _Log, run_id: str, node: WorkflowNode, attempts: dict[str, int],
-                 outputs: dict[str, dict], budget: Budget, pins: dict[str, int]):
+                 outputs: dict[str, dict], budget: Budget, pins: dict[str, int],
+                 approval_id: str | None = None):
         """Resolve the PINNED agent version + executor, append step.started. Returns
         (node, req, executor) or an error string for definition problems that no retry
         can fix. Runs that predate pinning (empty pins) resolve the latest version."""
@@ -491,6 +636,7 @@ class Engine:
             run_id=run_id, step_id=node.id, attempt=attempt, idempotency_key=key,
             agent=agent, inputs=upstream, inputs_ref=self._blobs.put(_canonical(upstream)),
             declared_effects=declared, budget=budget, deadline=deadline,
+            approval_id=approval_id,
         )
         return node, req, executor
 
@@ -499,6 +645,8 @@ class Engine:
         """Runs in the pool. Gate, then dispatch. Returns one of:
         ("ok", result, elapsed) | ("refused", _Refused) | ("crashed", _StepCrashed)."""
         over = req.declared_effects - req.budget.allowed_effect_classes
+        if req.approval_id is not None:
+            over -= req.budget.approval_required_for      # granted: tier 2 is now allowed
         if over:
             ec = min(over)
             return ("refused", _Refused(f"agent {req.agent.name!r} declares effect {ec.value!r} "

@@ -53,7 +53,7 @@ forward — see the dated decision at the end of this phase.
   - [ ] ⏭ ADR 0006 core-depends-on-nothing, 0007 log-is-the-API, 0008 providers-are-plugins, 0009 queue-and-lease-are-ports
   - [ ] **AI-engineering pass (§11)** — `EffectClass`, `Principal`, `BlobRef`, `BlobStore` port **shipped at Phase 0 close**; Phase 1 items:
     - [x] A1 declare-then-do: `Agent.declared_effects` checked against `WorkflowDefinition.budget.allowed_effect_classes` BEFORE dispatch; undeclared reported effect → `step.dead_lettered` + run failed (Phase 3 turns the failure into SUSPENDED-for-approval)
-    - [ ] ⏭ A2 `Principal` on every approve/cancel/resume event; `spend`/`write_external` gates require a human unless the workflow opts out
+    - [x] A2 `Principal` mandatory on every decision (422 without one); `spend`/`write_external` require `kind == human` unless `Budget.allow_agent_approval` (403 otherwise); other gated classes may be agent-approved
     - [ ] ⏭ A3 capability aliases (`chat.fast`, …) resolved by provider plugins; `ExecutorSubstituted` event on change
     - [~] A4 events carry `BlobRef`; SQLite + Memory `BlobStore` adapters; filesystem adapter still to add
     - [x] A5 `progress(fraction, note)` renews the lease on every call and appends `step.progress` at most once per second; lease loss mid-step raises `LeaseLost` before any write (proven over Toxiproxy alongside the fence)
@@ -146,13 +146,13 @@ than considering a signature change first.
 ## Phase 3 — Human-in-the-Loop + Observability  ·  ~2-3 weekends
 **Goal:** production-shaped — pausable, traceable, costed.
 
-- [ ] Approval node: run → `SUSPENDED`, lock released, `approval_requests` row
-- [ ] `POST /runs/{id}/approve|reject` resumes or fails the run
+- [x] Approval as a run state: the governor's tier-2 gate (`Budget.approval_required_for`, default write_external/spend/send_message/execute_code) appends `approval.requested` + `run.suspended` BEFORE dispatch — no `step.started`, no attempt consumed; lease released, run leaves the queue, sweep skips it. Approvals live in the log (`WorkflowRun.approvals`), not a side table
+- [x] `POST /runs/{id}/approvals/{aid}/approve|reject` (+ `GET /approvals` inbox, `GET /runs/{id}/approvals`): approve → `approval.granted`, running once no gate is pending, re-enqueued; reject → dead-letter naming the decider + run failed; `…/steps/{step}/retry` reopens and re-asks. `Budget.approval_timeout_seconds` → rejected by the `system` principal on the worker's sweep
 - [ ] OpenTelemetry spans per run/step → Jaeger (docker compose)
 - [ ] Prometheus metrics: run latency, throughput, error rate, queue depth, retries
 - [ ] Token + cost accounting per step, rolled up per run; Grafana dashboard
 - [ ] Grafana + Jaeger added to compose; screenshots in README
-- [ ] **C7** — approval is a run state; a gated step cannot run before its approval event ([#7](https://github.com/AmitSinghOM/AgentOS/issues/7))
+- [x] **C7** — approval is a run state; the gated step's `step.started.seq > approval.granted.seq` is asserted; it runs exactly once, tagged with its `approval_id` ([#7](https://github.com/AmitSinghOM/AgentOS/issues/7))
 - [ ] **C8** — per-step cost on `step.completed`; Prometheus + OTel only, no SaaS ([#8](https://github.com/AmitSinghOM/AgentOS/issues/8))
 - [ ] **C12** — trust boundary on resume payloads and replayed events ([#12](https://github.com/AmitSinghOM/AgentOS/issues/12))
 - [ ] **A9** OpenTelemetry GenAI semantic conventions (`gen_ai.*`) for spans; AgentOS-specific attributes under `agentos.*`; pinned semconv version

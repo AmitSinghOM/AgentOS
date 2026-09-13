@@ -41,7 +41,7 @@ store = build_store()
 engine = Engine(store=store, blobs=store, executors={AgentType.echo.value: EchoExecutor()},
                 lease=store if hasattr(store, "acquire") else None)
 
-app = FastAPI(title="AgentOS", version="0.3.0")
+app = FastAPI(title="AgentOS", version="0.4.0-dev")
 
 
 @app.get("/health")
@@ -190,3 +190,65 @@ def resume_run(run_id: str, body: ControlBody | None = None) -> dict:
     out = _control(engine.resume, run_id, body)
     store.push(run_id)
     return out
+
+
+# ---- human-in-the-loop (C7)
+
+class DecisionBody(BaseModel):
+    principal: Principal              # mandatory: every decision names who made it (A2)
+    reason: str = ""
+
+
+@app.get("/runs/{run_id}/approvals")
+def list_run_approvals(run_id: str) -> dict:
+    run = engine.get_run(run_id, hydrate=False)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
+    return {"data": list(run.approvals.values()), "status": run.status}
+
+
+@app.get("/approvals")
+def list_pending_approvals() -> dict:
+    """Every pending approval across suspended runs — the operator's inbox.
+    (Scans runs; a store index arrives with the Phase 3 operator surface.)"""
+    out = []
+    for run_id in store.list_run_ids():
+        run = engine.get_run(run_id, hydrate=False)
+        if run is None or run.status.value != "suspended":
+            continue
+        out += [{"run_id": run_id, "workflow": run.workflow, **a.model_dump()}
+                for a in run.approvals.values() if a.status.value == "pending"]
+    return {"data": out}
+
+
+@app.post("/runs/{run_id}/approvals/{approval_id}/approve", status_code=202)
+def approve(run_id: str, approval_id: str, body: DecisionBody, sync: bool = False,
+            response: Response = None) -> dict:  # type: ignore[assignment]
+    """Grant. 403 if the principal kind may not approve these effect classes; 409 if the
+    approval is not pending. Re-enqueues the run (or `?sync=true` advances it)."""
+    try:
+        run = engine.approve(run_id, approval_id, principal=body.principal, reason=body.reason)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ControlNotAllowed as exc:
+        code = 403 if "principal" in str(exc) else 409
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
+    if run.status.value == "running":
+        if sync:
+            response.status_code = 200
+            return engine.advance_until_terminal(run_id).model_dump()
+        store.push(run_id)
+    return run.model_dump()
+
+
+@app.post("/runs/{run_id}/approvals/{approval_id}/reject", status_code=200)
+def reject(run_id: str, approval_id: str, body: DecisionBody) -> dict:
+    """Reject: the step is dead-lettered naming the decider; the run fails. Reopen it with
+    POST /runs/{id}/steps/{step}/retry, which re-requests approval."""
+    try:
+        return engine.reject(run_id, approval_id, principal=body.principal,
+                             reason=body.reason).model_dump()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ControlNotAllowed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

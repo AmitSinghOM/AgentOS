@@ -11,6 +11,9 @@ from collections.abc import Iterable
 from decimal import Decimal
 
 from agentos.core.events import (
+    ApprovalGranted,
+    ApprovalRejected,
+    ApprovalRequested,
     Event,
     RunCancelled,
     RunCancelRequested,
@@ -20,6 +23,7 @@ from agentos.core.events import (
     RunPauseRequested,
     RunResumed,
     RunStarted,
+    RunSuspended,
     StepCancelled,
     StepCompleted,
     StepDeadLettered,
@@ -28,7 +32,7 @@ from agentos.core.events import (
     StepRetryRequested,
     StepStarted,
 )
-from agentos.core.models import RunStatus, StepRecord, WorkflowRun
+from agentos.core.models import Approval, ApprovalStatus, RunStatus, StepRecord, WorkflowRun
 
 
 class FoldError(ValueError):
@@ -130,6 +134,25 @@ def fold(events: Iterable[Event]) -> WorkflowRun:
             run.pause_requested = False
         elif isinstance(ev, RunResumed):
             run.status = RunStatus.running
+        elif isinstance(ev, ApprovalRequested):
+            run.approvals[ev.approval_id] = Approval(
+                approval_id=ev.approval_id, step_id=ev.step_id,
+                effect_classes=ev.effect_classes, reason=ev.reason,
+                requested_at=ev.occurred_at, expires_at=ev.expires_at,
+            )
+        elif isinstance(ev, RunSuspended):
+            run.status = RunStatus.suspended
+        elif isinstance(ev, ApprovalGranted):
+            a = run.approvals[ev.approval_id]
+            a.status, a.decided_by, a.decision_reason, a.decided_at = (
+                ApprovalStatus.granted, ev.principal, ev.reason, ev.occurred_at)
+            if run.status is RunStatus.suspended and not any(
+                    x.status is ApprovalStatus.pending for x in run.approvals.values()):
+                run.status = RunStatus.running
+        elif isinstance(ev, ApprovalRejected):
+            a = run.approvals[ev.approval_id]
+            a.status, a.decided_by, a.decision_reason, a.decided_at = (
+                ApprovalStatus.rejected, ev.principal, ev.reason, ev.occurred_at)
         elif isinstance(ev, RunStarted):
             raise FoldError("run.started appears twice")
 
