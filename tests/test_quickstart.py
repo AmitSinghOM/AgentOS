@@ -2,21 +2,31 @@
 example files, must work end to end. This is the demo the phase is gated on."""
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
-from agentos.api.main import app
-
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+
+
+@pytest.fixture
+def app(monkeypatch):
+    """A fresh composition root per test: agent versions are immutable, so tests that
+    register the same (name, version) with different bodies must not share a store."""
+    monkeypatch.setenv("AGENTOS_STORE", "memory")
+    from agentos.api import main
+    importlib.reload(main)
+    return main.app
 
 
 def _load(name: str) -> dict:
     return json.loads((EXAMPLES / name).read_text())
 
 
-def test_readme_quickstart_with_example_files():
+def test_readme_quickstart_with_example_files(app):
     client = TestClient(app)
 
     agent = _load("echo_agent.json")
@@ -37,7 +47,7 @@ def test_readme_quickstart_with_example_files():
     assert fetched.json()["status"] == "completed"
 
 
-def test_quickstart_requires_json_content_type():
+def test_quickstart_requires_json_content_type(app):
     """curl -d @file sends form-encoded by default; the README must pass the
     JSON header or the registry call is rejected. Lock the behaviour so the
     README instruction stays honest."""
@@ -50,7 +60,7 @@ def test_quickstart_requires_json_content_type():
     assert resp.status_code == 422
 
 
-def test_unknown_workflow_and_run_are_404():
+def test_unknown_workflow_and_run_are_404(app):
     client = TestClient(app)
     assert client.post("/workflows/does-not-exist/runs").status_code == 404
     assert client.get("/runs/nope").status_code == 404

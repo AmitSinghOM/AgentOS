@@ -28,7 +28,13 @@ class AgentType(str, Enum):
 
 
 class Agent(BaseModel):
+    """Immutable versioned agent definition. `(name, version)` is the identity; the store
+    refuses to overwrite an existing version with a different body — bump `version`.
+    Runs pin the version of every agent they use at start (DESIGN §5 `agent_versions`),
+    so redeploying an agent never changes a running workflow's behaviour."""
+
     name: str
+    version: int = 1
     type: AgentType
     config: dict = Field(default_factory=dict)
     # Declare-then-do (§11 A1): the effect classes this agent is allowed to cause. Fixed
@@ -270,6 +276,7 @@ class WorkflowRun(BaseModel):
     workflow: str
     workflow_version: int = 1
     request_id: str = Field(default_factory=_id)
+    agent_versions: dict[str, int] = Field(default_factory=dict)  # name → pinned version
     status: RunStatus = RunStatus.pending
     steps: list[StepRecord] = Field(default_factory=list)
     attempts: dict[str, int] = Field(default_factory=dict)   # step_id → latest attempt
