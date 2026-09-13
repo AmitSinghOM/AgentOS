@@ -69,6 +69,12 @@ curl -X POST localhost:8000/workflows/hello/runs -H 'Idempotency-Key: demo-1'
 curl localhost:8000/runs/{run_id}
 curl 'localhost:8000/runs/{run_id}/events?after=0'
 
+# a step that exhausted its retries is dead-lettered with the cause; reopen it,
+# recording who asked, and the run continues from where it stopped
+curl -X POST localhost:8000/runs/{run_id}/steps/{step_id}/retry \
+     -H 'Content-Type: application/json' \
+     -d '{"principal": {"kind": "human", "id": "amit"}, "reason": "fixed the agent"}'
+
 # or run synchronously in the API process (Phase 0 behaviour)
 curl -X POST 'localhost:8000/workflows/hello/runs?sync=true'
 ```
