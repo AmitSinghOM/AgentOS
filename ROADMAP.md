@@ -41,25 +41,25 @@ labelled `landscape-con`; an issue closes only when its acceptance test is in th
 **Goal:** a run survives a crash and resumes. No step runs twice. This is the demo that
 wins interviews.
 
-- [ ] Event-sourced run state: `run_events` table, fold-to-state replay
+- [x] Event-sourced run state: `run_events` table, fold-to-state replay (`core/events.py`, `core/fold.py`)
 - [ ] **Longevity structure** (`docs/DEVELOPMENT_STRUCTURE.md`): ports + injected adapters, import-linter contract, CI matrix 3.11/3.14 — **shipped at Phase 0 close**; remaining Phase 1 items:
-  - [ ] `schema_version`, `event_type`, `parent_run_id` on every event; upcaster registry
+  - [x] `schema_version`, `event_type`, `parent_run_id` on every event; upcaster registry (`core/upcast.py`)
   - [ ] `StepRequest`/`StepResult` with `effects`, `cost`, `provenance` (§2.1); budget enforced by the core
   - [ ] Model-vendor executors as `agentos-provider-*` plugins via entry points; core ships `echo` + `tool` only — the Phase 1 demo needs no vendor key
-  - [ ] SQLite store adapter beside Postgres; `tests/contract/` runs the same suite against both
-  - [ ] `tests/golden/v0.2.0.json` recorded at release; replay-compat CI job
+  - [~] SQLite store adapter (`store/sqlite.py`, stdlib) + Memory pass `tests/contract/`; Postgres adapter still to add to the same suite
+  - [~] golden corpus mechanism live (`tests/golden/`, `scripts/record_golden.py`, `v0.2.0-dev.json`); record `v0.2.0.json` at release
   - [ ] ADR 0006 core-depends-on-nothing, 0007 log-is-the-API, 0008 providers-are-plugins
   - [ ] **AI-engineering pass (§11)** — `EffectClass`, `Principal`, `BlobRef`, `BlobStore` port **shipped at Phase 0 close**; Phase 1 items:
     - [ ] A1 declare-then-do: `declared_effects` on the agent definition, checked before dispatch; undeclared effect → dead-letter + suspend
     - [ ] A2 `Principal` on every approve/cancel/resume event; `spend`/`write_external` gates require a human unless the workflow opts out
     - [ ] A3 capability aliases (`chat.fast`, …) resolved by provider plugins; `ExecutorSubstituted` event on change
-    - [ ] A4 events carry `BlobRef`; filesystem + SQLite `BlobStore` adapters; golden corpus stays small
+    - [~] A4 events carry `BlobRef`; SQLite + Memory `BlobStore` adapters; filesystem adapter still to add
     - [ ] A5 `progress()` callback renews the lease; rate-limited `StepProgress` events; expiry measured from last heartbeat
     - [ ] A6 metered `Cost{units, amount, currency, pricing_snapshot_hash}`; pricing table stored as a blob
     - [ ] A10 provider plugins tested against recorded cassettes; live re-record is a nightly opt-in job
 - [ ] Worker process consuming a Redis run queue (decoupled from the API)
 - [ ] Real tool agent (HTTP/subprocess) in core; LLM executors live in provider plugins (see longevity structure)
-- [ ] Idempotency keys on step execution; re-run after crash = no double call
+- [~] Idempotency keys on step execution (`run_id:step_id:sha256(inputs)`); completed steps replayed from the log, never re-executed — crash test itself lands with the worker
 - [ ] Redis execution lock per run (exactly-one-worker advancement)
 - [ ] State snapshots to bound replay cost
 - [ ] **Chaos suite** (`tests/chaos/`): deterministic fault points in the worker, run in CI on every PR — see *Chaos engineering plan* below. The `kill -9` demo is one case of it, not a one-off script.
