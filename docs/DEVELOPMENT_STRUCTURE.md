@@ -69,35 +69,44 @@ ledger *more* necessary, not less. That is the positioning that survives.
 
 ```python
 class Executor(Protocol):
-    def execute(self, req: StepRequest) -> StepResult: ...
+    def execute(self, req: StepRequest, progress: Callable[[float, str], None]) -> StepResult: ...
 
 @dataclass(frozen=True)
 class StepRequest:
     run_id: str; step_id: str; attempt: int
     idempotency_key: str            # run_id:step_id:hash(inputs)
-    inputs: bytes                   # opaque to the core; JSON by convention
+    inputs: BlobRef                 # sha256 + size + media type; bytes live in the BlobStore
+    declared_effects: frozenset[EffectClass]   # fixed BEFORE dispatch; the governor checks these
     budget: Budget                  # max cost, max wall time, allowed effect classes
     deadline: datetime
 
 @dataclass(frozen=True)
 class StepResult:
-    outputs: bytes                  # opaque to the core
-    effects: tuple[Effect, ...]     # every side effect the step claims to have caused
-    cost: Cost                      # tokens in/out, currency amount, provider, model id
-    provenance: Provenance          # executor name+version, model id, prompt hash
+    outputs: BlobRef                # opaque to the core
+    effects: tuple[Effect, ...]     # each carries an EffectClass ⊆ declared_effects, else dead-letter
+    cost: Cost                      # metered units + amount + pricing_snapshot_hash (§11 A6)
+    provenance: Provenance          # executor name+version, model alias→id, prompt hash
 ```
 
 Rules:
 
-- The core never inspects `inputs`/`outputs` beyond hashing them. A step may be a 2026
+- The core never inspects `inputs`/`outputs` beyond their hash. A step may be a 2026
   chat completion, a 2030 agentic loop that runs its own tools, or a 2033 system that
-  plans its own sub-workflow. To the core each is one step with recorded effects.
+  plans its own sub-workflow. To the core each is one step with declared and recorded effects.
+- **Declare-then-do.** `declared_effects` comes from the agent definition, not the
+  executor, and is checked against the budget and approval policy *before* dispatch. An
+  effect reported outside the declaration dead-letters the step and suspends the run
+  (§11 A1). This is what makes the gate a governor rather than an audit.
 - `effects` is the unit of idempotency. Replay returns the recorded `StepResult`; it never
   calls `execute` again for a completed `(run_id, step_id)`.
+- `progress()` renews the worker's lease and may append a rate-limited `StepProgress`
+  event, so an hour-long step is not mistaken for a dead worker (§11 A5).
 - `budget` is enforced by the core, not trusted to the executor: a step that reports cost
   above budget is `DEAD_LETTERED`, and a run whose rolling cost exceeds its ceiling is
   `SUSPENDED` for approval (DESIGN §8 "budget guardrails" becomes Phase 3 scope).
 - `provenance` is mandatory so a 2033 reader can tell which model produced a 2026 step.
+- Every approval, cancel and resume carries a `Principal{kind: human|agent|system}`;
+  gates on `spend`/`write_external` require a human unless the workflow opted out (§11 A2).
 
 ### 2.2 Providers are plugins, not core
 
@@ -232,3 +241,50 @@ Phase 1 gains these items (mirrored in `ROADMAP.md`):
 - That a solo portfolio project reaches year 7 — low regardless of structure (~20%).
   The structure raises the odds and, more importantly, makes an archive at year 3 a
   finished artifact rather than an abandoned one (§6 kill criteria).
+
+---
+
+## 11. AI-engineering review of §1–§9 (second pass, different lens)
+
+§0–§9 were written by a distributed-systems engineer. This section asks the questions an
+AI engineer asks of the same structure, using what has actually happened to agent stacks
+between 2023 and 2026: models deprecated within a year of launch, tool-calling formats
+diverging per vendor and then converging on MCP, payloads turning multimodal, agents
+approving agents, steps running for an hour, prompts containing personal data. Each
+finding names the change to §1–§9 it forces. Findings marked **now** are folded into
+Phase 1 scope in `ROADMAP.md`; the rest are Phase 2–3.
+
+| # | Finding | Why §1–§9 as written does not survive it | Change |
+| --- | --- | --- | --- |
+| A1 | **Effects are declared after the fact.** §2.1 says `effects` is "every side effect the step claims to have caused". A gate that learns about a wire transfer *after* it happened is an audit, not a governor. | The approval gate (C7) and budget (§2.1) can only refuse what they see before it happens. Post-hoc effects make the governor decorative exactly when autonomy rises. | **Declare-then-do (now).** `StepRequest.declared_effects: tuple[EffectClass, ...]` is fixed *before* execution from the agent definition; the core checks it against `budget.allowed_effect_classes` and the approval policy *before* dispatch. An executor that reports an effect class it did not declare is `DEAD_LETTERED` and the run `SUSPENDED`. Effect classes are a closed enum owned by the core (`read`, `compute`, `write_external`, `spend`, `send_message`, `execute_code`, `spawn_run`). |
+| A2 | **Approvers have no principal type.** DESIGN §4.4 and C7 record "who approved". In 2026 a reviewer is already often another agent. | "Human-in-the-loop" silently becomes "agent-in-the-loop" and no invariant catches it. | **Principals (now).** `Principal{kind: human \| agent \| system, id, attestation}` on every approval, cancel and resume event. Default policy: approval gates require `kind == human`; overriding is a per-workflow setting recorded as an event. Invariant: no run with `spend` or `write_external` completes without a human principal on its gate unless the workflow explicitly opted out. |
+| A3 | **Model deprecation mid-run.** Vendors retire models in 6–18 months. A run `SUSPENDED` for a week of approvals can wake up to a model that no longer exists. Provenance tells you what *was* used, not what to do *now*. | Runs that cannot be resumed rot in `SUSPENDED`; or worse, silently resume on a different model with no record. | **Model aliases + substitution events (Phase 1).** Agent definitions reference a *capability alias* (`chat.fast`, `chat.reasoning`) resolved by a provider plugin at dispatch. If resolution changes between attempts, the core appends `ExecutorSubstituted{from, to, reason, principal}` before the step runs. Completed steps are never re-executed (C1), so substitution only ever affects future steps. |
+| A4 | **Payloads will not stay text.** §3 puts `inputs`/`outputs` in the event log. Images, audio and video in Postgres rows kill operability by year 3 (§7). | Log bloat, slow replay, backups that cannot complete. | **Content-addressed `BlobStore` port (now, port only).** Events carry `sha256` + size + media type; bytes live in a blob adapter (filesystem, S3-compatible, SQLite). Events stay small forever; replay never needs the bytes; golden corpus (§5.3) stays committable. |
+| A5 | **Long-running steps look dead.** A 2026 agentic step already runs for tens of minutes; §2.1 is request/response. A lease-based worker (C6) sees no progress and expires the lease. | False crash detection → duplicate execution attempts → the exact bug class C1 exists to prevent. | **Heartbeat + `StepProgress` (Phase 1).** Executors receive a `progress()` callback; each call renews the lease and may append a `StepProgress{fraction, note}` event (rate-limited). Lease expiry is measured from the last heartbeat, not step start. `budget.max_wall_time` still hard-caps. |
+| A6 | **Cost is token-shaped.** §2.1 `Cost` = tokens in/out + currency. Pricing already includes per-second GPU, per-request, per-image, cached-token discounts; prices change monthly. | Historic costs become unexplainable when prices move; non-token providers cannot report. | **Generic metered cost (Phase 1).** `Cost{units: tuple[Meter{name, quantity}], amount, currency, pricing_snapshot_hash}`. The pricing table used is content-addressed and stored as a blob, so "why did run #4821 cost $2.10" is answerable in 2033. |
+| A7 | **Append-only vs. the right to erasure.** Prompts contain personal data. §3 forbids deleting events; regulation requires deleting data. | Either the log is mutable (breaks §3) or the project is undeployable for real users. | **Crypto-shredding (Phase 2).** Payload blobs (A4) are encrypted with a per-run data key kept in a `KeyStore` port; erasure = destroy the key and append `RunErased{principal, reason}`. The log remains append-only and replayable to *structure*; content is gone. |
+| A8 | **Tool-protocol churn.** Function-calling formats differed per vendor; MCP (2024) and A2A (2025) are the current convergence; neither will be the last. §1 has no place for them. | Protocol code leaks into executors or, worse, the core. | **`agentos/protocols/` adapter layer (Phase 2).** Tools are described to the core by JSON Schema only. MCP, A2A, and vendor-native function calling are adapters that translate to/from that. Tool *results* are data, never prompt (C12). |
+| A9 | **Observability speaks a private dialect.** §5/§7 emit OTel spans with whatever attribute names we pick. | 2030 tooling cannot read 2026 traces. | **OpenTelemetry GenAI semantic conventions (Phase 3).** Use `gen_ai.*` attributes for model, tokens, provider; AgentOS-specific attributes namespaced `agentos.*`. Costs and effects also exported as span events. |
+| A10 | **Provider plugins are untestable once the model is gone.** §2.2 plugins pin an SDK; their tests call a live model that will be deprecated. | Plugins rot silently; CI goes red for reasons no one can fix. | **Record/replay fixtures (Phase 1, with the first plugin).** Every provider test runs against recorded HTTP cassettes; a nightly opt-in job re-records against the live vendor. A plugin whose live job fails for 30 days is marked `deprecated` in its own README, not in core. |
+| A11 | **Evals are not the control plane's job, but its data is.** Model swaps (A3) change outputs; someone must measure that. §5 tests correctness of the *log*, not quality of the *steps*. | Temptation to grow an eval framework inside AgentOS (scope creep; opik exists). | **Export, don't evaluate (Phase 3).** `agentos export-run --format jsonl` emits every step's inputs/outputs by hash plus provenance so an external evaluator (opik, custom) can diff runs across models. AgentOS never scores; it records. |
+| A12 | **Operator kill switch.** §2.4 governs per-run. Nothing stops *all* runs at once when a provider misbehaves or a prompt-injection wave hits. | The one control every incident review asks for is missing. | **Global pause (Phase 2).** `agentos pause --all` appends `SchedulerPaused{principal}`; workers finish in-flight steps and dispatch nothing new; `resume --all` reverses it. Both are events, so the pause is in the audit trail. |
+
+### What this pass leaves unchanged
+
+- The core-depends-on-nothing rule (§1) and import-linter contracts hold; every item
+  above is a port, an event type, or a plugin.
+- The event log remains the public API (§3); every item above *adds* event types
+  (`ExecutorSubstituted`, `StepProgress`, `RunErased`, `SchedulerPaused`) and never
+  changes an existing one.
+- Kill criteria (§6) stand.
+
+### Confidence (this section)
+
+- A1 declare-then-do and A2 principals being the two controls that matter most as
+  autonomy rises — 90%; both are structural, cheap now, and impossible to retrofit into
+  a log that has already recorded agent-approved spends as "approved".
+- A3 model deprecation cadence (6–18 months) — 90%, observed 2023–2026 across vendors.
+- A8 MCP/A2A being the current convergence — 85% from memory; neither being the last
+  protocol — 95%.
+- A9 OTel GenAI semantic conventions being the right export dialect — 80%; they are
+  still marked incubating, so pin the version used.
