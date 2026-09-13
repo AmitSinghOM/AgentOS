@@ -22,6 +22,9 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "network: needs real Postgres + Toxiproxy (tests/chaos/network); skipped without AGENTOS_TEST_PG_DSN",
+]
 
 # Layering contract (docs/DEVELOPMENT_STRUCTURE.md §1). `lint-imports` runs in CI;
 # a PR that makes the core depend on an adapter or an SDK fails.

@@ -102,7 +102,10 @@ without repeating step 2. Show the event log. **Now a test:** `pytest tests/chao
 - [ ] **C5** — first-class cancel/pause; client disconnect never changes run state ([#5](https://github.com/AmitSinghOM/AgentOS/issues/5))
 - [ ] **C9** — one execution model: every DAG node is a durable step ([#9](https://github.com/AmitSinghOM/AgentOS/issues/9))
 - [ ] **C11** — `DEAD_LETTERED` step state with cause and a retry path ([#11](https://github.com/AmitSinghOM/AgentOS/issues/11))
-- [ ] **Chaos, network class:** Toxiproxy in compose between worker ↔ Postgres/Redis; `lease_expiry_race` (add 2 s latency to Postgres so a live worker's lease lapses while a 2nd worker starts) → exactly one advancement, the stale worker's write is rejected (C6 split-brain); `redis_partition_mid_run` → retry timers survive; `pg_latency_under_fanout` → fan-in waits, no branch output lost (C4)
+- [~] **Chaos, network class:** Toxiproxy between worker ↔ Postgres (`tests/chaos/network/`, CI job `chaos-network` with Postgres + Toxiproxy service containers)
+  - [x] `lease_expiry_race` — 2 s latency on worker A's link so its lease lapses mid-step; worker B finishes; A's late write is rejected **by the fence** (asserted on the rejection reason, not just seq) (C6 split-brain). Also fixed: fence now recorded at `acquire`, not first write, closing the window between takeover and B's first append
+  - [ ] `coordination_partition_mid_run` → run resumes via recovery sweep once the link returns
+  - [ ] `pg_latency_under_fanout` → fan-in waits, no branch output lost (C4)
 - [ ] **A7** crypto-shredding: per-run data key in a `KeyStore` port; erasure = destroy key + `RunErased` event; log stays append-only
 - [ ] **A8** `agentos/protocols/`: tools described by JSON Schema; MCP / A2A / vendor function-calling are adapters; tool results are data, never prompt
 - [ ] **A12** global pause: `agentos pause --all` / `resume --all` as `SchedulerPaused` / `SchedulerResumed` events; workers finish in-flight steps, dispatch nothing new
