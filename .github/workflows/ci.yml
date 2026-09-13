@@ -24,13 +24,20 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Floor we promise and the newest interpreter we develop on
+        # (docs/DEVELOPMENT_STRUCTURE.md §4). Both must stay green.
+        python: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
       - run: pip install -e ".[dev]"
       - run: ruff check .
+      - run: lint-imports
       - run: pytest -q
 
   compose:

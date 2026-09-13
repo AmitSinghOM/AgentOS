@@ -42,34 +42,43 @@ class WorkflowDefinition(BaseModel):
     name: str
     nodes: list[WorkflowNode]
 
-    def validate_dag(self) -> None:
-        """Reject cycles and dangling dependencies before a run ever starts."""
+    def topological_order(self) -> list[str]:
+        """Return node IDs in dependency order (Kahn's algorithm).
+
+        Raises ValueError on a dangling dependency or a cycle. This is the single
+        implementation of DAG validity; `validate_dag()` is a thin alias so the
+        API boundary and the engine can never disagree about what a valid DAG is.
+        """
         ids = {n.id for n in self.nodes}
         for n in self.nodes:
             for dep in n.depends_on:
                 if dep not in ids:
-                    raise ValueError(
-                        f"node {n.id!r} depends on unknown node {dep!r}"
-                    )
-        # cycle check via DFS
-        edges = {n.id: n.depends_on for n in self.nodes}
-        WHITE, GREY, BLACK = 0, 1, 2
-        color = dict.fromkeys(ids, WHITE)
+                    raise ValueError(f"node {n.id!r} depends on unknown node {dep!r}")
 
-        def visit(node: str) -> None:
-            color[node] = GREY
-            for dep in edges[node]:
-                if color[dep] == GREY:
-                    raise ValueError(
-                        f"workflow {self.name!r} has a cycle at {node!r}"
-                    )
-                if color[dep] == WHITE:
-                    visit(dep)
-            color[node] = BLACK
+        indegree = {n.id: len(n.depends_on) for n in self.nodes}
+        dependents: dict[str, list[str]] = {nid: [] for nid in ids}
+        for n in self.nodes:
+            for dep in n.depends_on:
+                dependents[dep].append(n.id)
 
-        for node in ids:
-            if color[node] == WHITE:
-                visit(node)
+        # Deterministic order: sort ready nodes so replays are reproducible.
+        ready = sorted(nid for nid, d in indegree.items() if d == 0)
+        order: list[str] = []
+        while ready:
+            nid = ready.pop(0)
+            order.append(nid)
+            for child in sorted(dependents[nid]):
+                indegree[child] -= 1
+                if indegree[child] == 0:
+                    ready.append(child)
+        if len(order) != len(self.nodes):
+            stuck = sorted(nid for nid, d in indegree.items() if d > 0)
+            raise ValueError(f"workflow {self.name!r} has a cycle at {stuck[0]!r}")
+        return order
+
+    def validate_dag(self) -> None:
+        """Reject cycles and dangling dependencies before a run ever starts."""
+        self.topological_order()
 
 
 class RunStatus(str, Enum):

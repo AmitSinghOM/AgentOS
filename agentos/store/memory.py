@@ -1,5 +1,7 @@
-"""In-memory store for Phase 0. The method surface is the contract the engine
-depends on, so Phase 1 can drop in a Postgres-backed store with no engine changes."""
+"""In-memory store for Phase 0. Implements `agentos.core.ports.Store`.
+
+Phase 1 adds Postgres and SQLite adapters that pass the same contract test suite
+(tests/contract/), so the engine never changes when the store does."""
 from __future__ import annotations
 
 from agentos.core.models import Agent, WorkflowDefinition, WorkflowRun
@@ -34,6 +36,3 @@ class MemoryStore:
 
     def get_run(self, run_id: str) -> WorkflowRun | None:
         return self._runs.get(run_id)
-
-
-store = MemoryStore()

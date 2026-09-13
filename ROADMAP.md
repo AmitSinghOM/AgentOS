@@ -42,8 +42,15 @@ labelled `landscape-con`; an issue closes only when its acceptance test is in th
 wins interviews.
 
 - [ ] Event-sourced run state: `run_events` table, fold-to-state replay
+- [ ] **Longevity structure** (`docs/DEVELOPMENT_STRUCTURE.md`): ports + injected adapters, import-linter contract, CI matrix 3.11/3.14 — **shipped at Phase 0 close**; remaining Phase 1 items:
+  - [ ] `schema_version`, `event_type`, `parent_run_id` on every event; upcaster registry
+  - [ ] `StepRequest`/`StepResult` with `effects`, `cost`, `provenance` (§2.1); budget enforced by the core
+  - [ ] Model-vendor executors as `agentos-provider-*` plugins via entry points; core ships `echo` + `tool` only — the Phase 1 demo needs no vendor key
+  - [ ] SQLite store adapter beside Postgres; `tests/contract/` runs the same suite against both
+  - [ ] `tests/golden/v0.2.0.json` recorded at release; replay-compat CI job
+  - [ ] ADR 0006 core-depends-on-nothing, 0007 log-is-the-API, 0008 providers-are-plugins
 - [ ] Worker process consuming a Redis run queue (decoupled from the API)
-- [ ] Real LLM agent (Bedrock or OpenAI) + a tool agent
+- [ ] Real tool agent (HTTP/subprocess) in core; LLM executors live in provider plugins (see longevity structure)
 - [ ] Idempotency keys on step execution; re-run after crash = no double call
 - [ ] Redis execution lock per run (exactly-one-worker advancement)
 - [ ] State snapshots to bound replay cost
