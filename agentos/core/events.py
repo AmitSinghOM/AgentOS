@@ -165,6 +165,37 @@ class RunResumed(ControlEvent):
     event_type: ClassVar[str] = "run.resumed"
 
 
+# ---- human-in-the-loop (C7, DESIGN §4.4). Approval is a run state, not a library
+# pattern: the gated step has NOT started when approval.requested is appended, and its
+# step.started must have a higher seq than approval.granted.
+
+class ApprovalRequested(Event):
+    event_type: ClassVar[str] = "approval.requested"
+    approval_id: str
+    step_id: str
+    effect_classes: list[EffectClass]     # the declared classes that need a decision
+    reason: str = ""
+    expires_at: datetime | None = None
+
+
+class RunSuspended(Event):
+    """Not terminal. Lease released, run leaves the queue, no resources held while a
+    human decides — hours or days (DESIGN §4.4)."""
+    event_type: ClassVar[str] = "run.suspended"
+
+
+class ApprovalGranted(ControlEvent):
+    event_type: ClassVar[str] = "approval.granted"
+    approval_id: str
+    step_id: str
+
+
+class ApprovalRejected(ControlEvent):
+    event_type: ClassVar[str] = "approval.rejected"
+    approval_id: str
+    step_id: str
+
+
 CONTROL_REQUEST_TYPES = (RunCancelRequested, RunPauseRequested)
 
 
@@ -172,13 +203,15 @@ EVENT_TYPES: dict[str, type[Event]] = {
     cls.event_type: cls
     for cls in (RunStarted, StepStarted, StepProgress, StepCompleted, StepDeadLettered,
                 StepFailed, StepRetryRequested, StepCancelled, RunCompleted, RunFailed,
-                RunCancelRequested, RunCancelled, RunPauseRequested, RunPaused, RunResumed)
+                RunCancelRequested, RunCancelled, RunPauseRequested, RunPaused, RunResumed,
+                ApprovalRequested, RunSuspended, ApprovalGranted, ApprovalRejected)
 }
 
 EventTypeName = Literal[
     "run.started", "step.started", "step.progress", "step.completed", "step.dead_lettered",
     "step.failed", "step.retry_requested", "step.cancelled", "run.completed", "run.failed",
     "run.cancel_requested", "run.cancelled", "run.pause_requested", "run.paused", "run.resumed",
+    "approval.requested", "run.suspended", "approval.granted", "approval.rejected",
 ]
 
 

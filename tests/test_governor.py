@@ -77,11 +77,14 @@ def _wf(budget: Budget | None = None, agents=("a1", "a2")) -> WorkflowDefinition
 # ------------------------------------------------------------- declare-then-do (A1)
 
 def test_declared_effect_outside_budget_is_refused_before_dispatch():
+    """Tier 3 of the gate: a class in neither `allowed` nor `approval_required_for` is
+    dead-lettered before the executor runs. (`spend` is tier 2 since Phase 3 — it suspends
+    for approval instead; see tests/test_approvals.py.)"""
     a1 = Agent(name="a1", type=AgentType.echo)                       # compute only
     a2 = Agent(name="a2", type=AgentType.echo,
-               declared_effects=[EffectClass.compute, EffectClass.spend])
-    ex = ScriptedExecutor({"a1": _result(), "a2": _result(effects=[EffectClass.spend])})
-    store, eng = _engine([a1, a2], _wf(), ex)                        # default budget: read+compute
+               declared_effects=[EffectClass.compute, EffectClass.spawn_run])
+    ex = ScriptedExecutor({"a1": _result(), "a2": _result(effects=[EffectClass.spawn_run])})
+    store, eng = _engine([a1, a2], _wf(), ex)                        # default budget
 
     run = eng.start_run("w")
 
@@ -90,10 +93,10 @@ def test_declared_effect_outside_budget_is_refused_before_dispatch():
     events = store.read_events(run.id)
     dl = [e for e in events if isinstance(e, StepDeadLettered)]
     assert len(dl) == 1 and dl[0].step_id == "s2"
-    assert dl[0].effect_class is EffectClass.spend and "not allowed" in dl[0].cause
+    assert dl[0].effect_class is EffectClass.spawn_run and "not allowed" in dl[0].cause
     assert run.dead_lettered == {"s2": dl[0].cause}
     started = [e for e in events if isinstance(e, StepStarted) and e.step_id == "s2"]
-    assert started[0].declared_effects == [EffectClass.compute, EffectClass.spend]
+    assert started[0].declared_effects == [EffectClass.compute, EffectClass.spawn_run]
 
 
 def test_declared_and_allowed_effect_runs():

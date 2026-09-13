@@ -81,6 +81,14 @@ curl -X POST localhost:8000/runs/{run_id}/pause
 curl -X POST localhost:8000/runs/{run_id}/resume
 curl -X POST localhost:8000/runs/{run_id}/cancel
 
+# human-in-the-loop: a step whose agent declares spend / write_external / send_message /
+# execute_code suspends the run BEFORE it runs. Decide from the inbox; the decision and
+# who made it are in the log; the step then runs exactly once.
+curl localhost:8000/approvals
+curl -X POST localhost:8000/runs/{run_id}/approvals/{approval_id}/approve \
+     -H 'Content-Type: application/json' \
+     -d '{"principal": {"kind": "human", "id": "amit"}, "reason": "within budget"}'
+
 # or run synchronously in the API process (Phase 0 behaviour)
 curl -X POST 'localhost:8000/workflows/hello/runs?sync=true'
 ```
