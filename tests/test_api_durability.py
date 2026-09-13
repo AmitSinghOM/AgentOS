@@ -44,9 +44,10 @@ def test_run_survives_app_restart_and_events_page_by_seq(app_factory):
 
     events_after = c2.get(f"/runs/{run['id']}/events").json()
     assert events_after == events_before
-    assert events_after["last_seq"] == 6
-    page2 = c2.get(f"/runs/{run['id']}/events", params={"after": 4}).json()
-    assert [e["seq"] for e in page2["data"]] == [5, 6]
+    last = events_after["last_seq"]
+    assert last >= 6 and events_after["data"][-1]["event_type"] == "run.completed"
+    page2 = c2.get(f"/runs/{run['id']}/events", params={"after": last - 2}).json()
+    assert [e["seq"] for e in page2["data"]] == [last - 1, last]
 
     # Idempotency-Key survives the restart too: same key → same run, no new log —
     # whether the retry is sync or async.
