@@ -3,7 +3,9 @@
 > A control plane for orchestrating multi-step LLM agent workflows with
 > **durable execution**, **human-in-the-loop approvals**, and **full observability**.
 
-Status: Phase 0 (walking skeleton). This document drives the build; it is updated as decisions change.
+Status: Phase 0 shipped (`v0.1.0-skeleton`). This document drives the build; it is updated as decisions change.
+How the build is structured to outlive its dependencies and model generations is in
+[docs/DEVELOPMENT_STRUCTURE.md](./docs/DEVELOPMENT_STRUCTURE.md).
 
 ---
 
