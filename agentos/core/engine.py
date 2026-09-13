@@ -1,61 +1,164 @@
 """Workflow engine.
 
-Phase 0 executes synchronously in topological order. Phase 1 makes execution durable
-and asynchronous; the public shape stays the same.
+Phase 1 slice 1: every state change is an appended event; run state is only ever the
+fold of the log; a step that already has a `step.completed` event is replayed from the
+log, never re-executed (C1). Execution is still synchronous in-process — the worker
+process, per-run lease and crash-resume arrive in the next slice, and they reuse
+`advance()` unchanged.
 
-The engine depends only on the ports in `agentos.core.ports`. Stores and executors are
-injected; the engine never imports an adapter. `import-linter` enforces this in CI.
+The engine depends only on the ports in `agentos.core.ports`.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from uuid import uuid4
 
-from agentos.core.models import RunStatus, StepResult, WorkflowDefinition, WorkflowRun
-from agentos.core.ports import Executor, Store
+from agentos.core.events import (
+    Event,
+    RunCompleted,
+    RunFailed,
+    RunStarted,
+    StepCompleted,
+    StepFailed,
+    StepStarted,
+)
+from agentos.core.fold import fold
+from agentos.core.models import Principal, WorkflowDefinition, WorkflowRun
+from agentos.core.ports import BlobStore, Executor, Store
+
+
+def _canonical(obj: dict) -> bytes:
+    """Stable JSON bytes: sorted keys, no whitespace. Same inputs → same hash → same
+    idempotency key across processes and Python versions."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str).encode()
+
+
+def idempotency_key(run_id: str, step_id: str, inputs: dict) -> str:
+    return f"{run_id}:{step_id}:{hashlib.sha256(_canonical(inputs)).hexdigest()}"
 
 
 class Engine:
-    def __init__(self, store: Store, executors: Mapping[str, Executor]) -> None:
+    def __init__(self, store: Store, blobs: BlobStore,
+                 executors: Mapping[str, Executor]) -> None:
         """`executors` maps an AgentType value (e.g. "echo") to the adapter that runs it."""
         self._store = store
+        self._blobs = blobs
         self._executors = executors
 
-    def run_workflow(self, wf_name: str) -> WorkflowRun:
+    # ----------------------------------------------------------------- queries
+    def get_run(self, run_id: str, *, hydrate: bool = True) -> WorkflowRun | None:
+        events = self._store.read_events(run_id)
+        if not events:
+            return None
+        run = fold(events)
+        if hydrate:
+            for step in run.steps:
+                if step.output_ref is not None:
+                    step.output = json.loads(self._blobs.get(step.output_ref))
+        return run
+
+    # ---------------------------------------------------------------- commands
+    def start_run(self, wf_name: str, *, request_id: str | None = None,
+                  principal: Principal | None = None) -> WorkflowRun:
+        """Start (or, for a repeated request_id, return) a run and drive it to a
+        terminal state. Idempotent on request_id (DESIGN §6)."""
         wf = self._store.get_workflow(wf_name)
         if wf is None:
             raise KeyError(f"unknown workflow {wf_name!r}")
 
-        run = WorkflowRun(workflow=wf_name, status=RunStatus.running)
-        self._store.put_run(run)
+        request_id = request_id or uuid4().hex
+        existing = self._store.run_id_for_request(request_id)
+        if existing is not None:
+            run = self.get_run(existing)
+            assert run is not None
+            return run
+
+        run_id = uuid4().hex
+        self._store.append_events(run_id, 0, [RunStarted(
+            run_id=run_id, workflow=wf.name, workflow_version=wf.version,
+            request_id=request_id, principal=principal,
+        )])
+        return self.advance(run_id)
+
+    def advance(self, run_id: str) -> WorkflowRun:
+        """Drive a run from its current log position to a terminal state.
+
+        Re-entrant by construction: it re-derives everything from the log, skips steps
+        that already completed, and appends with optimistic concurrency, so calling it
+        twice — or from two processes — cannot double-execute a step."""
+        run = self.get_run(run_id, hydrate=False)
+        if run is None:
+            raise KeyError(f"unknown run {run_id!r}")
+        if run.status.value in ("completed", "failed"):
+            return self.get_run(run_id)  # already terminal; nothing to do
+
+        wf = self._store.get_workflow(run.workflow)
+        if wf is None:
+            return self._fail(run, f"workflow {run.workflow!r} no longer exists")
+        if wf.version != run.workflow_version:
+            # C3: never resume a run against a definition it did not start with.
+            return self._fail(
+                run,
+                f"workflow {wf.name!r} is v{wf.version} but run pinned v{run.workflow_version}",
+            )
+
         by_id = {n.id: n for n in wf.nodes}
-        outputs: dict[str, dict] = {}
+        done = {s.node_id: s for s in run.steps}
+        outputs: dict[str, dict] = {
+            sid: json.loads(self._blobs.get(s.output_ref))
+            for sid, s in done.items() if s.output_ref is not None
+        }
 
-        try:
-            for node_id in wf.topological_order():
-                node = by_id[node_id]
-                agent = self._store.get_agent(node.agent)
-                if agent is None:
-                    raise KeyError(
-                        f"node {node_id!r} references unknown agent {node.agent!r}"
-                    )
-                executor = self._executors.get(agent.type.value)
-                if executor is None:
-                    raise KeyError(
-                        f"no executor registered for agent type {agent.type.value!r}"
-                    )
-                upstream = {dep: outputs[dep] for dep in node.depends_on}
+        for step_id in wf.topological_order():
+            if step_id in done:
+                continue  # replayed from the log — the C1 invariant in one line
+            node = by_id[step_id]
+            upstream = {dep: outputs[dep] for dep in node.depends_on}
+            key = idempotency_key(run_id, step_id, upstream)
+            attempt = run.attempts.get(step_id, 0) + 1
+
+            agent = self._store.get_agent(node.agent)
+            if agent is None:
+                return self._fail(run, f"node {step_id!r} references unknown agent "
+                                       f"{node.agent!r}", step_id=step_id)
+            executor = self._executors.get(agent.type.value)
+            if executor is None:
+                return self._fail(run, f"no executor registered for agent type "
+                                       f"{agent.type.value!r}", step_id=step_id)
+
+            run = self._append(run, StepStarted(
+                run_id=run_id, step_id=step_id, attempt=attempt, agent=agent.name,
+                idempotency_key=key,
+            ))
+            try:
                 output = executor.execute(agent, upstream)
-                outputs[node_id] = output
-                run.steps.append(StepResult(node_id=node_id, output=output))
-            run.status = RunStatus.completed
-        except Exception as exc:  # noqa: BLE001 — top-level run boundary
-            run.status = RunStatus.failed
-            run.error = str(exc)
-        finally:
-            run.ended_at = datetime.now(UTC)
-            self._store.put_run(run)
-        return run
+            except Exception as exc:  # noqa: BLE001 — step boundary; recorded, not raised
+                run = self._append(run, StepFailed(
+                    run_id=run_id, step_id=step_id, attempt=attempt, error=str(exc),
+                ))
+                return self._fail(run, f"step {step_id!r} failed: {exc}", step_id=step_id)
+
+            ref = self._blobs.put(_canonical(output))
+            run = self._append(run, StepCompleted(
+                run_id=run_id, step_id=step_id, attempt=attempt,
+                idempotency_key=key, output_ref=ref,
+            ))
+            outputs[step_id] = output
+            done[step_id] = run.steps[-1]
+
+        self._append(run, RunCompleted(run_id=run_id))
+        return self.get_run(run_id)  # type: ignore[return-value]
+
+    # ---------------------------------------------------------------- helpers
+    def _append(self, run: WorkflowRun, event: Event) -> WorkflowRun:
+        self._store.append_events(run.id, run.last_seq, [event])
+        return self.get_run(run.id, hydrate=False)  # type: ignore[return-value]
+
+    def _fail(self, run: WorkflowRun, error: str, *, step_id: str | None = None) -> WorkflowRun:
+        self._append(run, RunFailed(run_id=run.id, error=error, step_id=step_id))
+        return self.get_run(run.id)  # type: ignore[return-value]
 
 
-__all__ = ["Engine", "WorkflowDefinition"]
+__all__ = ["Engine", "WorkflowDefinition", "idempotency_key"]
