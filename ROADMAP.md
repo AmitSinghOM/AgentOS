@@ -104,10 +104,12 @@ because no vendor key is needed for anything Phase 2 proves.
 **What I'd do differently:** record the fence at `acquire()` from the start. Recording it on
 first write left a takeover window that only designing the Toxiproxy test made visible.
 
-## Phase 2 — DAG Orchestration  ·  ~2-3 weekends
-**Goal:** real multi-agent workflows, not just sequences.
+## Phase 2 — DAG Orchestration  ·  ~2-3 weekends  ·  ✅ shipped `v0.3.0-dag` (2026-09-13)
+**Goal:** real multi-agent workflows, not just sequences. **Met:** fan-out/fan-in with a
+flaky branch retrying (`tests/test_scheduler.py`), the governor, dead-letter + human retry,
+cancel/pause, agent versioning. Items marked ⏭ carried forward — see the dated decision.
 
-- [ ] Workflow = DAG (nodes + dependency edges); validate acyclic
+- [x] Workflow = DAG (nodes + dependency edges); validate acyclic (`WorkflowDefinition.topological_order()`, single implementation since Phase 0 close)
 - [x] Topological scheduler: run all ready nodes, parallelize independent branches — wave scheduler in `core/engine.py`, bounded by `WorkflowDefinition.max_parallelism` (default 4); appends serialized through one `_Log` per `advance()`
 - [x] Agent versioning: `Agent.version`, immutable per `(name, version)` in every store (409 on a changed body — bump the version); `run.started.agent_versions` pins every agent at start and each attempt resolves against the pin (`step.started.agent_version`), so redeploying an agent never changes a running workflow; `GET /agents/{name}?version=N`
 - [x] Retry with exponential backoff + max attempts — `WorkflowNode.retry: RetryPolicy{max_attempts, backoff_seconds, backoff_multiplier, max_backoff_seconds}`; `step.failed(terminal=False, retry_at)`; the worker re-pushes with `delay_seconds` (queue-tracked, no Redis needed)
@@ -119,15 +121,27 @@ first write left a takeover window that only designing the Toxiproxy test made v
 - [x] **C11** — `DEAD_LETTERED` step state with cause and a retry path ([#11](https://github.com/AmitSinghOM/AgentOS/issues/11))
 - [~] **Chaos, network class:** Toxiproxy between worker ↔ Postgres (`tests/chaos/network/`, CI job `chaos-network` with Postgres + Toxiproxy service containers)
   - [x] `lease_expiry_race` — 2 s latency on worker A's link so its lease lapses mid-step; worker B finishes; A's late write is rejected **by the fence** (asserted on the rejection reason, not just seq) (C6 split-brain). Also fixed: fence now recorded at `acquire`, not first write, closing the window between takeover and B's first append
-  - [ ] `coordination_partition_mid_run` → run resumes via recovery sweep once the link returns
-  - [ ] `pg_latency_under_fanout` → fan-in waits, no branch output lost (C4)
-- [ ] **A7** crypto-shredding: per-run data key in a `KeyStore` port; erasure = destroy key + `RunErased` event; log stays append-only
-- [ ] **A8** `agentos/protocols/`: tools described by JSON Schema; MCP / A2A / vendor function-calling are adapters; tool results are data, never prompt
-- [ ] **A12** global pause: `agentos pause --all` / `resume --all` as `SchedulerPaused` / `SchedulerResumed` events; workers finish in-flight steps, dispatch nothing new
+  - [ ] ⏭ `coordination_partition_mid_run` → run resumes via recovery sweep once the link returns
+  - [ ] ⏭ `pg_latency_under_fanout` → fan-in waits, no branch output lost (C4)
+- [ ] ⏭ **A7** crypto-shredding: per-run data key in a `KeyStore` port; erasure = destroy key + `RunErased` event; log stays append-only
+- [ ] ⏭ **A8** `agentos/protocols/`: tools described by JSON Schema; MCP / A2A / vendor function-calling are adapters; tool results are data, never prompt
+- [ ] ⏭ **A12** global pause: `agentos pause --all` / `resume --all` as `SchedulerPaused` / `SchedulerResumed` events; workers finish in-flight steps, dispatch nothing new
 
 **Demo:** a fan-out/fan-in workflow (1 → [2,3,4 parallel] → 5) with one branch failing
 and retrying.
 **Tag:** `v0.3.0-dag`. **Post:** "Retry Without Data Corruption" + "CQRS & Event Sourcing, for real."
+
+**Carry-forward decision (2026-09-13).** Phase 2 is tagged with its goal met and the ⏭ items
+not done. A7 (crypto-shredding) and A8 (protocol adapters) have no consumer until real
+provider plugins and real payloads exist, which is Phase 3+; building them against the echo
+executor would be speculative. A12 (global pause) is one event type on top of the per-run
+control shipped here and is deferred to land with the operator surface in Phase 3. The two
+Toxiproxy scenarios are deferred because both need the network-partition toxic, which the
+current fixture does not model yet; they stay as checkboxes, not deletions.
+
+**What I'd do differently:** design the Toxiproxy test before the fencing code (it found two
+windows the code had); and set `progress()` as the cancellation token from the start rather
+than considering a signature change first.
 
 ## Phase 3 — Human-in-the-Loop + Observability  ·  ~2-3 weekends
 **Goal:** production-shaped — pausable, traceable, costed.
