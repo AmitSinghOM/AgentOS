@@ -16,7 +16,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
-from agentos.core.models import BlobRef, EffectClass, Principal
+from agentos.core.models import BlobRef, Cost, Effect, EffectClass, Principal, Provenance
 
 CURRENT_SCHEMA_VERSION = 1
 
@@ -66,6 +66,33 @@ class StepCompleted(Event):
     attempt: int
     idempotency_key: str
     output_ref: BlobRef                   # bytes live in the BlobStore (§11 A4)
+    # Added in v0.3.0 (additive; older logs default these — see tests/golden/v0.2.0.json)
+    effects: list[Effect] = Field(default_factory=list)
+    cost: Cost = Field(default_factory=Cost)
+    provenance: Provenance | None = None
+
+
+class StepProgress(Event):
+    """Heartbeat with a human-readable position, rate-limited by the engine (§11 A5).
+    Also renews the lease, so an hour-long step is not mistaken for a dead worker."""
+
+    event_type: ClassVar[str] = "step.progress"
+    step_id: str
+    attempt: int
+    fraction: float                       # 0..1
+    note: str = ""
+
+
+class StepDeadLettered(Event):
+    """Poison step (C11 / §11 A1): the step will not be retried; the run fails with the
+    cause in the log. `POST /runs/{id}/steps/{step}/retry` (later) replays from here."""
+
+    event_type: ClassVar[str] = "step.dead_lettered"
+    step_id: str
+    attempt: int
+    cause: str
+    effect_class: EffectClass | None = None   # set when the cause is an undeclared effect
+    cost: Cost = Field(default_factory=Cost)  # what it cost before it was refused
 
 
 class StepFailed(Event):
@@ -88,12 +115,13 @@ class RunFailed(Event):
 
 EVENT_TYPES: dict[str, type[Event]] = {
     cls.event_type: cls
-    for cls in (RunStarted, StepStarted, StepCompleted, StepFailed, RunCompleted, RunFailed)
+    for cls in (RunStarted, StepStarted, StepProgress, StepCompleted, StepDeadLettered,
+                StepFailed, RunCompleted, RunFailed)
 }
 
 EventTypeName = Literal[
-    "run.started", "step.started", "step.completed", "step.failed",
-    "run.completed", "run.failed",
+    "run.started", "step.started", "step.progress", "step.completed", "step.dead_lettered",
+    "step.failed", "run.completed", "run.failed",
 ]
 
 

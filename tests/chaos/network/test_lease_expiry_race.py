@@ -38,19 +38,20 @@ THREE = WorkflowDefinition(name="three", version=1, nodes=[
 
 class SlowStep(EchoExecutor):
     """Step s2 takes `hold` seconds — long enough for the latency toxic to be applied
-    and for A's lease to lapse while the step is 'running'."""
+    and for A's lease to lapse while the step is 'running'. `heartbeats=False` models
+    an executor that never calls progress() — the case the fence exists for."""
 
-    def __init__(self, hold: float, on_s2: threading.Event) -> None:
-        self.hold, self.on_s2 = hold, on_s2
+    def __init__(self, hold: float, on_s2: threading.Event, heartbeats: bool = True) -> None:
+        self.hold, self.on_s2, self.heartbeats = hold, on_s2, heartbeats
         self.calls: list[str] = []
 
-    def execute(self, agent, upstream):
-        step = {(): "s1", ("s1",): "s2", ("s2",): "s3"}[tuple(sorted(upstream))]
+    def execute(self, req, progress):
+        step = {(): "s1", ("s1",): "s2", ("s2",): "s3"}[tuple(sorted(req.inputs))]
         self.calls.append(step)
         if step == "s2":
             self.on_s2.set()
             time.sleep(self.hold)
-        return super().execute(agent, upstream)
+        return super().execute(req, progress if self.heartbeats else (lambda *_: None))
 
 
 class RecordingFaults:
@@ -81,15 +82,19 @@ def direct(schema_name):
         s.close()
 
 
+@pytest.mark.parametrize("heartbeats,expect", [
+    (False, "fence"),        # silent executor: only the fence stands between A and the log
+    (True, "lease lost"),    # heartbeating executor: A5 detects the loss before writing
+], ids=["silent-executor-fenced", "heartbeating-executor-stops-early"])
 def test_lease_expiry_race_stale_worker_is_fenced_not_merged(toxiproxy, direct, schema_name,
-                                                             caplog):
+                                                             caplog, heartbeats, expect):
     caplog.set_level("WARNING", logger="agentos.worker")
     toxiproxy.proxy("pg", LISTEN, UPSTREAM)
     slow = PostgresStore(proxied_dsn(PG_DSN), schema=schema_name, max_size=2)
 
     # Shared "external ledger": both workers' executors count into the same list.
     on_s2 = threading.Event()
-    exec_a = SlowStep(hold=1.5, on_s2=on_s2)
+    exec_a = SlowStep(hold=1.5, on_s2=on_s2, heartbeats=heartbeats)
     exec_b = SlowStep(hold=0.0, on_s2=threading.Event())
     faults_a = RecordingFaults()
     engine_a = Engine(store=slow, blobs=slow, executors={"echo": exec_a}, faults=faults_a)
@@ -145,9 +150,10 @@ def test_lease_expiry_race_stale_worker_is_fenced_not_merged(toxiproxy, direct, 
         (b_fence,) = conn.execute(
             "SELECT fence FROM leases WHERE run_id = %s", (run_id,)).fetchone()
     assert max_fence == b_fence and b_fence >= 2
-    # And the REASON A was rejected must be the fence, not merely a seq mismatch: the
-    # fence is the guarantee that holds even when seqs still happen to line up.
+    # And the REASON A stopped must be the one this variant exercises: the fence for a
+    # silent executor (a seq mismatch would be coincidence, not guarantee); the
+    # heartbeat's LeaseLost for an executor that calls progress().
     rejections = [r.getMessage() for r in caplog.records if run_id in r.getMessage()]
-    assert rejections, "worker A never reported a rejected write"
-    assert any("fence" in m and "stale" in m for m in rejections), rejections
+    assert rejections, "worker A never reported why it stopped"
+    assert any(expect in m for m in rejections), rejections
     slow.close()

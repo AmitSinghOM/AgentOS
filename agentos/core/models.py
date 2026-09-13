@@ -6,6 +6,7 @@ Phase 1 can move state to Postgres without touching the engine.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import Enum
 from uuid import uuid4
 
@@ -30,6 +31,11 @@ class Agent(BaseModel):
     name: str
     type: AgentType
     config: dict = Field(default_factory=dict)
+    # Declare-then-do (§11 A1): the effect classes this agent is allowed to cause. Fixed
+    # here, checked against the workflow budget BEFORE dispatch, and enforced against
+    # what the executor actually reports. Defaults to pure computation.
+    declared_effects: list[EffectClass] = Field(
+        default_factory=lambda: [EffectClass.compute])
 
 
 class WorkflowNode(BaseModel):
@@ -42,6 +48,7 @@ class WorkflowDefinition(BaseModel):
     name: str
     version: int = 1                 # bumped on any change; runs pin it (C3)
     nodes: list[WorkflowNode]
+    budget: Budget = Field(default_factory=lambda: Budget())
 
     def topological_order(self) -> list[str]:
         """Return node IDs in dependency order (Kahn's algorithm).
@@ -137,12 +144,100 @@ class BlobRef(BaseModel):
     media_type: str = "application/json"
 
 
+class Meter(BaseModel):
+    """One metered quantity: tokens, seconds, images, requests… (§11 A6)."""
+
+    name: str                  # e.g. "input_tokens", "gpu_seconds", "requests"
+    quantity: float
+
+
+class Cost(BaseModel):
+    """Generic metered cost. `amount` is a decimal string to avoid float drift in a
+    ledger; `pricing_snapshot_hash` points at the pricing table used, so a 2033 reader
+    can explain a 2026 charge after prices have changed."""
+
+    units: list[Meter] = Field(default_factory=list)
+    amount: str = "0"          # decimal string, e.g. "0.0123"
+    currency: str = "USD"
+    pricing_snapshot_hash: str | None = None
+
+    def decimal(self) -> Decimal:
+        return Decimal(self.amount)
+
+
+class Provenance(BaseModel):
+    """Who/what produced a step's output. Mandatory on every completed step (§2.1)."""
+
+    executor: str              # executor name, e.g. "echo", "openai"
+    executor_version: str      # plugin/package version
+    model_id: str | None = None
+    prompt_hash: str | None = None
+
+
+class Effect(BaseModel):
+    """A side effect a step reports having caused. Its class must be within the step's
+    DECLARED effects or the step is dead-lettered (§11 A1)."""
+
+    effect_class: EffectClass
+    description: str = ""
+    external_ref: str | None = None   # e.g. message id, payment id, PR URL
+
+
+class Budget(BaseModel):
+    """Limits the core enforces — never trusted to the executor (§2.1).
+
+    `allowed_effect_classes` is the declare-then-do gate: an agent whose declared effects
+    exceed it is refused BEFORE dispatch. Phase 3 turns that refusal into SUSPENDED for
+    approval; today it dead-letters the step and fails the run."""
+
+    allowed_effect_classes: set[EffectClass] = Field(
+        default_factory=lambda: {EffectClass.read, EffectClass.compute})
+    max_step_cost: str | None = None        # decimal string
+    max_run_cost: str | None = None         # decimal string; rolling total across steps
+    max_step_wall_seconds: float | None = None
+
+
+class StepRequest(BaseModel):
+    """What an executor receives. `inputs` is the hydrated upstream map; `inputs_ref` is
+    what the log records. `declared_effects` is fixed from the agent definition before
+    dispatch — the executor cannot widen it."""
+
+    run_id: str
+    step_id: str
+    attempt: int
+    idempotency_key: str
+    agent: Agent
+    inputs: dict
+    inputs_ref: BlobRef
+    declared_effects: frozenset[EffectClass]
+    budget: Budget
+    deadline: datetime | None = None
+
+
 class StepResult(BaseModel):
+    """What an executor returns. `output` is opaque to the core beyond hashing."""
+
+    output: dict
+    effects: list[Effect] = Field(default_factory=list)
+    cost: Cost = Field(default_factory=Cost)
+    provenance: Provenance
+
+
+class StepRecord(BaseModel):
+    """Folded per-step view: what the log recorded about a completed step."""
+
     node_id: str
     attempt: int = 1
     output_ref: BlobRef | None = None     # what the log records (§11 A4)
     output: dict = Field(default_factory=dict)  # hydrated from the BlobStore for callers
+    effects: list[Effect] = Field(default_factory=list)
+    cost: Cost = Field(default_factory=Cost)
+    provenance: Provenance | None = None
     finished_at: datetime = Field(default_factory=_now)
+
+
+class StepState(str, Enum):
+    dead_lettered = "dead_lettered"       # C11: poison step; cause in the log
 
 
 class WorkflowRun(BaseModel):
@@ -154,8 +249,11 @@ class WorkflowRun(BaseModel):
     workflow_version: int = 1
     request_id: str = Field(default_factory=_id)
     status: RunStatus = RunStatus.pending
-    steps: list[StepResult] = Field(default_factory=list)
+    steps: list[StepRecord] = Field(default_factory=list)
     attempts: dict[str, int] = Field(default_factory=dict)   # step_id → latest attempt
+    progress: dict[str, float] = Field(default_factory=dict)  # step_id → last reported fraction
+    dead_lettered: dict[str, str] = Field(default_factory=dict)  # step_id → cause
+    total_cost: str = "0"                                     # decimal string, rolled up
     started_at: datetime = Field(default_factory=_now)
     ended_at: datetime | None = None
     error: str | None = None
