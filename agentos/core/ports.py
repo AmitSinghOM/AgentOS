@@ -26,6 +26,9 @@ class Store(Protocol):
     - `append_events` assigns `seq` = expected_seq+1..n atomically, or raises
       ConflictError if the run's current last seq != expected_seq. Nothing is written
       on conflict. `UNIQUE(run_id, seq)` is the physical guarantee behind C2.
+    - `fence` (optional): the appender's lease fence. The store remembers the highest
+      fence seen per run and rejects a lower one with ConflictError — a stalled worker
+      whose lease lapsed cannot write even though it is still alive (C6).
     - `read_events(run_id, after_seq)` returns events with seq > after_seq in seq order.
     - `run_id_for_request(request_id)` makes run start idempotent (DESIGN §6).
     """
@@ -39,7 +42,7 @@ class Store(Protocol):
 
     # run log
     def append_events(self, run_id: str, expected_seq: int,
-                      events: Sequence[Event]) -> list[Event]: ...
+                      events: Sequence[Event], *, fence: int | None = None) -> list[Event]: ...
     def read_events(self, run_id: str, after_seq: int = 0) -> list[Event]: ...
     def list_run_ids(self) -> list[str]: ...
     def run_id_for_request(self, request_id: str) -> str | None: ...

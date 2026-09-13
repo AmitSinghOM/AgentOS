@@ -1,12 +1,16 @@
-"""In-memory Store + BlobStore. Implements the same contract as the SQLite adapter and
-passes the same suite (tests/contract/). Used for unit tests and the zero-config demo;
-nothing survives a process restart, by design."""
+"""In-memory Store + BlobStore + Lease + Queue. Implements the same contracts as the
+SQLite and Postgres adapters and passes the same suites (tests/contract/). Used for unit
+tests and the zero-config demo; nothing survives a process restart, by design."""
 from __future__ import annotations
 
 import hashlib
+import heapq
 import threading
+import time
+from collections import deque
 from collections.abc import Sequence
 
+from agentos.core.coordination import LeaseToken
 from agentos.core.events import Event, RunStarted, from_record
 from agentos.core.models import Agent, BlobRef, WorkflowDefinition
 from agentos.core.ports import ConflictError
@@ -18,8 +22,15 @@ class MemoryStore:
         self._workflows: dict[str, WorkflowDefinition] = {}
         self._events: dict[str, list[dict]] = {}          # run_id → records in seq order
         self._requests: dict[str, str] = {}               # request_id → run_id
+        self._fences: dict[str, int] = {}                 # run_id → highest fence seen
         self._blobs: dict[str, tuple[bytes, str]] = {}
-        self._lock = threading.Lock()
+        self._leases: dict[str, tuple[str, int, float]] = {}   # run_id → (holder, fence, expires)
+        self._fence_counter: dict[str, int] = {}
+        self._queue: deque[str] = deque()
+        self._inflight: list[tuple[float, str]] = []      # (visible_at, run_id) heap
+        self._lock = threading.RLock()
+        self._cv = threading.Condition(self._lock)
+        self.visibility_seconds = 30.0
 
     # definitions
     def put_agent(self, agent: Agent) -> None:
@@ -39,13 +50,16 @@ class MemoryStore:
 
     # run log
     def append_events(self, run_id: str, expected_seq: int,
-                      events: Sequence[Event]) -> list[Event]:
+                      events: Sequence[Event], *, fence: int | None = None) -> list[Event]:
         with self._lock:
             log = self._events.get(run_id, [])
             if len(log) != expected_seq:
                 raise ConflictError(
                     f"run {run_id!r}: expected seq {expected_seq}, log is at {len(log)}"
                 )
+            if fence is not None and fence < self._fences.get(run_id, 0):
+                raise ConflictError(f"run {run_id!r}: fence {fence} is stale "
+                                    f"(highest seen {self._fences[run_id]})")
             out: list[Event] = []
             staged: list[dict] = []
             for i, ev in enumerate(events, start=expected_seq + 1):
@@ -58,6 +72,8 @@ class MemoryStore:
             # Commit only after every event validated — nothing on conflict, not even
             # an empty log entry for the run.
             self._events.setdefault(run_id, []).extend(staged)
+            if fence is not None:
+                self._fences[run_id] = fence
             for ev in out:
                 if isinstance(ev, RunStarted):
                     self._requests[ev.request_id] = run_id
@@ -88,3 +104,64 @@ class MemoryStore:
 
     def exists(self, ref: BlobRef) -> bool:
         return ref.sha256 in self._blobs
+
+    # lease
+    def acquire(self, run_id: str, holder: str, ttl_seconds: float) -> LeaseToken | None:
+        with self._lock:
+            now = time.monotonic()
+            cur = self._leases.get(run_id)
+            if cur is not None and cur[2] > now and cur[0] != holder:
+                return None
+            fence = self._fence_counter.get(run_id, 0) + 1
+            self._fence_counter[run_id] = fence
+            self._leases[run_id] = (holder, fence, now + ttl_seconds)
+            return LeaseToken(run_id=run_id, holder=holder, fence=fence)
+
+    def renew(self, token: LeaseToken, ttl_seconds: float) -> bool:
+        with self._lock:
+            cur = self._leases.get(token.run_id)
+            if cur is None or cur[0] != token.holder or cur[1] != token.fence:
+                return False
+            if cur[2] <= time.monotonic():
+                return False
+            self._leases[token.run_id] = (cur[0], cur[1], time.monotonic() + ttl_seconds)
+            return True
+
+    def release(self, token: LeaseToken) -> None:
+        with self._lock:
+            cur = self._leases.get(token.run_id)
+            if cur and cur[0] == token.holder and cur[1] == token.fence:
+                del self._leases[token.run_id]
+
+    # queue
+    def push(self, run_id: str) -> None:
+        """Enqueue, or make an in-flight delivery visible again (see SqliteStore.push)."""
+        with self._cv:
+            self._inflight = [(t, r) for t, r in self._inflight if r != run_id]
+            heapq.heapify(self._inflight)
+            if run_id not in self._queue:
+                self._queue.append(run_id)
+                self._cv.notify()
+
+    def pull(self, timeout: float) -> str | None:
+        deadline = time.monotonic() + timeout
+        with self._cv:
+            while True:
+                now = time.monotonic()
+                # Redeliver anything whose visibility timeout lapsed (at-least-once).
+                while self._inflight and self._inflight[0][0] <= now:
+                    _, rid = heapq.heappop(self._inflight)
+                    self._queue.append(rid)
+                if self._queue:
+                    rid = self._queue.popleft()
+                    heapq.heappush(self._inflight, (now + self.visibility_seconds, rid))
+                    return rid
+                remaining = deadline - now
+                if remaining <= 0:
+                    return None
+                self._cv.wait(min(remaining, 0.05))
+
+    def ack(self, run_id: str) -> None:
+        with self._cv:
+            self._inflight = [(t, r) for t, r in self._inflight if r != run_id]
+            heapq.heapify(self._inflight)

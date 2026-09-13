@@ -26,7 +26,7 @@ def test_readme_quickstart_with_example_files():
     wf = _load("hello_workflow.json")
     assert client.post("/workflows", json=wf).status_code == 201
 
-    run = client.post(f"/workflows/{wf['name']}/runs").json()
+    run = client.post(f"/workflows/{wf['name']}/runs", params={"sync": "true"}).json()
     assert run["status"] == "completed"
     assert [s["node_id"] for s in run["steps"]] == [n["id"] for n in wf["nodes"]]
     # The echo agent surfaces its configured message as the step output.

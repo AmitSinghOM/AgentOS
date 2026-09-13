@@ -42,10 +42,14 @@ PostgreSQL is the source of truth (append-only event log). Redis is the speed la
 
 ```bash
 cp .env.example .env
-docker compose up -d            # postgres + redis (unused until Phase 1; API is in-memory today)
 pip install -e ".[dev]"
-uvicorn agentos.api.main:app --reload
+uvicorn agentos.api.main:app --reload      # API (SQLite file ./agentos.db by default)
+python -m agentos.worker                   # worker, in another terminal
 ```
+
+No Docker needed for the default SQLite store. For Postgres:
+`docker compose up -d`, then `AGENTOS_STORE=postgres AGENTOS_PG_DSN=postgresql://agentos:agentos@localhost/agentos`
+for both processes.
 
 Define and run a workflow (the `Content-Type` header matters — without it curl sends a
 form body and the API answers 422):
@@ -57,14 +61,30 @@ curl -X POST localhost:8000/agents -H 'Content-Type: application/json' -d @examp
 # define a workflow
 curl -X POST localhost:8000/workflows -H 'Content-Type: application/json' -d @examples/hello_workflow.json
 
-# start a run (Phase 0 runs synchronously and returns the finished run)
-curl -X POST localhost:8000/workflows/hello/runs
+# start a run: 202 + run id; the worker advances it. Repeating with the same
+# Idempotency-Key returns the same run.
+curl -X POST localhost:8000/workflows/hello/runs -H 'Idempotency-Key: demo-1'
 
-# fetch it again by id
+# fetch the folded state, or the raw event log paged by seq
 curl localhost:8000/runs/{run_id}
+curl 'localhost:8000/runs/{run_id}/events?after=0'
+
+# or run synchronously in the API process (Phase 0 behaviour)
+curl -X POST 'localhost:8000/workflows/hello/runs?sync=true'
 ```
 
 Or run the same walkthrough as a test: `pytest tests/test_quickstart.py`.
+
+### The crash demo, as a test
+
+```bash
+pytest tests/chaos/test_kill9_real_process.py -v
+```
+
+A real worker process is started, hard-killed (exit 137) right after step 2 of 3 is
+committed, and a second process picks the run up and finishes it. The test asserts step 2
+is never started again and the log has exactly one completion per step. Every fault point
+in the commit path has a test in `tests/chaos/`; they run on every PR.
 
 ## Roadmap
 

@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections.abc import Sequence
 
 import psycopg
 from psycopg import errors
 from psycopg_pool import ConnectionPool
 
+from agentos.core.coordination import LeaseToken
 from agentos.core.events import Event, RunStarted, from_record
 from agentos.core.models import Agent, BlobRef, WorkflowDefinition
 from agentos.core.ports import ConflictError
@@ -40,7 +42,19 @@ CREATE TABLE IF NOT EXISTS runs (
     request_id TEXT NOT NULL UNIQUE,
     workflow   TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
-    last_seq   INTEGER NOT NULL DEFAULT 0
+    last_seq   INTEGER NOT NULL DEFAULT 0,
+    max_fence  INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS leases (
+    run_id     TEXT PRIMARY KEY,
+    holder     TEXT NOT NULL,
+    fence      INTEGER NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE TABLE IF NOT EXISTS queue (
+    run_id     TEXT PRIMARY KEY,
+    visible_at TIMESTAMPTZ NOT NULL,
+    deliveries INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS run_events (
     run_id         TEXT    NOT NULL REFERENCES runs(run_id),
@@ -114,18 +128,21 @@ class PostgresStore:
 
     # run log
     def append_events(self, run_id: str, expected_seq: int,
-                      events: Sequence[Event]) -> list[Event]:
+                      events: Sequence[Event], *, fence: int | None = None) -> list[Event]:
         with self._pool.connection() as conn, conn.transaction():
             # Serialize appenders on the run row. A brand-new run has no row yet, so
             # concurrent creators race on runs.request_id / PRIMARY KEY instead.
             row = conn.execute(
-                "SELECT last_seq FROM runs WHERE run_id = %s FOR UPDATE", (run_id,)
+                "SELECT last_seq, max_fence FROM runs WHERE run_id = %s FOR UPDATE", (run_id,)
             ).fetchone()
-            current = row[0] if row else 0
+            current, seen_fence = (row[0], row[1]) if row else (0, 0)
             if current != expected_seq:
                 raise ConflictError(
                     f"run {run_id!r}: expected seq {expected_seq}, log is at {current}"
                 )
+            if fence is not None and fence < seen_fence:
+                raise ConflictError(f"run {run_id!r}: fence {fence} is stale "
+                                    f"(highest seen {seen_fence})")
             out: list[Event] = []
             for i, ev in enumerate(events, start=expected_seq + 1):
                 stamped = ev.model_copy(update={"seq": i})
@@ -153,8 +170,11 @@ class PostgresStore:
                 except errors.UniqueViolation as exc:  # PRIMARY KEY(run_id, seq)
                     raise ConflictError(f"run {run_id!r}: seq {i} already exists") from exc
                 out.append(stamped)
-            conn.execute("UPDATE runs SET last_seq = %s WHERE run_id = %s",
-                         (expected_seq + len(out), run_id))
+            conn.execute(
+                "UPDATE runs SET last_seq = %s, max_fence = GREATEST(max_fence, %s) "
+                "WHERE run_id = %s",
+                (expected_seq + len(out), fence if fence is not None else 0, run_id),
+            )
             return out
 
     def read_events(self, run_id: str, after_seq: int = 0) -> list[Event]:
@@ -200,6 +220,78 @@ class PostgresStore:
             return conn.execute(
                 "SELECT 1 FROM blobs WHERE sha256 = %s", (ref.sha256,)
             ).fetchone() is not None
+
+    # lease (database clock, so all workers agree on "now")
+    def acquire(self, run_id: str, holder: str, ttl_seconds: float) -> LeaseToken | None:
+        with self._pool.connection() as conn, conn.transaction():
+            row = conn.execute(
+                "SELECT holder, fence, expires_at > now() FROM leases WHERE run_id = %s "
+                "FOR UPDATE", (run_id,)
+            ).fetchone()
+            if row is not None and row[2] and row[0] != holder:
+                return None
+            fence = (row[1] if row else 0) + 1
+            conn.execute(
+                "INSERT INTO leases(run_id, holder, fence, expires_at) "
+                "VALUES (%s, %s, %s, now() + make_interval(secs => %s)) "
+                "ON CONFLICT (run_id) DO UPDATE SET holder = EXCLUDED.holder, "
+                "fence = EXCLUDED.fence, expires_at = EXCLUDED.expires_at",
+                (run_id, holder, fence, ttl_seconds),
+            )
+            return LeaseToken(run_id=run_id, holder=holder, fence=fence)
+
+    def renew(self, token: LeaseToken, ttl_seconds: float) -> bool:
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                "UPDATE leases SET expires_at = now() + make_interval(secs => %s) "
+                "WHERE run_id = %s AND holder = %s AND fence = %s AND expires_at > now()",
+                (ttl_seconds, token.run_id, token.holder, token.fence),
+            )
+            return cur.rowcount == 1
+
+    def release(self, token: LeaseToken) -> None:
+        # Expire, never delete: the row carries the fence counter, which must stay
+        # monotonic for the life of the run.
+        with self._pool.connection() as conn:
+            conn.execute(
+                "UPDATE leases SET expires_at = to_timestamp(0) "
+                "WHERE run_id = %s AND holder = %s AND fence = %s",
+                (token.run_id, token.holder, token.fence),
+            )
+
+    # queue (at-least-once; SKIP LOCKED lets N workers pull without contention)
+    visibility_seconds = 30.0
+
+    def push(self, run_id: str) -> None:
+        """Enqueue, or make an in-flight delivery visible again (see SqliteStore.push)."""
+        with self._pool.connection() as conn:
+            conn.execute(
+                "INSERT INTO queue(run_id, visible_at) VALUES (%s, now()) "
+                "ON CONFLICT (run_id) DO UPDATE SET visible_at = now()", (run_id,),
+            )
+
+    def pull(self, timeout: float) -> str | None:
+        deadline = time.time() + timeout
+        while True:
+            with self._pool.connection() as conn, conn.transaction():
+                row = conn.execute(
+                    "SELECT run_id FROM queue WHERE visible_at <= now() "
+                    "ORDER BY visible_at LIMIT 1 FOR UPDATE SKIP LOCKED"
+                ).fetchone()
+                if row is not None:
+                    conn.execute(
+                        "UPDATE queue SET visible_at = now() + make_interval(secs => %s), "
+                        "deliveries = deliveries + 1 WHERE run_id = %s",
+                        (self.visibility_seconds, row[0]),
+                    )
+                    return row[0]
+            if time.time() >= deadline:
+                return None
+            time.sleep(0.05)
+
+    def ack(self, run_id: str) -> None:
+        with self._pool.connection() as conn:
+            conn.execute("DELETE FROM queue WHERE run_id = %s", (run_id,))
 
     # lifecycle
     def connection(self):
