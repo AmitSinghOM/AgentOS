@@ -56,7 +56,7 @@ pricing_snapshots = store_pricing_snapshots(executors, store)
 engine = Engine(store=store, blobs=store, executors=executors,
                 lease=store if hasattr(store, "acquire") else None, observers=observers)
 
-app = FastAPI(title="AgentOS", version="0.6.0-dev")
+app = FastAPI(title="AgentOS", version="0.6.0")
 
 
 @app.exception_handler(RequestValidationError)
