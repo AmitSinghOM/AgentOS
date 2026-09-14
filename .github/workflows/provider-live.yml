@@ -1,0 +1,45 @@
+# Nightly opt-in: re-record the provider cassettes against a LIVE model server and prove
+# the replay tests still pass on fresh recordings (docs/DEVELOPMENT_STRUCTURE.md §11 A10).
+#
+# Uses Ollama with qwen2.5:0.5b on the runner — free, no API key, no vendor account. The
+# recordings are uploaded as an artifact, never committed automatically: a human looks at
+# the diff and opens a PR. If this job fails for 30 days, the provider README marks the
+# plugin `deprecated`; the core is unaffected.
+name: provider-live
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Ollama model to record against"
+        default: "qwen2.5:0.5b"
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]" -e providers/openai-compat
+      - name: Install and start Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          nohup ollama serve > ollama.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:11434/v1/models && break; sleep 2; done
+          ollama pull "${{ github.event.inputs.model || 'qwen2.5:0.5b' }}"
+      - name: Re-record cassettes against the live server
+        env:
+          AGENTOS_OPENAI_ALIASES: '{"chat.fast": "${{ github.event.inputs.model || ''qwen2.5:0.5b'' }}"}'
+        run: python providers/openai-compat/scripts/record_cassettes.py --live
+      - name: Replay tests pass on the fresh recordings
+        run: pytest -q providers/openai-compat/tests -p no:cacheprovider
+      - name: Show what changed
+        run: git -P diff --stat -- providers/openai-compat/tests/cassettes
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cassettes-${{ github.run_id }}
+          path: providers/openai-compat/tests/cassettes

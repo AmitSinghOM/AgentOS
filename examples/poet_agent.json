@@ -1,0 +1,10 @@
+{
+  "name": "poet",
+  "type": "llm",
+  "executor": "openai-compat",
+  "config": {
+    "model": "chat.fast",
+    "system": "You are a terse poet. Answer with the poem only.",
+    "prompt": "Write a haiku about {run.topic}."
+  }
+}

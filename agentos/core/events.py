@@ -58,6 +58,7 @@ class RunStarted(Event):
     request_id: str                       # client-supplied; run start is idempotent on it
     principal: Principal | None = None
     agent_versions: dict[str, int] = Field(default_factory=dict)  # name → pinned version
+    inputs_ref: BlobRef | None = None     # v0.5.0, additive: run inputs, by hash (§11 A4)
 
 
 class StepStarted(Event):
@@ -208,6 +209,23 @@ class ApprovalRejected(ControlEvent):
     step_id: str
 
 
+class ExecutorSubstituted(Event):
+    """§11 A3: appended BEFORE `step.started` when the concrete model an executor resolves
+    for this agent differs from the one the same agent used earlier in this run (alias
+    re-pointed, model retired, provider config changed). Completed steps are never
+    re-executed (C1), so a substitution only ever affects future steps — and it is in the
+    audit trail, never silent."""
+
+    event_type: ClassVar[str] = "executor.substituted"
+    step_id: str
+    agent: str
+    executor: str
+    from_model: str
+    to_model: str
+    reason: str = ""
+    principal: Principal | None = None    # system unless an operator forced it
+
+
 CONTROL_REQUEST_TYPES = (RunCancelRequested, RunPauseRequested)
 
 
@@ -216,7 +234,8 @@ EVENT_TYPES: dict[str, type[Event]] = {
     for cls in (RunStarted, StepStarted, StepProgress, StepCompleted, StepDeadLettered,
                 StepFailed, StepRetryRequested, StepCancelled, RunCompleted, RunFailed,
                 RunCancelRequested, RunCancelled, RunPauseRequested, RunPaused, RunResumed,
-                ApprovalRequested, RunSuspended, ApprovalGranted, ApprovalRejected)
+                ApprovalRequested, RunSuspended, ApprovalGranted, ApprovalRejected,
+                ExecutorSubstituted)
 }
 
 EventTypeName = Literal[
@@ -224,6 +243,7 @@ EventTypeName = Literal[
     "step.failed", "step.retry_requested", "step.cancelled", "run.completed", "run.failed",
     "run.cancel_requested", "run.cancelled", "run.pause_requested", "run.paused", "run.resumed",
     "approval.requested", "run.suspended", "approval.granted", "approval.rejected",
+    "executor.substituted",
 ]
 
 

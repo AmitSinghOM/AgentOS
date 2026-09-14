@@ -18,9 +18,10 @@ from pydantic import BaseModel
 
 from agentos.agents.echo import EchoExecutor
 from agentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
-from agentos.core.models import Agent, AgentType, Principal, WorkflowDefinition
+from agentos.core.models import Agent, AgentType, BlobRef, Principal, WorkflowDefinition
 from agentos.core.ports import ConflictError
 from agentos.observability import build_observers
+from agentos.plugins import describe, discover_executors, store_pricing_snapshots
 from agentos.store.memory import MemoryStore
 from agentos.store.sqlite import SqliteStore
 
@@ -44,15 +45,35 @@ queue_depth = None
 if prometheus is not None and hasattr(store, "queue_depth"):
     from agentos.observability.prometheus import QueueDepthCollector
     queue_depth = QueueDepthCollector(prometheus.registry, store.queue_depth)
-engine = Engine(store=store, blobs=store, executors={AgentType.echo.value: EchoExecutor()},
+executors = {AgentType.echo.value: EchoExecutor(), **discover_executors()}
+pricing_snapshots = store_pricing_snapshots(executors, store)
+engine = Engine(store=store, blobs=store, executors=executors,
                 lease=store if hasattr(store, "acquire") else None, observers=observers)
 
-app = FastAPI(title="AgentOS", version="0.4.0")
+app = FastAPI(title="AgentOS", version="0.5.0-dev")
 
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/executors")
+def list_executors() -> list[dict]:
+    """Which executors this deployment can dispatch to, with each plugin's own
+    `describe()` (models, aliases, pricing snapshot) and `health()` (is its model server
+    reachable, does it have the model). The first thing to check when a step fails."""
+    return describe(executors)
+
+
+@app.get("/blobs/{sha256}")
+def get_blob(sha256: str) -> Response:
+    """Fetch a content-addressed payload: step inputs/outputs, run inputs, or the pricing
+    table behind a step's `cost.pricing_snapshot_hash` (§11 A6)."""
+    ref = BlobRef(sha256=sha256, size=0)
+    if not store.exists(ref):
+        raise HTTPException(status_code=404, detail=f"no blob {sha256!r}")
+    return Response(content=store.get(ref), media_type="application/json")
 
 
 @app.get("/metrics")
@@ -102,21 +123,33 @@ def define_workflow(wf: WorkflowDefinition) -> WorkflowDefinition:
     return wf
 
 
+class RunStartBody(BaseModel):
+    """Optional body for `POST /workflows/{name}/runs`. `inputs` reach every step under
+    the reserved key `run`, so an agent's prompt template can say `{run.topic}`."""
+
+    inputs: dict = {}
+
+
 @app.post("/workflows/{name}/runs", status_code=202)
 def start_run(name: str, response: Response, sync: bool = False,
+              body: RunStartBody | None = None,
               idempotency_key: str | None = Header(default=None,
                                                    alias="Idempotency-Key")) -> dict:
     """Enqueue a run and return 202 with its id; a worker (`python -m agentos.worker`)
     advances it. `?sync=true` runs it in-process and returns 201 with the finished run
     (the Phase 0 behaviour, kept for the quick start and tests). Repeating the call with
     the same `Idempotency-Key` header returns the same run (DESIGN §6)."""
+    inputs = body.inputs if body is not None else None
     try:
         if sync:
             response.status_code = 201
-            return engine.start_run(name, request_id=idempotency_key).model_dump()
-        run_id = engine.create_run(name, request_id=idempotency_key)
+            return engine.start_run(name, request_id=idempotency_key,
+                                    inputs=inputs).model_dump()
+        run_id = engine.create_run(name, request_id=idempotency_key, inputs=inputs)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     store.push(run_id)
     run = engine.get_run(run_id)
     assert run is not None
