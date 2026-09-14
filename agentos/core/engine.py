@@ -41,6 +41,7 @@ from agentos.core.events import (
     ApprovalRejected,
     ApprovalRequested,
     Event,
+    ExecutorSubstituted,
     RunCancelled,
     RunCancelRequested,
     RunCompleted,
@@ -123,6 +124,32 @@ def _canonical(obj: dict) -> bytes:
     """Stable JSON bytes: sorted keys, no whitespace. Same inputs → same hash → same
     idempotency key across processes and Python versions."""
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str).encode()
+
+
+RUN_INPUTS_KEY = "run"   # every step sees the run's inputs under this key (reserved node id)
+
+
+def _agent_of(step, wf) -> str:
+    for n in wf.nodes:
+        if n.id == step.node_id:
+            return n.agent
+    return step.node_id
+
+
+def resolve_model(executor: Executor, req: StepRequest) -> str | None:
+    """§11 A3 hook. An executor MAY expose `resolve(req) -> str | None`: the concrete
+    model id it would use for this request, with capability aliases already applied.
+    Executors without it (echo, tool) resolve to nothing and never substitute. A
+    resolver that raises is treated as "cannot resolve now" — the step still dispatches
+    and the executor reports the real error at its own boundary."""
+    fn = getattr(executor, "resolve", None)
+    if fn is None:
+        return None
+    try:
+        return fn(req)
+    except Exception as exc:  # noqa: BLE001 — never let a plugin hook stop the engine
+        _log.warning("executor %r resolve() failed: %s", executor.name, exc)
+        return None
 
 
 def idempotency_key(run_id: str, step_id: str, inputs: dict) -> str:
@@ -229,6 +256,8 @@ class Engine:
             for step in run.steps:
                 if step.output_ref is not None:
                     step.output = json.loads(self._blobs.get(step.output_ref))
+            if run.inputs_ref is not None:
+                run.inputs = json.loads(self._blobs.get(run.inputs_ref))
         return run
 
     def is_terminal(self, run_id: str) -> bool:
@@ -251,12 +280,16 @@ class Engine:
 
     # ---------------------------------------------------------------- commands
     def create_run(self, wf_name: str, *, request_id: str | None = None,
-                   principal: Principal | None = None) -> str:
+                   principal: Principal | None = None, inputs: dict | None = None) -> str:
         """Append run.started and return the run id WITHOUT executing anything. The
-        worker picks it up from the queue. Idempotent on request_id (DESIGN §6)."""
+        worker picks it up from the queue. Idempotent on request_id (DESIGN §6).
+        `inputs` are stored by hash and handed to every step under the reserved key
+        `run` (so a prompt template can say `{run.topic}`)."""
         wf = self._store.get_workflow(wf_name)
         if wf is None:
             raise KeyError(f"unknown workflow {wf_name!r}")
+        if inputs and any(n.id == RUN_INPUTS_KEY for n in wf.nodes):
+            raise ValueError(f"node id {RUN_INPUTS_KEY!r} is reserved for run inputs")
         request_id = request_id or uuid4().hex
         existing = self._store.run_id_for_request(request_id)
         if existing is not None:
@@ -269,9 +302,11 @@ class Engine:
             if node.agent not in pins:
                 agent = self._store.get_agent(node.agent)
                 pins[node.agent] = agent.version if agent is not None else 0
+        inputs_ref = self._blobs.put(_canonical(inputs)) if inputs else None
         self._emit(run_id, 0, [RunStarted(
             run_id=run_id, workflow=wf.name, workflow_version=wf.version,
             request_id=request_id, principal=principal, agent_versions=pins,
+            inputs_ref=inputs_ref,
         )])
         return run_id
 
@@ -447,10 +482,12 @@ class Engine:
         return status is RunStatus.paused
 
     def start_run(self, wf_name: str, *, request_id: str | None = None,
-                  principal: Principal | None = None, max_wait: float = 60.0) -> WorkflowRun:
+                  principal: Principal | None = None, max_wait: float = 60.0,
+                  inputs: dict | None = None) -> WorkflowRun:
         """create_run + advance in-process, sleeping through retry backoffs (bounded by
         `max_wait`). The synchronous path (tests, `?sync=true`)."""
-        run_id = self.create_run(wf_name, request_id=request_id, principal=principal)
+        run_id = self.create_run(wf_name, request_id=request_id, principal=principal,
+                                 inputs=inputs)
         return self.advance_until_terminal(run_id, max_wait=max_wait)
 
     def advance_until_terminal(self, run_id: str, *, max_wait: float = 60.0) -> WorkflowRun:
@@ -501,6 +538,15 @@ class Engine:
             s.node_id: json.loads(self._blobs.get(s.output_ref))
             for s in run.steps if s.output_ref is not None
         }
+        run_inputs = json.loads(self._blobs.get(run.inputs_ref)) if run.inputs_ref else None
+        # §11 A3: the concrete model each agent last ran on in this run (substitutions
+        # included), so a changed alias resolution is recorded before the step runs.
+        models: dict[str, str] = {}
+        for s in run.steps:
+            if s.provenance is not None and s.provenance.model_id:
+                models[_agent_of(s, wf)] = s.provenance.model_id
+        for sub in run.substitutions:
+            models[sub.agent] = sub.to_model
         attempts = dict(run.attempts)
         pending = dict(run.pending_retries)
         total = Decimal(run.total_cost)
@@ -563,7 +609,8 @@ class Engine:
                 started: list[tuple[WorkflowNode, StepRequest, Executor]] = []
                 for node, approval_id in runnable:
                     prepared = self._prepare(log, run_id, node, attempts, outputs, budget,
-                                             run.agent_versions, approval_id)
+                                             run.agent_versions, approval_id,
+                                             run_inputs=run_inputs, models=models)
                     if isinstance(prepared, str):          # unrecoverable definition error
                         return self._fail(log, prepared, step_id=node.id)
                     started.append(prepared)
@@ -664,7 +711,8 @@ class Engine:
 
     def _prepare(self, log: _Log, run_id: str, node: WorkflowNode, attempts: dict[str, int],
                  outputs: dict[str, dict], budget: Budget, pins: dict[str, int],
-                 approval_id: str | None = None):
+                 approval_id: str | None = None, *, run_inputs: dict | None = None,
+                 models: dict[str, str] | None = None):
         """Resolve the PINNED agent version + executor, append step.started. Returns
         (node, req, executor) or an error string for definition problems that no retry
         can fix. Runs that predate pinning (empty pins) resolve the latest version."""
@@ -674,19 +722,23 @@ class Engine:
         if agent is None:
             which = f" v{pinned}" if pinned else ""
             return f"node {node.id!r} references unknown agent {node.agent!r}{which}"
-        executor = self._executors.get(agent.type.value)
+        exec_name = agent.executor or agent.type.value
+        executor = self._executors.get(exec_name)
         if executor is None:
-            return f"no executor registered for agent type {agent.type.value!r}"
+            have = ", ".join(sorted(self._executors)) or "none"
+            hint = (" — install the provider distribution (e.g. `pip install "
+                    "agentos-provider-openai-compat`) and restart the API and worker"
+                    if agent.executor else "")
+            return (f"agent {agent.name!r} needs executor {exec_name!r} but only "
+                    f"[{have}] are registered{hint}")
 
         upstream = {dep: outputs[dep] for dep in node.depends_on}
+        if run_inputs:
+            upstream[RUN_INPUTS_KEY] = run_inputs
         key = idempotency_key(run_id, node.id, upstream)
         attempt = attempts.get(node.id, 0) + 1
         attempts[node.id] = attempt
         declared = frozenset(agent.declared_effects)
-        log.append(StepStarted(
-            run_id=run_id, step_id=node.id, attempt=attempt, agent=agent.name,
-            idempotency_key=key, declared_effects=sorted(declared), agent_version=agent.version,
-        ))
         deadline = (self._wall() + timedelta(seconds=budget.max_step_wall_seconds)
                     if budget.max_step_wall_seconds else None)
         req = StepRequest(
@@ -695,6 +747,23 @@ class Engine:
             declared_effects=declared, budget=budget, deadline=deadline,
             approval_id=approval_id,
         )
+        # §11 A3: record a model substitution BEFORE the step starts, never silently.
+        now_model = resolve_model(executor, req)
+        if models is not None and now_model is not None:
+            before = models.get(agent.name)
+            if before is not None and before != now_model:
+                log.append(ExecutorSubstituted(
+                    run_id=run_id, step_id=node.id, agent=agent.name, executor=executor.name,
+                    from_model=before, to_model=now_model,
+                    reason=f"executor {executor.name!r} now resolves agent {agent.name!r} "
+                           f"to {now_model!r} (was {before!r})",
+                    principal=Principal(kind=PrincipalKind.system, id=executor.name),
+                ))
+            models[agent.name] = now_model
+        log.append(StepStarted(
+            run_id=run_id, step_id=node.id, attempt=attempt, agent=agent.name,
+            idempotency_key=key, declared_effects=sorted(declared), agent_version=agent.version,
+        ))
         return node, req, executor
 
     def _execute(self, log: _Log, req: StepRequest, executor: Executor,

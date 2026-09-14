@@ -1,0 +1,31 @@
+{
+  "format": "agentos.cassette/1",
+  "source": "http://127.0.0.1:11434/v1",
+  "recorded_at": "2026-09-14T09:19:36+00:00",
+  "interactions": [
+    {
+      "key": "448e28b65cd180abd69494c50c1bd85d49e44cd8777251ec9f2b05e40a8a6df6",
+      "request": {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "host": "127.0.0.1:11434",
+          "accept": "*/*",
+          "accept-encoding": "gzip, deflate",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "agentos-openai-compat/0.1.0",
+          "content-length": "111"
+        },
+        "body": "{\"model\":\"qwen2.5:0.5b\",\"messages\":[{\"role\":\"user\",\"content\":\"{\\\"a\\\": {\\\"n\\\": 1}}\"}],\"temperature\":0,\"seed\":42}"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"id\":\"chatcmpl-399\",\"object\":\"chat.completion\",\"created\":1789377576,\"model\":\"qwen2.5:0.5b\",\"system_fingerprint\":\"fp_ollama\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"I'm sorry, but I don't understand the context or the specific information you're trying to convey. Could you please provide more details or clarify your question?\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":38,\"prompt_tokens_details\":{\"cached_tokens\":37},\"completion_tokens\":33,\"total_tokens\":71}}\n"
+      }
+    }
+  ]
+}
