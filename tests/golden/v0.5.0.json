@@ -1,0 +1,464 @@
+{
+  "events": [
+    {
+      "agent_versions": {
+        "greeter": 1,
+        "writer": 1
+      },
+      "event_type": "run.started",
+      "inputs_ref": {
+        "media_type": "application/json",
+        "sha256": "eef4862db6bef854041c8a257bb914df75d3d4c1338b26bddcb1e7c268107606",
+        "size": 18
+      },
+      "occurred_at": "2026-09-14T09:55:47.210870Z",
+      "parent_run_id": null,
+      "principal": null,
+      "request_id": "golden-v0.5.0",
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 1,
+      "workflow": "diamond",
+      "workflow_version": 1
+    },
+    {
+      "agent": "writer",
+      "agent_version": 1,
+      "attempt": 1,
+      "declared_effects": [
+        "compute"
+      ],
+      "event_type": "step.started",
+      "idempotency_key": "00b76e8260114cb29a033aa9021d3d9e:a:b7ece78457ce8c571ba6e2dae2f27ea4b294f7d2d846331ba6816704970c1216",
+      "occurred_at": "2026-09-14T09:55:47.213422Z",
+      "parent_run_id": null,
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 2,
+      "step_id": "a"
+    },
+    {
+      "attempt": 1,
+      "cost": {
+        "amount": "0",
+        "currency": "USD",
+        "pricing_snapshot_hash": null,
+        "units": []
+      },
+      "effects": [
+        {
+          "description": "",
+          "effect_class": "compute",
+          "external_ref": null
+        }
+      ],
+      "event_type": "step.completed",
+      "idempotency_key": "00b76e8260114cb29a033aa9021d3d9e:a:b7ece78457ce8c571ba6e2dae2f27ea4b294f7d2d846331ba6816704970c1216",
+      "occurred_at": "2026-09-14T09:55:47.213695Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "4b59167ad9045adad249b6c5a8d5d9bc246efc3c907a37a84a14a83bd1beb68b",
+        "size": 44
+      },
+      "parent_run_id": null,
+      "provenance": {
+        "executor": "aliased",
+        "executor_version": "golden",
+        "model_alias": "chat.fast",
+        "model_id": "model-A",
+        "prompt_hash": null
+      },
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 3,
+      "step_id": "a"
+    },
+    {
+      "agent": "greeter",
+      "agent_version": 1,
+      "attempt": 1,
+      "declared_effects": [
+        "compute"
+      ],
+      "event_type": "step.started",
+      "idempotency_key": "00b76e8260114cb29a033aa9021d3d9e:b:c340477c9a04d0fc0bbbc7c19438477a02c687ad6a365b23c6eaafcdd9284f08",
+      "occurred_at": "2026-09-14T09:55:47.214097Z",
+      "parent_run_id": null,
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 4,
+      "step_id": "b"
+    },
+    {
+      "agent": "greeter",
+      "agent_version": 1,
+      "attempt": 1,
+      "declared_effects": [
+        "compute"
+      ],
+      "event_type": "step.started",
+      "idempotency_key": "00b76e8260114cb29a033aa9021d3d9e:c:c340477c9a04d0fc0bbbc7c19438477a02c687ad6a365b23c6eaafcdd9284f08",
+      "occurred_at": "2026-09-14T09:55:47.214142Z",
+      "parent_run_id": null,
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 5,
+      "step_id": "c"
+    },
+    {
+      "attempt": 1,
+      "event_type": "step.progress",
+      "fraction": 0.0,
+      "note": "echo start",
+      "occurred_at": "2026-09-14T09:55:47.214398Z",
+      "parent_run_id": null,
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 6,
+      "step_id": "b"
+    },
+    {
+      "attempt": 1,
+      "event_type": "step.progress",
+      "fraction": 0.0,
+      "note": "echo start",
+      "occurred_at": "2026-09-14T09:55:47.214516Z",
+      "parent_run_id": null,
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 7,
+      "step_id": "c"
+    },
+    {
+      "attempt": 1,
+      "cost": {
+        "amount": "0",
+        "currency": "USD",
+        "pricing_snapshot_hash": null,
+        "units": []
+      },
+      "effects": [
+        {
+          "description": "echo",
+          "effect_class": "compute",
+          "external_ref": null
+        }
+      ],
+      "event_type": "step.completed",
+      "idempotency_key": "00b76e8260114cb29a033aa9021d3d9e:b:c340477c9a04d0fc0bbbc7c19438477a02c687ad6a365b23c6eaafcdd9284f08",
+      "occurred_at": "2026-09-14T09:55:47.215139Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "d3f31118b3f0dbfc58fc721e48feffc5e6970634ae591b3af1193d4394866e40",
+        "size": 121
+      },
+      "parent_run_id": null,
+      "provenance": {
+        "executor": "echo",
+        "executor_version": "0.3.0",
+        "model_alias": null,
+        "model_id": null,
+        "prompt_hash": null
+      },
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 8,
+      "step_id": "b"
+    },
+    {
+      "attempt": 1,
+      "cost": {
+        "amount": "0",
+        "currency": "USD",
+        "pricing_snapshot_hash": null,
+        "units": []
+      },
+      "effects": [
+        {
+          "description": "echo",
+          "effect_class": "compute",
+          "external_ref": null
+        }
+      ],
+      "event_type": "step.completed",
+      "idempotency_key": "00b76e8260114cb29a033aa9021d3d9e:c:c340477c9a04d0fc0bbbc7c19438477a02c687ad6a365b23c6eaafcdd9284f08",
+      "occurred_at": "2026-09-14T09:55:47.215399Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "d3f31118b3f0dbfc58fc721e48feffc5e6970634ae591b3af1193d4394866e40",
+        "size": 121
+      },
+      "parent_run_id": null,
+      "provenance": {
+        "executor": "echo",
+        "executor_version": "0.3.0",
+        "model_alias": null,
+        "model_id": null,
+        "prompt_hash": null
+      },
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 9,
+      "step_id": "c"
+    },
+    {
+      "agent": "writer",
+      "event_type": "executor.substituted",
+      "executor": "aliased",
+      "from_model": "model-A",
+      "occurred_at": "2026-09-14T09:55:47.216050Z",
+      "parent_run_id": null,
+      "principal": {
+        "attestation": null,
+        "id": "aliased",
+        "kind": "system"
+      },
+      "reason": "executor 'aliased' now resolves agent 'writer' to 'model-B' (was 'model-A')",
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 10,
+      "step_id": "d",
+      "to_model": "model-B"
+    },
+    {
+      "agent": "writer",
+      "agent_version": 1,
+      "attempt": 1,
+      "declared_effects": [
+        "compute"
+      ],
+      "event_type": "step.started",
+      "idempotency_key": "00b76e8260114cb29a033aa9021d3d9e:d:0d891d0e440eadcbc7691a2ab5b2f8006740ef52d1c01a6769c816392f4b9ddd",
+      "occurred_at": "2026-09-14T09:55:47.216072Z",
+      "parent_run_id": null,
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 11,
+      "step_id": "d"
+    },
+    {
+      "attempt": 1,
+      "cost": {
+        "amount": "0",
+        "currency": "USD",
+        "pricing_snapshot_hash": null,
+        "units": []
+      },
+      "effects": [
+        {
+          "description": "",
+          "effect_class": "compute",
+          "external_ref": null
+        }
+      ],
+      "event_type": "step.completed",
+      "idempotency_key": "00b76e8260114cb29a033aa9021d3d9e:d:0d891d0e440eadcbc7691a2ab5b2f8006740ef52d1c01a6769c816392f4b9ddd",
+      "occurred_at": "2026-09-14T09:55:47.216189Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "28515a78644dea2f8874ea613690a16336a9dc250b0af454e8c13d9700f1cfc8",
+        "size": 44
+      },
+      "parent_run_id": null,
+      "provenance": {
+        "executor": "aliased",
+        "executor_version": "golden",
+        "model_alias": "chat.fast",
+        "model_id": "model-B",
+        "prompt_hash": null
+      },
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 12,
+      "step_id": "d"
+    },
+    {
+      "event_type": "run.completed",
+      "occurred_at": "2026-09-14T09:55:47.216403Z",
+      "parent_run_id": null,
+      "run_id": "00b76e8260114cb29a033aa9021d3d9e",
+      "schema_version": 1,
+      "seq": 13
+    }
+  ],
+  "expected": {
+    "agent_versions": {
+      "greeter": 1,
+      "writer": 1
+    },
+    "approvals": {},
+    "attempts": {
+      "a": 1,
+      "b": 1,
+      "c": 1,
+      "d": 1
+    },
+    "cancel_requested": false,
+    "cancelled_steps": [],
+    "cost_ceiling": null,
+    "dead_lettered": {},
+    "ended_at": "2026-09-14T09:55:47.216403Z",
+    "error": null,
+    "failed_steps": {},
+    "id": "00b76e8260114cb29a033aa9021d3d9e",
+    "inputs": {},
+    "inputs_ref": {
+      "media_type": "application/json",
+      "sha256": "eef4862db6bef854041c8a257bb914df75d3d4c1338b26bddcb1e7c268107606",
+      "size": 18
+    },
+    "last_seq": 13,
+    "parent_run_id": null,
+    "pause_requested": false,
+    "pending_retries": {},
+    "progress": {
+      "a": 1.0,
+      "b": 1.0,
+      "c": 1.0,
+      "d": 1.0
+    },
+    "request_id": "golden-v0.5.0",
+    "started_at": "2026-09-14T09:55:47.210870Z",
+    "status": "completed",
+    "steps": [
+      {
+        "attempt": 1,
+        "cost": {
+          "amount": "0",
+          "currency": "USD",
+          "pricing_snapshot_hash": null,
+          "units": []
+        },
+        "effects": [
+          {
+            "description": "",
+            "effect_class": "compute",
+            "external_ref": null
+          }
+        ],
+        "finished_at": "2026-09-14T09:55:47.213695Z",
+        "node_id": "a",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "4b59167ad9045adad249b6c5a8d5d9bc246efc3c907a37a84a14a83bd1beb68b",
+          "size": 44
+        },
+        "provenance": {
+          "executor": "aliased",
+          "executor_version": "golden",
+          "model_alias": "chat.fast",
+          "model_id": "model-A",
+          "prompt_hash": null
+        }
+      },
+      {
+        "attempt": 1,
+        "cost": {
+          "amount": "0",
+          "currency": "USD",
+          "pricing_snapshot_hash": null,
+          "units": []
+        },
+        "effects": [
+          {
+            "description": "echo",
+            "effect_class": "compute",
+            "external_ref": null
+          }
+        ],
+        "finished_at": "2026-09-14T09:55:47.215139Z",
+        "node_id": "b",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "d3f31118b3f0dbfc58fc721e48feffc5e6970634ae591b3af1193d4394866e40",
+          "size": 121
+        },
+        "provenance": {
+          "executor": "echo",
+          "executor_version": "0.3.0",
+          "model_alias": null,
+          "model_id": null,
+          "prompt_hash": null
+        }
+      },
+      {
+        "attempt": 1,
+        "cost": {
+          "amount": "0",
+          "currency": "USD",
+          "pricing_snapshot_hash": null,
+          "units": []
+        },
+        "effects": [
+          {
+            "description": "echo",
+            "effect_class": "compute",
+            "external_ref": null
+          }
+        ],
+        "finished_at": "2026-09-14T09:55:47.215399Z",
+        "node_id": "c",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "d3f31118b3f0dbfc58fc721e48feffc5e6970634ae591b3af1193d4394866e40",
+          "size": 121
+        },
+        "provenance": {
+          "executor": "echo",
+          "executor_version": "0.3.0",
+          "model_alias": null,
+          "model_id": null,
+          "prompt_hash": null
+        }
+      },
+      {
+        "attempt": 1,
+        "cost": {
+          "amount": "0",
+          "currency": "USD",
+          "pricing_snapshot_hash": null,
+          "units": []
+        },
+        "effects": [
+          {
+            "description": "",
+            "effect_class": "compute",
+            "external_ref": null
+          }
+        ],
+        "finished_at": "2026-09-14T09:55:47.216189Z",
+        "node_id": "d",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "28515a78644dea2f8874ea613690a16336a9dc250b0af454e8c13d9700f1cfc8",
+          "size": 44
+        },
+        "provenance": {
+          "executor": "aliased",
+          "executor_version": "golden",
+          "model_alias": "chat.fast",
+          "model_id": "model-B",
+          "prompt_hash": null
+        }
+      }
+    ],
+    "substitutions": [
+      {
+        "agent": "writer",
+        "at": "2026-09-14T09:55:47.216050Z",
+        "from_model": "model-A",
+        "reason": "executor 'aliased' now resolves agent 'writer' to 'model-B' (was 'model-A')",
+        "step_id": "d",
+        "to_model": "model-B"
+      }
+    ],
+    "total_cost": "0",
+    "workflow": "diamond",
+    "workflow_version": 1
+  },
+  "label": "v0.5.0"
+}

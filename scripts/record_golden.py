@@ -15,10 +15,36 @@ from pathlib import Path
 
 from agentos.agents.echo import EchoExecutor
 from agentos.core.engine import Engine
-from agentos.core.models import Agent, AgentType, WorkflowDefinition
+from agentos.core.models import (
+    Agent,
+    AgentType,
+    Cost,
+    Effect,
+    EffectClass,
+    Provenance,
+    StepResult,
+    WorkflowDefinition,
+)
 from agentos.store.memory import MemoryStore
 
 GOLDEN = Path(__file__).resolve().parents[1] / "tests" / "golden"
+
+
+class _Aliased:
+    """Deterministic stand-in for a provider plugin (v0.5.0): resolves a different model
+    for step 'd' than for 'a', so the golden log contains an `executor.substituted`."""
+
+    name, version = "aliased", "golden"
+
+    def resolve(self, req):
+        return "model-B" if req.step_id == "d" else "model-A"
+
+    def execute(self, req, progress):
+        return StepResult(
+            output={"model": self.resolve(req), "run": req.inputs.get("run")},
+            effects=[Effect(effect_class=EffectClass.compute)], cost=Cost(),
+            provenance=Provenance(executor=self.name, executor_version=self.version,
+                                  model_id=self.resolve(req), model_alias="chat.fast"))
 
 
 def main(label: str) -> int:
@@ -28,14 +54,18 @@ def main(label: str) -> int:
         return 2
     store = MemoryStore()
     store.put_agent(Agent(name="greeter", type=AgentType.echo, config={"message": "hi"}))
+    store.put_agent(Agent(name="writer", type=AgentType.llm, executor="aliased",
+                          config={"model": "chat.fast"}))
     store.put_workflow(WorkflowDefinition(name="diamond", version=1, nodes=[
-        {"id": "a", "agent": "greeter"},
+        {"id": "a", "agent": "writer"},
         {"id": "b", "agent": "greeter", "depends_on": ["a"]},
         {"id": "c", "agent": "greeter", "depends_on": ["a"]},
-        {"id": "d", "agent": "greeter", "depends_on": ["b", "c"]},
+        {"id": "d", "agent": "writer", "depends_on": ["b", "c"]},
     ]))
-    engine = Engine(store=store, blobs=store, executors={"echo": EchoExecutor()})
-    run = engine.start_run("diamond", request_id=f"golden-{label}")
+    engine = Engine(store=store, blobs=store,
+                    executors={"echo": EchoExecutor(), "aliased": _Aliased()})
+    run = engine.start_run("diamond", request_id=f"golden-{label}",
+                           inputs={"topic": "golden"})
     events = [e.to_record() for e in store.read_events(run.id)]
     expected = engine.get_run(run.id, hydrate=False).model_dump(mode="json")
     out.write_text(json.dumps({"label": label, "events": events, "expected": expected},
