@@ -24,10 +24,22 @@ from agentos.providerkit.errors import (
     TemplateError,
     server_message,
 )
-from agentos.providerkit.prompt import render_prompt
+from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, wrap_input
 
 __all__ = [
-    "AuthenticationFailed", "BadResponse", "ConfigError", "ModelNotFound", "ProviderConfig",
-    "ProviderError", "ProviderRateLimited", "ProviderServerError", "ProviderUnreachable",
-    "TemplateError", "config_from_env", "render_prompt", "server_message",
+    "DATA_BOUNDARY",
+    "AuthenticationFailed",
+    "BadResponse",
+    "ConfigError",
+    "ModelNotFound",
+    "ProviderConfig",
+    "ProviderError",
+    "ProviderRateLimited",
+    "ProviderServerError",
+    "ProviderUnreachable",
+    "TemplateError",
+    "config_from_env",
+    "render_prompt",
+    "server_message",
+    "wrap_input",
 ]

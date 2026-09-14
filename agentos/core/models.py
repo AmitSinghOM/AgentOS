@@ -358,6 +358,8 @@ class WorkflowRun(BaseModel):
     error: str | None = None
     parent_run_id: str | None = None
     last_seq: int = 0
+    last_hash: str | None = None                              # tail of the event chain (C12)
+    integrity_verified: int = 0                               # hashed events the fold checked
 
 
 # Several models above reference types defined later in this module (e.g. `Agent` →

@@ -40,7 +40,7 @@ from agentos.providerkit.errors import (
     server_message,
 )
 from agentos.providerkit.pricing import PricingTable
-from agentos.providerkit.prompt import render_prompt
+from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, wrap_input
 
 from .config import api_version, from_env
 
@@ -162,13 +162,19 @@ class AnthropicExecutor:
     # -- internals ----------------------------------------------------------------------
 
     def _messages(self, cfg: dict, inputs: dict) -> tuple[str | None, list[dict]]:
-        system = str(cfg["system"]) if cfg.get("system") else None
+        # C12: the agent definition is the only source of instructions; everything
+        # interpolated from inputs is delimited data and the system prompt says so.
+        parts = [str(cfg["system"])] if cfg.get("system") else []
         if cfg.get("json_output"):
-            system = f"{system}\n\n{JSON_INSTRUCTION}" if system else JSON_INSTRUCTION
+            parts.append(JSON_INSTRUCTION)
+        parts.append(DATA_BOUNDARY)
+        system = "\n\n".join(parts)
         if cfg.get("prompt"):
             user = render_prompt(str(cfg["prompt"]), inputs)
+        elif inputs:
+            user = wrap_input("inputs", json.dumps(inputs, sort_keys=True, ensure_ascii=False))
         else:
-            user = json.dumps(inputs, sort_keys=True, ensure_ascii=False) if inputs else "Hello."
+            user = "Hello."
         return system, [{"role": "user", "content": user}]
 
     def _client(self, timeout: float | None = None) -> httpx.Client:

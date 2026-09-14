@@ -143,7 +143,8 @@ See [ROADMAP.md](./ROADMAP.md).
 | 2 · DAG orchestration | Parallel branches, agent versioning, retries + DLQ | ✅ `v0.3.0-dag` |
 | 3 · HITL + observability | Approval gates, OpenTelemetry, cost dashboard | ✅ `v0.4.0-observable` |
 | 4 · Providers + DX | OpenAI-compatible + Anthropic plugins, aliases, cassettes, 5-minute quickstart | ✅ `v0.5.0-providers` |
-| 5 · UI (optional) | React run visualizer over the event log | ⚪ planned |
+| 5 · Trust boundary + polish | C12: strict control payloads, tamper-evident log, inputs as data; screenshots | 🔵 in progress |
+| 6 · UI (optional) | React run visualizer over the event log | ⚪ planned |
 
 Phases 1–3 are scoped against a survey of what the popular agent runtimes get wrong
 (LangGraph, agno, Microsoft Agent Framework, crewAI, ADK, mastra, Temporal, Hatchet…).
