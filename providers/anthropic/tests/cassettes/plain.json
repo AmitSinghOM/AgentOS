@@ -1,0 +1,32 @@
+{
+  "format": "agentos.cassette/1",
+  "source": "http://127.0.0.1:11434",
+  "recorded_at": "2026-09-14T09:50:15+00:00",
+  "interactions": [
+    {
+      "key": "4cbc9dba6ac9123e3d5268cb4b52f6c76cc8fc1e68c2ca7765cf29f1f6e30291",
+      "request": {
+        "method": "POST",
+        "path": "/v1/messages",
+        "headers": {
+          "host": "127.0.0.1:11434",
+          "accept": "*/*",
+          "accept-encoding": "gzip, deflate",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "anthropic-version": "2023-06-01",
+          "user-agent": "agentos-anthropic/0.1.0",
+          "content-length": "119"
+        },
+        "body": "{\"model\":\"qwen2.5:0.5b\",\"max_tokens\":1024,\"messages\":[{\"role\":\"user\",\"content\":\"{\\\"a\\\": {\\\"n\\\": 1}}\"}],\"temperature\":0}"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"id\":\"msg_8135d5a9266aa5d399ffbe14\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"qwen2.5:0.5b\",\"content\":[{\"type\":\"text\",\"text\":\"I'm sorry, but I don't understand the context or the specific information you're trying to convey. Could you please provide more details or clarify your question?\"}],\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":14,\"cache_read_input_tokens\":24,\"output_tokens\":33}}\n"
+      }
+    }
+  ]
+}

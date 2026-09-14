@@ -1,5 +1,5 @@
 """Provider tests run against recorded cassettes, never the network (§11 A10). The
-in-process reference server (`reference_server.py`) stands in for a live server where a
+in-process reference server (`openai_reference_server.py`) stands in for a live server where a
 specific status code is needed."""
 from __future__ import annotations
 
@@ -17,28 +17,29 @@ from agentos_provider_openai_compat import (
     ConfigError,
     ModelNotFound,
     OpenAICompatExecutor,
-    ProviderConfig,
     ProviderRateLimited,
     ProviderServerError,
     ProviderUnreachable,
     TemplateError,
+    from_env,
 )
-from agentos_provider_openai_compat.cassette import CassetteMiss
-from agentos_provider_openai_compat.pricing import PricingTable
 
 from agentos.core.models import Agent, AgentType, BlobRef, Budget, StepRequest
+from agentos.providerkit.cassette import CassetteMiss
+from agentos.providerkit.pricing import PricingTable
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "scripts"))
-import reference_server
-from record_cassettes import QUICKSTART, SCENARIOS, quickstart_requests, request_for
+import openai_reference_server
+
+from agentos.providerkit.conformance import QUICKSTART, SCENARIOS, quickstart_requests, request_for
 
 CASSETTES = HERE / "cassettes"
 
 
 def replay(name: str, **over) -> OpenAICompatExecutor:
-    cfg = ProviderConfig.from_env({
+    cfg = from_env({
         "AGENTOS_OPENAI_BASE_URL": "http://reference-server/v1",
         "AGENTOS_OPENAI_CASSETTES": "replay",
         "AGENTOS_OPENAI_CASSETTE_DIR": str(CASSETTES), **over})
@@ -87,7 +88,7 @@ def test_json_output_is_parsed():
 def test_inputs_without_template_are_sent_as_json():
     res = replay("plain").execute(scenario("plain"), _progress)
     assert res.output["text"].strip()
-    assert "alias" not in res.output                                     # concrete id used
+    assert res.output["alias"] == "chat.fast"                            # shared scenario
 
 
 def test_replay_never_touches_the_network():
@@ -128,7 +129,7 @@ def test_unreachable_default_ollama_gives_the_start_hint():
     def down(request):
         raise httpx.ConnectError("connection refused", request=request)
 
-    ex = OpenAICompatExecutor(ProviderConfig.from_env({}), transport=httpx.MockTransport(down))
+    ex = OpenAICompatExecutor(from_env({}), transport=httpx.MockTransport(down))
     with pytest.raises(ProviderUnreachable) as e:
         ex.execute(scenario("plain"), _progress)
     assert "127.0.0.1:11434" in str(e.value) and "ollama serve" in str(e.value)
@@ -136,27 +137,27 @@ def test_unreachable_default_ollama_gives_the_start_hint():
 
 
 def test_auth_failure_names_the_variable_and_key_fixes_it():
-    t = reference_server.transport(require_key=True)
-    cfg = ProviderConfig.from_env({"AGENTOS_OPENAI_BASE_URL": "http://reference-server/v1"})
+    t = openai_reference_server.transport(require_key=True)
+    cfg = from_env({"AGENTOS_OPENAI_BASE_URL": "http://reference-server/v1"})
     with pytest.raises(AuthenticationFailed, match="AGENTOS_OPENAI_API_KEY.*unset"):
         OpenAICompatExecutor(cfg, transport=t).execute(scenario("plain"), _progress)
-    cfg = ProviderConfig.from_env({"AGENTOS_OPENAI_BASE_URL": "http://reference-server/v1",
-                                   "OPENAI_API_KEY": reference_server.API_KEY})
+    cfg = from_env({"AGENTOS_OPENAI_BASE_URL": "http://reference-server/v1",
+                                   "OPENAI_API_KEY": openai_reference_server.API_KEY})
     assert OpenAICompatExecutor(cfg, transport=t).execute(scenario("plain"), _progress).output
 
 
 @pytest.mark.parametrize("status,exc", [(429, ProviderRateLimited), (500, ProviderServerError),
                                         (503, ProviderServerError)])
 def test_transient_server_errors_say_retry_policy_applies(status, exc):
-    cfg = ProviderConfig.from_env({"AGENTOS_OPENAI_BASE_URL": "http://reference-server/v1"})
-    ex = OpenAICompatExecutor(cfg, transport=reference_server.transport(fail_with=status))
+    cfg = from_env({"AGENTOS_OPENAI_BASE_URL": "http://reference-server/v1"})
+    ex = OpenAICompatExecutor(cfg, transport=openai_reference_server.transport(fail_with=status))
     with pytest.raises(exc, match="retry policy applies"):
         ex.execute(scenario("plain"), _progress)
 
 
 def test_template_error_lists_available_keys():
-    cfg = ProviderConfig.from_env({"AGENTOS_OPENAI_BASE_URL": "http://reference-server/v1"})
-    ex = OpenAICompatExecutor(cfg, transport=reference_server.transport())
+    cfg = from_env({"AGENTOS_OPENAI_BASE_URL": "http://reference-server/v1"})
+    ex = OpenAICompatExecutor(cfg, transport=openai_reference_server.transport())
     req = request_for("t", {"prompt": "Summarise {draft.text}"}, {"run": {"topic": "x"}})
     with pytest.raises(TemplateError, match=r"\{draft.text\}.*available top-level keys: \['run'\]"):
         ex.execute(req, _progress)
@@ -165,22 +166,22 @@ def test_template_error_lists_available_keys():
 # ------------------------------------------------------------------ config, pricing, hooks
 
 def test_config_env_overrides_and_errors():
-    cfg = ProviderConfig.from_env({"AGENTOS_OPENAI_ALIASES": '{"chat.fast": "gpt-4o-mini"}',
+    cfg = from_env({"AGENTOS_OPENAI_ALIASES": '{"chat.fast": "gpt-4o-mini"}',
                                    "AGENTOS_OPENAI_BASE_URL": "https://api.openai.com/v1/"})
     assert cfg.resolve("chat.fast") == ("gpt-4o-mini", "chat.fast")
     assert cfg.resolve("chat.default") == ("llama3.2:3b", "chat.default")  # defaults kept
     assert cfg.resolve("gpt-4.1") == ("gpt-4.1", None)
     assert cfg.base_url == "https://api.openai.com/v1"
     with pytest.raises(ConfigError, match="AGENTOS_OPENAI_ALIASES is not valid JSON"):
-        ProviderConfig.from_env({"AGENTOS_OPENAI_ALIASES": "{oops"})
+        from_env({"AGENTOS_OPENAI_ALIASES": "{oops"})
     with pytest.raises(ConfigError, match="off \\| replay \\| record"):
-        ProviderConfig.from_env({"AGENTOS_OPENAI_CASSETTES": "maybe"})
+        from_env({"AGENTOS_OPENAI_CASSETTES": "maybe"})
     with pytest.raises(ConfigError, match="does not exist"):
-        ProviderConfig.from_env({"AGENTOS_OPENAI_PRICING": "/nope/pricing.json"})
+        from_env({"AGENTOS_OPENAI_PRICING": "/nope/pricing.json"})
 
 
 def test_pricing_is_decimal_and_content_addressed():
-    table = PricingTable(ProviderConfig().pricing_path)
+    table = PricingTable(from_env({}).pricing_path)
     cost, priced = table.cost("gpt-4o-mini", 1000, 500)
     assert priced and cost.amount == "0.00045" and cost.currency == "USD"
     cost, priced = table.cost("gpt-4o-mini-2024-07-18", 1_000_000, 0)   # dated variant
@@ -192,8 +193,8 @@ def test_pricing_is_decimal_and_content_addressed():
 
 
 def test_resolve_describe_and_health_hooks():
-    cfg = ProviderConfig.from_env({"AGENTOS_OPENAI_BASE_URL": "http://reference-server/v1"})
-    ex = OpenAICompatExecutor(cfg, transport=reference_server.transport())
+    cfg = from_env({"AGENTOS_OPENAI_BASE_URL": "http://reference-server/v1"})
+    ex = OpenAICompatExecutor(cfg, transport=openai_reference_server.transport())
     assert ex.resolve(quickstart_requests()[0]) == "qwen2.5:0.5b"
     d = ex.describe()
     assert d["aliases"]["chat.fast"] == "qwen2.5:0.5b" and d["pricing"]["sha256"] == ex.pricing.sha256
@@ -206,11 +207,11 @@ def test_resolve_describe_and_health_hooks():
 def test_record_then_replay_round_trip(tmp_path):
     env = {"AGENTOS_OPENAI_BASE_URL": "http://reference-server/v1",
            "AGENTOS_OPENAI_CASSETTE_DIR": str(tmp_path)}
-    rec = OpenAICompatExecutor(ProviderConfig.from_env({**env, "AGENTOS_OPENAI_CASSETTES": "record"}),
-                               transport=reference_server.transport(), cassette_name="rt")
+    rec = OpenAICompatExecutor(from_env({**env, "AGENTOS_OPENAI_CASSETTES": "record"}),
+                               transport=openai_reference_server.transport(), cassette_name="rt")
     first = rec.execute(quickstart_requests()[0], _progress)
     assert (tmp_path / "rt.json").exists()
-    rep = OpenAICompatExecutor(ProviderConfig.from_env({**env, "AGENTOS_OPENAI_CASSETTES": "replay"}),
+    rep = OpenAICompatExecutor(from_env({**env, "AGENTOS_OPENAI_CASSETTES": "replay"}),
                                cassette_name="rt")
     second = rep.execute(quickstart_requests()[0], _progress)
     assert first.output == second.output and first.provenance == second.provenance

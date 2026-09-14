@@ -24,6 +24,9 @@ observability = [
     "opentelemetry-semantic-conventions>=0.46b0",
     "prometheus-client>=0.20",
 ]
+# Shared toolkit for provider plugins (agentos.providerkit): cassettes, pricing, errors,
+# prompt templates. The core never imports it; the agentos-provider-* distributions do.
+providerkit = ["httpx>=0.27"]
 
 [tool.ruff]
 line-length = 100
@@ -32,7 +35,7 @@ target-version = "py311"
 [tool.pytest.ini_options]
 # The provider's tests live with the provider (its own distribution) but run from the
 # root too; they importorskip when the provider is not installed.
-testpaths = ["tests", "providers/openai-compat/tests"]
+testpaths = ["tests", "providers/openai-compat/tests", "providers/anthropic/tests"]
 markers = [
     "network: needs real Postgres + Toxiproxy (tests/chaos/network); skipped without AGENTOS_TEST_PG_DSN",
 ]
@@ -53,6 +56,7 @@ forbidden_modules = [
     "agentos.agents",
     "agentos.observability",
     "agentos.plugins",
+    "agentos.providerkit",
 ]
 
 [[tool.importlinter.contracts]]
@@ -71,7 +75,7 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "adapters do not import each other"
 type = "independence"
-modules = ["agentos.store", "agentos.agents", "agentos.observability"]
+modules = ["agentos.store", "agentos.agents", "agentos.observability", "agentos.providerkit"]
 
 [build-system]
 requires = ["hatchling"]
