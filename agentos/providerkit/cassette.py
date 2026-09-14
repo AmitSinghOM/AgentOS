@@ -67,12 +67,14 @@ class CassetteTransport(httpx.BaseTransport):
     """`mode="replay"` answers from the cassette; `mode="record"` forwards to `inner`
     and records. Auth headers are stripped from what is written."""
 
-    def __init__(self, cassette: Cassette, mode: str, inner: httpx.BaseTransport | None = None):
+    def __init__(self, cassette: Cassette, mode: str, inner: httpx.BaseTransport | None = None,
+                 record_var: str = "<PROVIDER>_CASSETTES"):
         if mode not in ("replay", "record"):
             raise ValueError(f"mode must be replay | record, got {mode!r}")
         if mode == "record" and inner is None:
             inner = httpx.HTTPTransport()
         self.cassette, self.mode, self.inner = cassette, mode, inner
+        self.record_var = record_var
         self.hits = 0
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
@@ -84,7 +86,7 @@ class CassetteTransport(httpx.BaseTransport):
                 raise CassetteMiss(
                     f"no recorded response in {self.cassette.path} for "
                     f"{request.method} {request.url.raw_path.decode()} (key {key[:12]}…). "
-                    f"Re-record with AGENTOS_OPENAI_CASSETTES=record against a live server, "
+                    f"Re-record with {self.record_var}=record against a live server, "
                     f"or check that the request body is deterministic (temperature, seed).")
             self.hits += 1
             r = hit["response"]

@@ -1,0 +1,16 @@
+{
+  "schema": "agentos.pricing/1",
+  "as_of": "2025-06",
+  "currency": "USD",
+  "unit": "per_1m_tokens",
+  "note": "Snapshot used to price steps; its sha256 is recorded on every step as cost.pricing_snapshot_hash and the bytes are stored in the BlobStore at startup. Models not listed are priced 0 and marked priced=false. Override with AGENTOS_ANTHROPIC_PRICING=/path/to/pricing.json.",
+  "models": {
+    "claude-3-5-haiku-latest": {"input": "0.80", "output": "4.00"},
+    "claude-3-5-haiku": {"input": "0.80", "output": "4.00"},
+    "claude-3-7-sonnet": {"input": "3.00", "output": "15.00"},
+    "claude-sonnet-4": {"input": "3.00", "output": "15.00"},
+    "claude-opus-4": {"input": "15.00", "output": "75.00"}
+  },
+  "free_prefixes": ["qwen", "llama", "gemma", "mistral", "phi", "deepseek", "smollm", "tinyllama"],
+  "free_prefixes_note": "Locally served open-weight families behind Ollama's /v1/messages are priced 0 and marked priced=true."
+}

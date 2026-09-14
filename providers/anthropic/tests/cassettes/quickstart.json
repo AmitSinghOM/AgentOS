@@ -1,0 +1,57 @@
+{
+  "format": "agentos.cassette/1",
+  "source": "http://127.0.0.1:11434",
+  "recorded_at": "2026-09-14T09:50:16+00:00",
+  "interactions": [
+    {
+      "key": "4e1417157553b292dea06efb7d7c94a912df27c5bad39b6ebdc806e3273de2c7",
+      "request": {
+        "method": "POST",
+        "path": "/v1/messages",
+        "headers": {
+          "host": "127.0.0.1:11434",
+          "accept": "*/*",
+          "accept-encoding": "gzip, deflate",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "anthropic-version": "2023-06-01",
+          "user-agent": "agentos-anthropic/0.1.0",
+          "content-length": "191"
+        },
+        "body": "{\"model\":\"qwen2.5:0.5b\",\"max_tokens\":1024,\"messages\":[{\"role\":\"user\",\"content\":\"Write a haiku about event logs.\"}],\"temperature\":0,\"system\":\"You are a terse poet. Answer with the poem only.\"}"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"id\":\"msg_31d0b73921e6c80d4b5882b8\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"qwen2.5:0.5b\",\"content\":[{\"type\":\"text\",\"text\":\"Logs of events,\\nPast and present, now and forever,\\nTrace the journey.\"}],\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":1,\"cache_read_input_tokens\":32,\"output_tokens\":17}}\n"
+      }
+    },
+    {
+      "key": "5f7fc82cc599e9a898b3b31259a98198d49ae0df5ca36daeebcaa74b97b5c851",
+      "request": {
+        "method": "POST",
+        "path": "/v1/messages",
+        "headers": {
+          "host": "127.0.0.1:11434",
+          "accept": "*/*",
+          "accept-encoding": "gzip, deflate",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "anthropic-version": "2023-06-01",
+          "user-agent": "agentos-anthropic/0.1.0",
+          "content-length": "314"
+        },
+        "body": "{\"model\":\"qwen2.5:0.5b\",\"max_tokens\":1024,\"messages\":[{\"role\":\"user\",\"content\":\"Rate this haiku from 1 to 5 and say why, as JSON with keys score and reason:\\n\\nLogs of events,\\nPast and present, now and forever,\\nTrace the journey.\"}],\"temperature\":0,\"system\":\"Respond with a single JSON object and nothing else.\"}"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"id\":\"msg_1046d93ae8da29ecc98526be\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"qwen2.5:0.5b\",\"content\":[{\"type\":\"text\",\"text\":\"```json\\n{\\n  \\\"score\\\": 5,\\n  \\\"reason\\\": \\\"The haiku beautifully captures the cyclical nature of life, with each line representing a different aspect of the journey. The repetition of 'logs of events' and 'past and present' emphasizes the continuous flow of time, making it a fitting choice for this poetic form.\\\"\\n}\\n```\"}],\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":58,\"cache_read_input_tokens\":3,\"output_tokens\":73}}\n"
+      }
+    }
+  ]
+}

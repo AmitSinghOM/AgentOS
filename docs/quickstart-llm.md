@@ -90,7 +90,23 @@ curl -s -X POST 'localhost:8000/workflows/haiku/runs?sync=true' -H 'Content-Type
      -d '{"inputs": {"topic": "event logs"}}' | python -m json.tool
 ```
 
-## 6. See it in Jaeger and Grafana (optional)
+## 6. Same agents, a different wire format (optional)
+
+There is a second provider, `anthropic`, which speaks the Anthropic Messages API — and
+Ollama serves that format too. Change **one field** in the agent, nothing else:
+
+```bash
+pip install -e providers/anthropic       # then restart the API and worker
+sed 's/"openai-compat"/"anthropic"/' examples/poet_agent.json > /tmp/poet.json
+```
+
+Register that agent (bump `version` if `poet` already exists), run the workflow again, and
+the step's `provenance.executor` says `anthropic`. Point `AGENTOS_ANTHROPIC_BASE_URL` at
+`https://api.anthropic.com` with `ANTHROPIC_API_KEY` and aliases like
+`{"chat.fast": "claude-3-5-haiku-latest"}` for Anthropic's models. Tested end to end in
+`tests/test_quickstart_llm.py::test_same_agents_run_on_the_anthropic_wire_format`.
+
+## 7. See it in Jaeger and Grafana (optional)
 
 `docker compose up -d` brings up Postgres, Jaeger, Prometheus and Grafana. Run the API and
 worker with `AGENTOS_OTEL_EXPORTER=otlp AGENTOS_PROMETHEUS=1`, re-run step 5, then open

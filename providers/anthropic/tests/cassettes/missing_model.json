@@ -1,0 +1,32 @@
+{
+  "format": "agentos.cassette/1",
+  "source": "http://127.0.0.1:11434",
+  "recorded_at": "2026-09-14T09:50:15+00:00",
+  "interactions": [
+    {
+      "key": "661d4c72084b9f2565f089e67947043b4ad29d0af31ee5f53e4b8e03980eba71",
+      "request": {
+        "method": "POST",
+        "path": "/v1/messages",
+        "headers": {
+          "host": "127.0.0.1:11434",
+          "accept": "*/*",
+          "accept-encoding": "gzip, deflate",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "anthropic-version": "2023-06-01",
+          "user-agent": "agentos-anthropic/0.1.0",
+          "content-length": "106"
+        },
+        "body": "{\"model\":\"no-such-model:1b\",\"max_tokens\":1024,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"temperature\":0}"
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"type\":\"error\",\"error\":{\"type\":\"not_found_error\",\"message\":\"model 'no-such-model:1b' not found\"},\"request_id\":\"req_34e23db773e3713b13abed66\"}\n"
+      }
+    }
+  ]
+}

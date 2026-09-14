@@ -1,8 +1,7 @@
 """Record the cassettes the replay tests use (docs/DEVELOPMENT_STRUCTURE.md §11 A10).
 
-    python scripts/record_cassettes.py --live   # against AGENTOS_OPENAI_BASE_URL (default:
-                                                # local Ollama) — what the committed
-                                                # cassettes came from
+    python scripts/record_cassettes.py --live   # against AGENTOS_ANTHROPIC_BASE_URL
+                                                # (default: local Ollama /v1/messages)
     python scripts/record_cassettes.py          # against the in-process reference server
 
 Scenarios are shared by every provider: `agentos.providerkit.conformance`.
@@ -17,8 +16,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE / "tests"))
 
-import openai_reference_server
-from agentos_provider_openai_compat import OpenAICompatExecutor, from_env
+import anthropic_reference_server
+from agentos_provider_anthropic import AnthropicExecutor, from_env
 
 from agentos.providerkit.conformance import record
 
@@ -32,13 +31,13 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     env = dict(os.environ)
-    env["AGENTOS_OPENAI_CASSETTES"] = "record"
-    env["AGENTOS_OPENAI_CASSETTE_DIR"] = str(CASSETTE_DIR)
+    env["AGENTOS_ANTHROPIC_CASSETTES"] = "record"
+    env["AGENTOS_ANTHROPIC_CASSETTE_DIR"] = str(CASSETTE_DIR)
     if not args.live:
-        env.setdefault("AGENTOS_OPENAI_BASE_URL", "http://reference-server/v1")
+        env.setdefault("AGENTOS_ANTHROPIC_BASE_URL", "http://reference-server")
     cfg = from_env(env)
-    transport = None if args.live else openai_reference_server.transport()
-    return record(lambda name: OpenAICompatExecutor(cfg, transport=transport, cassette_name=name),
+    transport = None if args.live else anthropic_reference_server.transport()
+    return record(lambda name: AnthropicExecutor(cfg, transport=transport, cassette_name=name),
                   CASSETTE_DIR, args.only)
 
 
