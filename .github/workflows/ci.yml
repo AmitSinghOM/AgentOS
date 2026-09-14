@@ -110,8 +110,10 @@ jobs:
       - run: docker compose up -d --wait --wait-timeout 90
       - run: docker compose exec -T postgres pg_isready -U agentos
       - run: docker compose exec -T redis redis-cli ping | grep -q PONG
-      - run: curl -fsS http://localhost:16686/ > /dev/null      # jaeger UI up
-      - run: curl -fsS http://localhost:9090/-/ready               # prometheus ready
-      - run: curl -fsS http://localhost:3000/api/health | grep -q ok  # grafana up
+      # The UIs have no compose healthcheck, so `--wait` returns before they listen;
+      # retry briefly instead of failing the release gate on a connection reset.
+      - run: curl -fsS --retry 10 --retry-all-errors --retry-delay 2 http://localhost:16686/ > /dev/null      # jaeger UI up
+      - run: curl -fsS --retry 10 --retry-all-errors --retry-delay 2 http://localhost:9090/-/ready               # prometheus ready
+      - run: curl -fsS --retry 10 --retry-all-errors --retry-delay 2 http://localhost:3000/api/health | grep -q ok  # grafana up
       - if: always()
         run: docker compose down -v
