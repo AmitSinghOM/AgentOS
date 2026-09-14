@@ -142,7 +142,7 @@ See [ROADMAP.md](./ROADMAP.md).
 | 1 · Durable execution | Event-sourced state, idempotent steps, crash-resume | ✅ `v0.2.0-durable` |
 | 2 · DAG orchestration | Parallel branches, agent versioning, retries + DLQ | ✅ `v0.3.0-dag` |
 | 3 · HITL + observability | Approval gates, OpenTelemetry, cost dashboard | ✅ `v0.4.0-observable` |
-| 4 · Providers + DX | OpenAI-compatible plugin, aliases, cassettes, 5-minute quickstart | 🔵 in progress |
+| 4 · Providers + DX | OpenAI-compatible + Anthropic plugins, aliases, cassettes, 5-minute quickstart | ✅ `v0.5.0-providers` |
 | 5 · UI (optional) | React run visualizer over the event log | ⚪ planned |
 
 Phases 1–3 are scoped against a survey of what the popular agent runtimes get wrong

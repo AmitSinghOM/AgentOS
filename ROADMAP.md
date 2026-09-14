@@ -183,9 +183,11 @@ screenshots together.
 the log turned out to need zero engine changes beyond the fan-out, and having spans earlier
 would have made the Toxiproxy investigations faster to read.
 
-## Phase 4 — Providers + developer experience  ·  ~2 weekends
+## Phase 4 — Providers + developer experience  ·  ~2 weekends  ·  ✅ shipped `v0.5.0-providers` (2026-09-14)
 **Goal:** a real model in five minutes with no API key, from a package a stranger would
-adopt for a pilot. Providers are plugins (§2.2); the core still ships `echo` only.
+adopt for a pilot. Providers are plugins (§2.2); the core still ships `echo` only. **Met:**
+two providers, two wire formats, zero core changes between them; quickstart executed by
+test and run live for both.
 
 - [x] **First provider plugin** `agentos-provider-openai-compat` (`providers/openai-compat/`, its own distribution, MIT): any OpenAI-compatible chat-completions server over plain `httpx` — Ollama zero-config default, vLLM, LM Studio, OpenRouter, OpenAI. No vendor SDK: the wire format is the contract
 - [x] **Entry-point discovery** (`agentos.executors` group) in the composition roots (`agentos/plugins.py`); a broken plugin is skipped with a warning naming it, never fatal; `Agent.executor` routes by name; a missing executor fails the run with the install hint. `GET /executors` shows each plugin's `describe()` + `health()` (server reachable? aliases available?)
@@ -197,10 +199,25 @@ adopt for a pilot. Providers are plugins (§2.2); the core still ships `echo` on
 - [ ] ⏭ README screenshots (Jaeger span with `gen_ai.*`, Grafana) — now recordable
 - [ ] ⏭ C12 executor-input trust boundary: tool results are data, never prompt (`agentos/protocols/`, A8)
 - [ ] ⏭ A11 `agentos export-run --format jsonl`
-- [ ] ⏭ Second provider (Anthropic or Bedrock) to prove the plugin seam with a different wire format
+- [x] **Second provider** `agentos-provider-anthropic` (Anthropic Messages wire format; Ollama's `/v1/messages` as the free default) — proved the seam: different request shape, auth header, error envelope (529), no `response_format`; zero changes to the core or the first provider. Shared pieces extracted to `agentos.providerkit` (cassettes, pricing, errors, templates, env config, conformance scenarios); the OpenAI provider refactored onto it
 - [ ] ⏭ Real `tool` agent (HTTP/subprocess) in core
 
 **Tag:** `v0.5.0-providers`. **Post:** "Providers Are Plugins: Surviving Model Churn With Aliases, Cassettes and a Pricing Hash."
+
+**Carry-forward decision (2026-09-14).** Phase 4 is tagged with its goal met. The
+executor-input trust boundary (C12/A8) now has a consumer — two of them — and is the
+natural first slice of whatever comes next, ahead of the optional UI; it was not started
+here because the phase's DX target was already large and the boundary deserves its own
+design note (tool results as data, never prompt; a `protocols/` adapter layer). README
+screenshots wait for a moment with Grafana open and a real run behind it — they are
+recordable now, which they were not before this phase. The `tool` agent, A11 export and
+A12 global pause carry unchanged; none is blocking anyone. Every ⏭ item remains a
+checkbox, not a deletion.
+
+**What I'd do differently:** extract `providerkit` *before* writing the first provider,
+not after the second. The refactor was cheap, but designing the shared layer first would
+have made the first provider smaller on day one and the conformance scenarios the
+starting point rather than a by-product.
 
 ## Phase 5 — UI (optional)  ·  ~2 weekends
 **Goal:** a visual the recruiter screenshot remembers. Plays to frontend strength.
