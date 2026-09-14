@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentos-provider-openai-compat"
+version = "0.1.0"
+description = "AgentOS executor for any OpenAI-compatible chat-completions server (Ollama, vLLM, LM Studio, OpenRouter, OpenAI) over plain HTTP"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "agentos>=0.4,<0.6",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "fastapi>=0.110"]   # fastapi only for the in-process reference server
+
+# Discovered by `agentos.plugins.discover_executors()` in the API and worker composition
+# roots (docs/DEVELOPMENT_STRUCTURE.md §2.2). The core never imports this package.
+[project.entry-points."agentos.executors"]
+openai-compat = "agentos_provider_openai_compat:load"
+
+[tool.setuptools]
+packages = ["agentos_provider_openai_compat"]
+
+[tool.setuptools.package-data]
+agentos_provider_openai_compat = ["pricing.json"]

@@ -1,0 +1,55 @@
+{
+  "format": "agentos.cassette/1",
+  "source": "http://127.0.0.1:11434/v1",
+  "recorded_at": "2026-09-14T09:19:37+00:00",
+  "interactions": [
+    {
+      "key": "7e2815b27777bc211c53905972de07fdfd0ea826ca840a4ea0a83c89cf0b46b4",
+      "request": {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "host": "127.0.0.1:11434",
+          "accept": "*/*",
+          "accept-encoding": "gzip, deflate",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "agentos-openai-compat/0.1.0",
+          "content-length": "284"
+        },
+        "body": "{\"model\":\"qwen2.5:0.5b\",\"messages\":[{\"role\":\"user\",\"content\":\"Rate this haiku from 1 to 5 and say why, as JSON with keys score and reason:\\n\\nLogs of events,\\nPast and present, now and forever,\\nTrace the journey.\"}],\"temperature\":0,\"seed\":42,\"response_format\":{\"type\":\"json_object\"}}"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"id\":\"chatcmpl-414\",\"object\":\"chat.completion\",\"created\":1789377577,\"model\":\"qwen2.5:0.5b\",\"system_fingerprint\":\"fp_ollama\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"{\\n  \\\"score\\\": 5,\\n  \\\"reason\\\": \\\"The haiku is a short poem that captures the essence of time and the passage of events. It uses simple language and imagery to convey the idea that the past, present, and future are intertwined, and the journey is a continuous flow. The haiku's structure and imagery make it a perfect choice for a haiku, which is a form of poetry that typically consists of three lines with a blank line in the middle. The score of 5 indicates that the haiku is well-written and captures the essence of the haiku form.\\\"\\n}\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":67,\"prompt_tokens_details\":{\"cached_tokens\":24},\"completion_tokens\":123,\"total_tokens\":190}}\n"
+      }
+    },
+    {
+      "key": "90757546b8eac98c30f6fd941c107c8d57f7c768794fdc75c85e57c23a4716e0",
+      "request": {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "host": "127.0.0.1:11434",
+          "accept": "*/*",
+          "accept-encoding": "gzip, deflate",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "agentos-openai-compat/0.1.0",
+          "content-length": "202"
+        },
+        "body": "{\"model\":\"qwen2.5:0.5b\",\"messages\":[{\"role\":\"system\",\"content\":\"You are a terse poet. Answer with the poem only.\"},{\"role\":\"user\",\"content\":\"Write a haiku about event logs.\"}],\"temperature\":0,\"seed\":42}"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"id\":\"chatcmpl-40\",\"object\":\"chat.completion\",\"created\":1789377576,\"model\":\"qwen2.5:0.5b\",\"system_fingerprint\":\"fp_ollama\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Logs of events,\\nPast and present, now and forever,\\nTrace the journey.\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":33,\"prompt_tokens_details\":{\"cached_tokens\":5},\"completion_tokens\":17,\"total_tokens\":50}}\n"
+      }
+    }
+  ]
+}

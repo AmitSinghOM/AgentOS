@@ -15,6 +15,7 @@ from agentos.core.events import (
     ApprovalRejected,
     ApprovalRequested,
     Event,
+    ExecutorSubstituted,
     RunCancelled,
     RunCancelRequested,
     RunCompleted,
@@ -38,6 +39,7 @@ from agentos.core.models import (
     ApprovalStatus,
     RunStatus,
     StepRecord,
+    Substitution,
     WorkflowRun,
 )
 
@@ -63,6 +65,7 @@ def fold(events: Iterable[Event]) -> WorkflowRun:
         status=RunStatus.running,
         started_at=first.occurred_at,
         parent_run_id=first.parent_run_id,
+        inputs_ref=first.inputs_ref,
         last_seq=first.seq,
     )
     completed: dict[str, StepRecord] = {}
@@ -164,6 +167,10 @@ def fold(events: Iterable[Event]) -> WorkflowRun:
             a = run.approvals[ev.approval_id]
             a.status, a.decided_by, a.decision_reason, a.decided_at = (
                 ApprovalStatus.rejected, ev.principal, ev.reason, ev.occurred_at)
+        elif isinstance(ev, ExecutorSubstituted):
+            run.substitutions.append(Substitution(
+                step_id=ev.step_id, agent=ev.agent, from_model=ev.from_model,
+                to_model=ev.to_model, reason=ev.reason, at=ev.occurred_at))
         elif isinstance(ev, RunStarted):
             raise FoldError("run.started appears twice")
 

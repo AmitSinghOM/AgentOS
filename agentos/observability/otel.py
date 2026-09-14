@@ -27,6 +27,7 @@ from agentos.core.events import (
     ApprovalRejected,
     ApprovalRequested,
     Event,
+    ExecutorSubstituted,
     RunCancelled,
     RunCompleted,
     RunFailed,
@@ -112,6 +113,12 @@ class OtelObserver:
             self._run_event(event, "approval.requested", {
                 "agentos.approval.id": event.approval_id, "agentos.step.id": event.step_id,
                 "agentos.effect.classes": ",".join(c.value for c in event.effect_classes)})
+        elif isinstance(event, ExecutorSubstituted):
+            self._run_event(event, "executor.substituted", {
+                "agentos.step.id": event.step_id, "agentos.agent": event.agent,
+                GEN_AI_SYSTEM: event.executor,
+                "agentos.model.from": event.from_model, "agentos.model.to": event.to_model,
+                "agentos.reason": event.reason})
         elif isinstance(event, ApprovalGranted | ApprovalRejected):
             kind = "granted" if isinstance(event, ApprovalGranted) else "rejected"
             p = event.principal

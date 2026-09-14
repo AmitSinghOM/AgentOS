@@ -36,6 +36,10 @@ class Agent(BaseModel):
     name: str
     version: int = 1
     type: AgentType
+    # Which registered executor runs this agent. Defaults to the agent type's built-in
+    # (`echo`, `tool`); model-vendor executors are plugins named after their distribution,
+    # e.g. "openai-compat" (docs/DEVELOPMENT_STRUCTURE.md §2.2). Additive, v0.5.0.
+    executor: str | None = None
     config: dict = Field(default_factory=dict)
     # Declare-then-do (§11 A1): the effect classes this agent is allowed to cause. Fixed
     # here, checked against the workflow budget BEFORE dispatch, and enforced against
@@ -196,10 +200,23 @@ class Cost(BaseModel):
 class Provenance(BaseModel):
     """Who/what produced a step's output. Mandatory on every completed step (§2.1)."""
 
-    executor: str              # executor name, e.g. "echo", "openai"
+    executor: str              # executor name, e.g. "echo", "openai-compat"
     executor_version: str      # plugin/package version
-    model_id: str | None = None
+    model_id: str | None = None        # the concrete model that ran (§11 A3)
+    model_alias: str | None = None     # the capability alias the agent asked for, if any
     prompt_hash: str | None = None
+
+
+class Substitution(BaseModel):
+    """Folded view of one `executor.substituted` event (§11 A3): the model a step ran on
+    differs from what the same agent used earlier in this run."""
+
+    step_id: str
+    agent: str
+    from_model: str
+    to_model: str
+    reason: str = ""
+    at: datetime = Field(default_factory=_now)
 
 
 class Effect(BaseModel):
@@ -333,6 +350,9 @@ class WorkflowRun(BaseModel):
     approvals: dict[str, Approval] = Field(default_factory=dict)  # approval_id → gate
     cost_ceiling: str | None = None                           # raised by granted cost approvals
     total_cost: str = "0"                                     # decimal string, rolled up
+    inputs_ref: BlobRef | None = None                         # run inputs, what the log records
+    inputs: dict = Field(default_factory=dict)                # hydrated for callers
+    substitutions: list[Substitution] = Field(default_factory=list)  # §11 A3
     started_at: datetime = Field(default_factory=_now)
     ended_at: datetime | None = None
     error: str | None = None
