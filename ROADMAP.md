@@ -219,9 +219,10 @@ not after the second. The refactor was cheap, but designing the shared layer fir
 have made the first provider smaller on day one and the conformance scenarios the
 starting point rather than a by-product.
 
-## Phase 5 — Trust boundary + polish  ·  ~1 weekend  ·  🔵 in progress
+## Phase 5 — Trust boundary + polish  ·  ~1 weekend  ·  ✅ shipped `v0.6.0-trusted` (2026-09-14)
 **Goal:** close the last structural landscape con and make the README show what the
-system looks like running.
+system looks like running. **Met:** C12 closed with three tested boundaries; screenshots
+from a real two-process run, which also exposed and fixed cross-process observability.
 
 - [x] **C12 trust boundary** ([#12](https://github.com/AmitSinghOM/AgentOS/issues/12), `docs/TRUST_BOUNDARY.md`): control payloads are `principal` + `reason` and nothing else (`extra="forbid"`, 422 + logged, no event, no step); every appended event carries `prev_hash`/`hash` computed in the core, `fold()` verifies the chain (edit/insert/remove → `FoldError`, `GET /runs/{id}` 500, `GET /runs/{id}/integrity`), pre-v0.6.0 logs fold as before; model inputs delimited as `<input name=…>` with `DATA_BOUNDARY` in every system prompt (both providers); structural test that a step output cannot choose the next step, executor or effect class
 - [x] README screenshots: Jaeger span with `gen_ai.*`, Grafana dashboard, from a real two-process run (`docs/images/`). Taking them exposed and fixed a real defect: the worker's observers never saw `run.started`, so Prometheus labelled everything `workflow="unknown"` and Jaeger got orphan step spans. Now: trace/run-span ids derive from the run id, observers resolve run facts from the store, run-level happenings are child spans, and the worker serves `/metrics` on `:8001`
@@ -230,7 +231,18 @@ system looks like running.
 - [ ] ⏭ A11 `agentos export-run --format jsonl`
 - [ ] ⏭ A12 global pause
 
-**Tag:** `v0.6.0-trusted`.
+**Tag:** `v0.6.0-trusted`. **Post:** "Three Doors: Where Untrusted Bytes Meet an Agent Engine."
+
+**Carry-forward decision (2026-09-14).** Phase 5 is tagged with its goal met. The `tool`
+agent, A11 export and A12 global pause carry unchanged — none blocks a user of the two
+providers, and each is a feature rather than a gap in an invariant. Signing the chain tail
+(so the C12 chain becomes a signature) waits for the KeyStore port (A7), where it belongs.
+Every ⏭ item remains a checkbox, not a deletion.
+
+**What I'd do differently:** run the two-process deployment as part of CI from Phase 3.
+The compose job proved the *services* came up; nothing proved the *telemetry* stitched
+across processes, and a single test that feeds one observer `run.started` and another the
+rest would have caught it a release earlier.
 
 ## Phase 6 — UI (optional)  ·  ~2 weekends
 **Goal:** a visual the recruiter screenshot remembers. Plays to frontend strength.
