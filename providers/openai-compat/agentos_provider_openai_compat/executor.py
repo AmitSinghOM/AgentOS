@@ -42,7 +42,7 @@ from agentos.providerkit.errors import (
     server_message,
 )
 from agentos.providerkit.pricing import PricingTable
-from agentos.providerkit.prompt import render_prompt
+from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, wrap_input
 
 from .config import from_env
 
@@ -164,14 +164,16 @@ class OpenAICompatExecutor:
     # -- internals ----------------------------------------------------------------------
 
     def _messages(self, cfg: dict, inputs: dict) -> list[dict]:
-        msgs = []
-        if cfg.get("system"):
-            msgs.append({"role": "system", "content": str(cfg["system"])})
+        # C12: the agent definition is the only source of instructions; everything
+        # interpolated from inputs is delimited data and the system prompt says so.
+        system = f"{cfg['system']}\n\n{DATA_BOUNDARY}" if cfg.get("system") else DATA_BOUNDARY
+        msgs = [{"role": "system", "content": system}]
         if cfg.get("prompt"):
             user = render_prompt(str(cfg["prompt"]), inputs)
+        elif inputs:
+            user = wrap_input("inputs", json.dumps(inputs, sort_keys=True, ensure_ascii=False))
         else:
-            user = json.dumps(inputs, sort_keys=True, ensure_ascii=False) if inputs else \
-                "Hello."
+            user = "Hello."
         msgs.append({"role": "user", "content": user})
         return msgs
 

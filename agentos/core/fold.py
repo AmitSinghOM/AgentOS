@@ -33,6 +33,7 @@ from agentos.core.events import (
     StepRetryRequested,
     StepStarted,
 )
+from agentos.core.integrity import IntegrityError, verify
 from agentos.core.models import (
     Approval,
     ApprovalKind,
@@ -48,13 +49,21 @@ class FoldError(ValueError):
     """The log is not a valid run history (gap in seq, missing run.started, …)."""
 
 
-def fold(events: Iterable[Event]) -> WorkflowRun:
+def fold(events: Iterable[Event], *, verify_integrity: bool = True) -> WorkflowRun:
     events = list(events)
     if not events:
         raise FoldError("empty log")
     first = events[0]
     if not isinstance(first, RunStarted):
         raise FoldError(f"log must begin with run.started, got {type(first).event_type}")
+    verified = 0
+    if verify_integrity:
+        # C12: a replayed event that was edited, inserted or removed must not fold into
+        # state a scheduler acts on. Unhashed (pre-v0.6.0) logs verify trivially.
+        try:
+            verified = verify(events)
+        except IntegrityError as exc:
+            raise FoldError(f"log integrity violation: {exc}") from exc
 
     run = WorkflowRun(
         id=first.run_id,
@@ -176,4 +185,6 @@ def fold(events: Iterable[Event]) -> WorkflowRun:
 
     run.steps = [completed[s] for s in order]
     run.total_cost = str(total)
+    run.last_hash = events[-1].hash
+    run.integrity_verified = verified
     return run

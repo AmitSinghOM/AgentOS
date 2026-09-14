@@ -190,3 +190,21 @@ def test_step_completed_carries_blob_ref_not_bytes(store):
     (_, done) = store.read_events("r1")
     assert isinstance(done, StepCompleted) and done.output_ref == ref
     assert b'"out"' not in str(done.to_record()).encode()  # payload never in the log
+
+
+def test_event_chain_survives_the_adapter_round_trip(store):
+    """C12: the hash is computed over the record BEFORE append; the adapter's serialization
+    (datetimes, enums, decimals, nested models) must reproduce those exact bytes on read."""
+    from agentos.agents.echo import EchoExecutor
+    from agentos.core.engine import Engine
+    from agentos.core.integrity import event_hash, verify
+
+    store.put_agent(Agent(name="g", type=AgentType.echo))
+    store.put_workflow(WorkflowDefinition(name="w", nodes=[
+        {"id": "a", "agent": "g"}, {"id": "b", "agent": "g", "depends_on": ["a"]}]))
+    eng = Engine(store=store, blobs=store, executors={"echo": EchoExecutor()},
+                 lease=store if hasattr(store, "acquire") else None)
+    run = eng.start_run("w", inputs={"topic": "round trip"})
+    events = store.read_events(run.id)
+    assert all(e.hash and event_hash(e) == e.hash for e in events)
+    assert verify(events) == len(events) == run.integrity_verified >= 7

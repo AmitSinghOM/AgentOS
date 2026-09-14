@@ -11,13 +11,19 @@ Configuration (env):
 """
 from __future__ import annotations
 
+import logging
 import os
 
-from fastapi import FastAPI, Header, HTTPException, Response
-from pydantic import BaseModel
+from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 
 from agentos.agents.echo import EchoExecutor
 from agentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
+from agentos.core.fold import FoldError
+from agentos.core.integrity import IntegrityError, verify
 from agentos.core.models import Agent, AgentType, BlobRef, Principal, WorkflowDefinition
 from agentos.core.ports import ConflictError
 from agentos.observability import build_observers
@@ -50,7 +56,20 @@ pricing_snapshots = store_pricing_snapshots(executors, store)
 engine = Engine(store=store, blobs=store, executors=executors,
                 lease=store if hasattr(store, "acquire") else None, observers=observers)
 
-app = FastAPI(title="AgentOS", version="0.5.0")
+app = FastAPI(title="AgentOS", version="0.6.0-dev")
+
+
+@app.exception_handler(RequestValidationError)
+async def _log_rejected_payload(request: Request, exc: RequestValidationError) -> Response:
+    """C12: a control payload that fails validation — an unexpected field, a missing
+    principal — is rejected 422 AND logged with what was smuggled, so an attempt to feed
+    the scheduler a client-authored tool call leaves a trace even though no event is
+    appended and no step starts."""
+    extras = sorted({str(e["loc"][-1]) for e in exc.errors() if e.get("type") == "extra_forbidden"})
+    if extras:
+        logger.warning("rejected control payload on %s %s: unexpected field(s) %s",
+                       request.method, request.url.path, extras)
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
 
 @app.get("/health")
@@ -123,6 +142,14 @@ def define_workflow(wf: WorkflowDefinition) -> WorkflowDefinition:
     return wf
 
 
+# C12 trust boundary (docs/TRUST_BOUNDARY.md §1): control payloads carry a principal and a
+# reason and NOTHING else. A body smuggling a tool call, an output or a next step is
+# rejected 422 before it reaches the engine, and logged; the scheduler only ever dispatches
+# steps it derives from the workflow definition.
+_STRICT = ConfigDict(extra="forbid")
+logger = logging.getLogger("agentos.api")
+
+
 class RunStartBody(BaseModel):
     """Optional body for `POST /workflows/{name}/runs`. `inputs` reach every step under
     the reserved key `run`, so an agent's prompt template can say `{run.topic}`."""
@@ -158,13 +185,33 @@ def start_run(name: str, response: Response, sync: bool = False,
 
 @app.get("/runs/{run_id}")
 def get_run(run_id: str) -> dict:
-    run = engine.get_run(run_id)
+    try:
+        run = engine.get_run(run_id)
+    except FoldError as exc:
+        # C12: a tampered log is refused, loudly, rather than folded into state.
+        logger.error("run %s: %s", run_id, exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     if run is None:
         raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
     return run.model_dump()
 
 
+@app.get("/runs/{run_id}/integrity")
+def run_integrity(run_id: str) -> dict:
+    """Verify the run's tamper-evident event chain (C12). `hashed` counts the events that
+    carry a hash (pre-v0.6.0 logs have none and verify trivially)."""
+    events = store.read_events(run_id)
+    if not events:
+        raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
+    try:
+        hashed = verify(events)
+    except IntegrityError as exc:
+        return {"run_id": run_id, "ok": False, "events": len(events), "error": str(exc)}
+    return {"run_id": run_id, "ok": True, "events": len(events), "hashed": hashed}
+
+
 class RetryBody(BaseModel):
+    model_config = _STRICT
     principal: Principal | None = None
     reason: str = ""
 
@@ -203,6 +250,7 @@ def get_run_events(run_id: str, after: int = 0) -> dict:
 
 
 class ControlBody(BaseModel):
+    model_config = _STRICT
     principal: Principal | None = None
     reason: str = ""
 
@@ -245,6 +293,7 @@ def resume_run(run_id: str, body: ControlBody | None = None) -> dict:
 # ---- human-in-the-loop (C7)
 
 class DecisionBody(BaseModel):
+    model_config = _STRICT
     principal: Principal              # mandatory: every decision names who made it (A2)
     reason: str = ""
 

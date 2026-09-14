@@ -43,6 +43,10 @@ class Event(BaseModel):
     schema_version: int = CURRENT_SCHEMA_VERSION
     occurred_at: datetime = Field(default_factory=_now)
     parent_run_id: str | None = None      # dynamic DAGs (§2.3): child runs point at parents
+    # v0.6.0, additive: tamper-evident chain (agentos.core.integrity, C12). None on logs
+    # written before; the engine stamps both on every append.
+    prev_hash: str | None = None
+    hash: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         """Flat JSON-safe dict: envelope + payload. The store persists exactly this."""

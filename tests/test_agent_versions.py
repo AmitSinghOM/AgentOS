@@ -77,9 +77,12 @@ def test_unpinned_legacy_run_resolves_latest():
     """Runs recorded before pinning existed (empty agent_versions) must still advance."""
     store, eng = _setup()
     run_id = eng.create_run("w")
-    # Rewrite the log's first event as a legacy record without pins.
+    # Rewrite the log's first event as a legacy record without pins. A pre-v0.6.0 record
+    # also carries no chain hashes — an edited HASHED event is a C12 integrity violation
+    # (see tests/test_integrity.py), which is the point.
     rec = store._events[run_id][0]
     rec["agent_versions"] = {}
+    rec["hash"] = rec["prev_hash"] = None
     run = eng.advance(run_id)
     assert run.status is RunStatus.completed and run.agent_versions == {}
 

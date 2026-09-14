@@ -219,7 +219,19 @@ not after the second. The refactor was cheap, but designing the shared layer fir
 have made the first provider smaller on day one and the conformance scenarios the
 starting point rather than a by-product.
 
-## Phase 5 — UI (optional)  ·  ~2 weekends
+## Phase 5 — Trust boundary + polish  ·  ~1 weekend  ·  🔵 in progress
+**Goal:** close the last structural landscape con and make the README show what the
+system looks like running.
+
+- [x] **C12 trust boundary** ([#12](https://github.com/AmitSinghOM/AgentOS/issues/12), `docs/TRUST_BOUNDARY.md`): control payloads are `principal` + `reason` and nothing else (`extra="forbid"`, 422 + logged, no event, no step); every appended event carries `prev_hash`/`hash` computed in the core, `fold()` verifies the chain (edit/insert/remove → `FoldError`, `GET /runs/{id}` 500, `GET /runs/{id}/integrity`), pre-v0.6.0 logs fold as before; model inputs delimited as `<input name=…>` with `DATA_BOUNDARY` in every system prompt (both providers); structural test that a step output cannot choose the next step, executor or effect class
+- [ ] README screenshots: Jaeger span with `gen_ai.*`, Grafana dashboard, from a real run
+- [ ] ⏭ Real `tool` agent (HTTP/subprocess) in core; results through `wrap_input`; `protocols/` (A8)
+- [ ] ⏭ A11 `agentos export-run --format jsonl`
+- [ ] ⏭ A12 global pause
+
+**Tag:** `v0.6.0-trusted`.
+
+## Phase 6 — UI (optional)  ·  ~2 weekends
 **Goal:** a visual the recruiter screenshot remembers. Plays to frontend strength.
 
 - [ ] React + (Cloudscape or shadcn) app
@@ -227,7 +239,7 @@ starting point rather than a by-product.
 - [ ] Event-log timeline view (time-travel debugging over the log)
 - [ ] Cost + latency panel per run
 
-**Tag:** `v0.6.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
+**Tag:** `v0.7.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
 
 ---
 

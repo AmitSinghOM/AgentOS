@@ -61,6 +61,7 @@ from agentos.core.events import (
 )
 from agentos.core.faults import FaultInjector, NoFaults
 from agentos.core.fold import fold
+from agentos.core.integrity import chain
 from agentos.core.models import (
     HUMAN_ONLY_EFFECTS,
     Approval,
@@ -178,9 +179,10 @@ class _Log:
     seq, remember the request, and retry once. Anything else is a real conflict."""
 
     def __init__(self, store: Store, run_id: str, last_seq: int, fence: int | None,
-                 observers: Sequence[Observer] = ()) -> None:
+                 observers: Sequence[Observer] = (), last_hash: str | None = None) -> None:
         self._store, self.run_id, self.last_seq, self._fence = store, run_id, last_seq, fence
         self._observers = observers
+        self.last_hash = last_hash            # tail of the tamper-evident chain (C12)
         self._lock = threading.Lock()
         self._closed = False
         self.cancel_requested = False
@@ -191,14 +193,17 @@ class _Log:
             if self._closed:
                 return  # advance() has returned; a straggler thread's progress is dropped
             try:
-                committed = self._store.append_events(self.run_id, self.last_seq, [event],
-                                                      fence=self._fence)
+                committed = self._store.append_events(
+                    self.run_id, self.last_seq, chain([event], self.last_seq, self.last_hash),
+                    fence=self._fence)
             except ConflictError:
                 if not self._adopt_control_events():
                     raise
-                committed = self._store.append_events(self.run_id, self.last_seq, [event],
-                                                      fence=self._fence)
+                committed = self._store.append_events(
+                    self.run_id, self.last_seq, chain([event], self.last_seq, self.last_hash),
+                    fence=self._fence)
             self.last_seq += 1
+            self.last_hash = committed[0].hash
         _notify(self._observers, committed[0])
 
     def poll_control(self) -> None:
@@ -218,6 +223,7 @@ class _Log:
             elif isinstance(e, RunPauseRequested):
                 self.pause_requested = True
         self.last_seq = fresh[-1].seq
+        self.last_hash = fresh[-1].hash
         return True
 
     def close(self) -> None:
@@ -431,8 +437,13 @@ class Engine:
         return expired
 
     def _emit(self, run_id: str, expected_seq: int, events: list[Event]) -> None:
-        """Command-path append: commit, then fan out to observers."""
-        committed = self._store.append_events(run_id, expected_seq, events)
+        """Command-path append: chain, commit, then fan out to observers."""
+        prev = None
+        if expected_seq > 0:
+            tail = self._store.read_events(run_id, after_seq=expected_seq - 1)
+            prev = tail[0].hash if tail else None
+        committed = self._store.append_events(run_id, expected_seq,
+                                              chain(events, expected_seq, prev))
         for ev in committed:
             _notify(self._observers, ev)
 
@@ -464,7 +475,8 @@ class Engine:
             run = self.get_run(run_id, hydrate=False)
             if run is None or run.status.value in TERMINAL:
                 return
-            log = _Log(self._store, run_id, run.last_seq, token.fence, self._observers)
+            log = _Log(self._store, run_id, run.last_seq, token.fence, self._observers,
+                       last_hash=run.last_hash)
             log.cancel_requested, log.pause_requested = run.cancel_requested, run.pause_requested
             self._apply_control(log, run.status)
         finally:
@@ -518,7 +530,8 @@ class Engine:
         if run.status.value in TERMINAL:
             return self.get_run(run_id)  # type: ignore[return-value]
 
-        log = _Log(self._store, run_id, run.last_seq, fence, self._observers)
+        log = _Log(self._store, run_id, run.last_seq, fence, self._observers,
+                   last_hash=run.last_hash)
         log.cancel_requested, log.pause_requested = run.cancel_requested, run.pause_requested
         if run.status is RunStatus.paused and not run.cancel_requested:
             return run                       # nothing to do until run.resumed
