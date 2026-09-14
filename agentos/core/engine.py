@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -75,10 +76,11 @@ from agentos.core.models import (
     WorkflowNode,
     WorkflowRun,
 )
-from agentos.core.ports import BlobStore, ConflictError, Executor, Store
+from agentos.core.ports import BlobStore, ConflictError, Executor, Observer, Store
 
 TERMINAL = frozenset({"completed", "failed", "cancelled"})
 PROGRESS_MIN_INTERVAL = 1.0   # seconds between step.progress events (rate limit)
+_log = logging.getLogger("agentos.engine")
 
 
 class LeaseLost(Exception):
@@ -126,6 +128,18 @@ def idempotency_key(run_id: str, step_id: str, inputs: dict) -> str:
     return f"{run_id}:{step_id}:{hashlib.sha256(_canonical(inputs)).hexdigest()}"
 
 
+def _notify(observers: Sequence[Observer], event: Event, run: WorkflowRun | None = None) -> None:
+    """Fan a committed event out to observers. An observer must never break the engine:
+    exceptions are logged and swallowed (telemetry is derived from the log and can be
+    rebuilt)."""
+    for obs in observers:
+        try:
+            obs.observe(event, run)
+        except Exception:  # noqa: BLE001 — telemetry must not affect correctness
+            _log.exception("observer %s failed on %s seq=%s", type(obs).__name__,
+                           type(event).event_type, event.seq)
+
+
 class _Log:
     """Serialized appender for one advance() call. Concurrent steps' progress events and
     the scheduler's own writes all go through here, so `expected_seq` is always right.
@@ -135,8 +149,10 @@ class _Log:
     conflict we re-read; if every foreign event is a control request we adopt the new
     seq, remember the request, and retry once. Anything else is a real conflict."""
 
-    def __init__(self, store: Store, run_id: str, last_seq: int, fence: int | None) -> None:
+    def __init__(self, store: Store, run_id: str, last_seq: int, fence: int | None,
+                 observers: Sequence[Observer] = ()) -> None:
         self._store, self.run_id, self.last_seq, self._fence = store, run_id, last_seq, fence
+        self._observers = observers
         self._lock = threading.Lock()
         self._closed = False
         self.cancel_requested = False
@@ -147,12 +163,15 @@ class _Log:
             if self._closed:
                 return  # advance() has returned; a straggler thread's progress is dropped
             try:
-                self._store.append_events(self.run_id, self.last_seq, [event], fence=self._fence)
+                committed = self._store.append_events(self.run_id, self.last_seq, [event],
+                                                      fence=self._fence)
             except ConflictError:
                 if not self._adopt_control_events():
                     raise
-                self._store.append_events(self.run_id, self.last_seq, [event], fence=self._fence)
+                committed = self._store.append_events(self.run_id, self.last_seq, [event],
+                                                      fence=self._fence)
             self.last_seq += 1
+        _notify(self._observers, committed[0])
 
     def poll_control(self) -> None:
         """Pick up control requests appended since our last write (no conflict needed)."""
@@ -183,11 +202,13 @@ class Engine:
                  faults: FaultInjector | None = None,
                  clock: Callable[[], float] = time.monotonic,
                  wall: Callable[[], datetime] = lambda: datetime.now(UTC),
-                 lease: Lease | None = None) -> None:
+                 lease: Lease | None = None,
+                 observers: Sequence[Observer] = ()) -> None:
         """`executors` maps an AgentType value (e.g. "echo") to the adapter that runs it.
         `clock` is monotonic (durations, rate limits); `wall` is the timestamp source for
         `retry_at` so tests can pin it. `lease` lets control requests be finalized
-        immediately when no worker holds the run (idle/paused runs)."""
+        immediately when no worker holds the run (idle/paused runs). `observers` receive
+        every committed event (telemetry adapters)."""
         self._store = store
         self._blobs = blobs
         self._executors = executors
@@ -195,6 +216,7 @@ class Engine:
         self._clock = clock
         self._wall = wall
         self._lease = lease
+        self._observers = tuple(observers)
 
     # ----------------------------------------------------------------- queries
     def get_run(self, run_id: str, *, hydrate: bool = True) -> WorkflowRun | None:
@@ -246,7 +268,7 @@ class Engine:
             if node.agent not in pins:
                 agent = self._store.get_agent(node.agent)
                 pins[node.agent] = agent.version if agent is not None else 0
-        self._store.append_events(run_id, 0, [RunStarted(
+        self._emit(run_id, 0, [RunStarted(
             run_id=run_id, workflow=wf.name, workflow_version=wf.version,
             request_id=request_id, principal=principal, agent_versions=pins,
         )])
@@ -262,7 +284,7 @@ class Engine:
         if step_id not in run.dead_lettered and step_id not in run.failed_steps:
             raise RetryNotAllowed(f"step {step_id!r} of run {run_id!r} is not dead-lettered "
                                   f"or failed (status {run.status.value})")
-        self._store.append_events(run_id, run.last_seq, [StepRetryRequested(
+        self._emit(run_id, run.last_seq, [StepRetryRequested(
             run_id=run_id, step_id=step_id, principal=principal, reason=reason,
         )])
         return self.get_run(run_id)  # type: ignore[return-value]
@@ -279,7 +301,7 @@ class Engine:
         if run.status.value in TERMINAL:
             raise ControlNotAllowed(f"run {run_id!r} is already {run.status.value}")
         if not run.cancel_requested:
-            self._store.append_events(run_id, run.last_seq, [RunCancelRequested(
+            self._emit(run_id, run.last_seq, [RunCancelRequested(
                 run_id=run_id, principal=principal, reason=reason)])
         self._finalize_if_idle(run_id)
         return self.get_run(run_id)  # type: ignore[return-value]
@@ -292,7 +314,7 @@ class Engine:
         if run.status.value in TERMINAL or run.status is RunStatus.paused:
             raise ControlNotAllowed(f"run {run_id!r} is {run.status.value}")
         if not run.pause_requested:
-            self._store.append_events(run_id, run.last_seq, [RunPauseRequested(
+            self._emit(run_id, run.last_seq, [RunPauseRequested(
                 run_id=run_id, principal=principal, reason=reason)])
         self._finalize_if_idle(run_id)
         return self.get_run(run_id)  # type: ignore[return-value]
@@ -304,7 +326,7 @@ class Engine:
             raise KeyError(f"unknown run {run_id!r}")
         if run.status is not RunStatus.paused:
             raise ControlNotAllowed(f"run {run_id!r} is {run.status.value}, not paused")
-        self._store.append_events(run_id, run.last_seq, [RunResumed(
+        self._emit(run_id, run.last_seq, [RunResumed(
             run_id=run_id, principal=principal, reason=reason)])
         return self.get_run(run_id)  # type: ignore[return-value]
 
@@ -324,7 +346,7 @@ class Engine:
                 f"approval {approval_id!r} covers "
                 f"{sorted(c.value for c in set(approval.effect_classes) & HUMAN_ONLY_EFFECTS)} "
                 f"and requires a human principal; got {principal.kind.value!r}")
-        self._store.append_events(run_id, run.last_seq, [ApprovalGranted(
+        self._emit(run_id, run.last_seq, [ApprovalGranted(
             run_id=run_id, approval_id=approval_id, step_id=approval.step_id,
             principal=principal, reason=reason)])
         return self.get_run(run_id)  # type: ignore[return-value]
@@ -336,7 +358,7 @@ class Engine:
         run, approval = self._pending_approval(run_id, approval_id)
         who = f"{principal.kind.value}:{principal.id}"
         cause = f"approval rejected by {who}" + (f": {reason}" if reason else "")
-        self._store.append_events(run_id, run.last_seq, [
+        self._emit(run_id, run.last_seq, [
             ApprovalRejected(run_id=run_id, approval_id=approval_id, step_id=approval.step_id,
                              principal=principal, reason=reason),
             StepDeadLettered(run_id=run_id, step_id=approval.step_id,
@@ -363,6 +385,12 @@ class Engine:
                     expired.append((run_id, a.approval_id))
                     break                                  # run is failed now
         return expired
+
+    def _emit(self, run_id: str, expected_seq: int, events: list[Event]) -> None:
+        """Command-path append: commit, then fan out to observers."""
+        committed = self._store.append_events(run_id, expected_seq, events)
+        for ev in committed:
+            _notify(self._observers, ev)
 
     def _pending_approval(self, run_id: str, approval_id: str):
         run = self.get_run(run_id, hydrate=False)
@@ -392,7 +420,7 @@ class Engine:
             run = self.get_run(run_id, hydrate=False)
             if run is None or run.status.value in TERMINAL:
                 return
-            log = _Log(self._store, run_id, run.last_seq, token.fence)
+            log = _Log(self._store, run_id, run.last_seq, token.fence, self._observers)
             log.cancel_requested, log.pause_requested = run.cancel_requested, run.pause_requested
             self._apply_control(log, run.status)
         finally:
@@ -444,7 +472,7 @@ class Engine:
         if run.status.value in TERMINAL:
             return self.get_run(run_id)  # type: ignore[return-value]
 
-        log = _Log(self._store, run_id, run.last_seq, fence)
+        log = _Log(self._store, run_id, run.last_seq, fence, self._observers)
         log.cancel_requested, log.pause_requested = run.cancel_requested, run.pause_requested
         if run.status is RunStatus.paused and not run.cancel_requested:
             return run                       # nothing to do until run.resumed

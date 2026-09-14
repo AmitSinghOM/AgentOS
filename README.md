@@ -95,6 +95,27 @@ curl -X POST 'localhost:8000/workflows/hello/runs?sync=true'
 
 Or run the same walkthrough as a test: `pytest tests/test_quickstart.py`.
 
+### Observability
+
+Telemetry is derived from the event log, so it can be rebuilt from any stored run and the
+core imports no telemetry SDK.
+
+```bash
+pip install -e ".[observability]"
+docker compose up -d jaeger prometheus grafana
+AGENTOS_OTEL_EXPORTER=otlp OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+  uvicorn agentos.api.main:app          # and the worker, with the same two variables
+```
+
+- Traces: [Jaeger](http://localhost:16686) — one span per run, one per step attempt, with
+  OpenTelemetry GenAI attributes (`gen_ai.system`, `gen_ai.request.model`,
+  `gen_ai.usage.*_tokens`) plus `agentos.*` (effects declared/reported, cost, approval and
+  dead-letter events).
+- Metrics: `GET /metrics` on the API, scraped by [Prometheus](http://localhost:9090).
+- Dashboard: [Grafana](http://localhost:3000), provisioned — runs/min, error rate, runs
+  awaiting approval, total cost, latency p50/p95/p99, step outcomes, retries and
+  dead-letters, tokens by agent, approval wait, cost per minute by workflow.
+
 ### The crash demo, as a test
 
 ```bash

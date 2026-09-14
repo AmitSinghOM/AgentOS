@@ -15,6 +15,7 @@ from agentos.agents.echo import EchoExecutor
 from agentos.core.engine import Engine
 from agentos.core.faults import from_env
 from agentos.core.models import AgentType
+from agentos.observability import build_observers
 from agentos.worker import Worker
 
 
@@ -45,8 +46,9 @@ def main(argv: list[str] | None = None) -> int:
 
     store = build_store()
     injector = from_env()
+    observers, _prom = build_observers()
     engine = Engine(store=store, blobs=store, executors={AgentType.echo.value: EchoExecutor()},
-                    faults=injector, lease=store)
+                    faults=injector, lease=store, observers=observers)
     worker = Worker(engine, store, lease=store, queue=store, holder=args.holder,
                     lease_ttl=args.lease_ttl, faults=injector)
     if args.once:
