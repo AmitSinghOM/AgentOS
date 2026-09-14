@@ -137,7 +137,7 @@ See [ROADMAP.md](./ROADMAP.md).
 | 0 · Walking skeleton | API + Postgres + Redis up, single-step run end-to-end | ✅ `v0.1.0-skeleton` |
 | 1 · Durable execution | Event-sourced state, idempotent steps, crash-resume | ✅ `v0.2.0-durable` |
 | 2 · DAG orchestration | Parallel branches, agent versioning, retries + DLQ | ✅ `v0.3.0-dag` |
-| 3 · HITL + observability | Approval gates, OpenTelemetry, cost dashboard | ⚪ planned |
+| 3 · HITL + observability | Approval gates, OpenTelemetry, cost dashboard | ✅ `v0.4.0-observable` |
 | 4 · UI (optional) | React run visualizer over the event log | ⚪ planned |
 
 Phases 1–3 are scoped against a survey of what the popular agent runtimes get wrong

@@ -63,6 +63,7 @@ from agentos.core.fold import fold
 from agentos.core.models import (
     HUMAN_ONLY_EFFECTS,
     Approval,
+    ApprovalKind,
     ApprovalStatus,
     Budget,
     Cost,
@@ -339,13 +340,15 @@ class Engine:
         The gated step has never started, so it runs exactly once, after this event."""
         run, approval = self._pending_approval(run_id, approval_id)
         budget = self._budget_for(run)
-        if principal.kind is not PrincipalKind.human and (
-                set(approval.effect_classes) & HUMAN_ONLY_EFFECTS
-                and not budget.allow_agent_approval):
+        human_only = (set(approval.effect_classes) & HUMAN_ONLY_EFFECTS) or \
+            approval.kind is ApprovalKind.cost           # money is human-only too
+        if principal.kind is not PrincipalKind.human and human_only \
+                and not budget.allow_agent_approval:
+            what = ("a cost ceiling" if approval.kind is ApprovalKind.cost else
+                    str(sorted(c.value for c in set(approval.effect_classes) & HUMAN_ONLY_EFFECTS)))
             raise ControlNotAllowed(
-                f"approval {approval_id!r} covers "
-                f"{sorted(c.value for c in set(approval.effect_classes) & HUMAN_ONLY_EFFECTS)} "
-                f"and requires a human principal; got {principal.kind.value!r}")
+                f"approval {approval_id!r} covers {what} and requires a human principal; "
+                f"got {principal.kind.value!r}")
         self._emit(run_id, run.last_seq, [ApprovalGranted(
             run_id=run_id, approval_id=approval_id, step_id=approval.step_id,
             principal=principal, reason=reason)])
@@ -358,14 +361,20 @@ class Engine:
         run, approval = self._pending_approval(run_id, approval_id)
         who = f"{principal.kind.value}:{principal.id}"
         cause = f"approval rejected by {who}" + (f": {reason}" if reason else "")
-        self._emit(run_id, run.last_seq, [
-            ApprovalRejected(run_id=run_id, approval_id=approval_id, step_id=approval.step_id,
-                             principal=principal, reason=reason),
-            StepDeadLettered(run_id=run_id, step_id=approval.step_id,
-                             attempt=run.attempts.get(approval.step_id, 0), cause=cause),
-            RunFailed(run_id=run_id, error=f"step {approval.step_id!r} dead-lettered: {cause}",
-                      step_id=approval.step_id),
-        ])
+        rejected = ApprovalRejected(run_id=run_id, approval_id=approval_id,
+                                    step_id=approval.step_id, principal=principal, reason=reason)
+        if approval.kind is ApprovalKind.cost:
+            # The money is already spent and recorded; nothing to dead-letter or reopen.
+            self._emit(run_id, run.last_seq, [rejected, RunFailed(
+                run_id=run_id, error=f"cost ceiling {cause}", step_id=approval.step_id or None)])
+        else:
+            self._emit(run_id, run.last_seq, [
+                rejected,
+                StepDeadLettered(run_id=run_id, step_id=approval.step_id,
+                                 attempt=run.attempts.get(approval.step_id, 0), cause=cause),
+                RunFailed(run_id=run_id, error=f"step {approval.step_id!r} dead-lettered: {cause}",
+                          step_id=approval.step_id),
+            ])
         return self.get_run(run_id)  # type: ignore[return-value]
 
     def expire_approvals(self, run_ids: list[str] | None = None) -> list[tuple[str, str]]:
@@ -600,9 +609,28 @@ class Engine:
                     # recorded, now suspend until they are decided.
                     log.append(RunSuspended(run_id=run_id))
                     return self.get_run(run_id)  # type: ignore[return-value]
-                if budget.max_run_cost is not None and total > Decimal(budget.max_run_cost):
-                    return self._fail(log, f"run cost {total} exceeds max_run_cost "
-                                           f"{budget.max_run_cost}")
+                ceiling = Decimal(run.cost_ceiling) if run.cost_ceiling else (
+                    Decimal(budget.max_run_cost) if budget.max_run_cost is not None else None)
+                if ceiling is not None and total > ceiling:
+                    # Budget guardrail (DESIGN §8): the tripping step is already recorded,
+                    # so the charge is in the log; now SUSPEND for a cost approval whose
+                    # grant raises the ceiling by one more budget's worth (C7 / A6).
+                    tripping = started[-1][1].step_id if started else ""
+                    approval_id = uuid4().hex
+                    proposed = total + Decimal(budget.max_run_cost or "0")
+                    expires = (now + timedelta(seconds=budget.approval_timeout_seconds)
+                               if budget.approval_timeout_seconds else None)
+                    log.append(ApprovalRequested(
+                        run_id=run_id, approval_id=approval_id, step_id=tripping,
+                        effect_classes=[], kind=ApprovalKind.cost,
+                        cost_at_request=str(total), proposed_ceiling=str(proposed),
+                        expires_at=expires,
+                        reason=f"run cost {total} exceeds ceiling {ceiling}; approving raises "
+                               f"the ceiling to {proposed}",
+                    ))
+                    log.append(RunSuspended(run_id=run_id))
+                    return self.get_run(run_id)  # type: ignore[return-value]
+                run = self.get_run(run_id, hydrate=False)  # type: ignore[assignment]
             log.append(RunCompleted(run_id=run_id))
             return self.get_run(run_id)  # type: ignore[return-value]
         finally:
@@ -625,7 +653,8 @@ class Engine:
         needs = (declared - budget.allowed_effect_classes) & budget.approval_required_for
         if not needs:
             return "run"
-        mine = [a for a in run.approvals.values() if a.step_id == node.id]
+        mine = [a for a in run.approvals.values()
+                if a.step_id == node.id and a.kind is ApprovalKind.effect]
         for a in mine:
             if a.status is ApprovalStatus.granted:
                 return f"granted:{a.approval_id}"

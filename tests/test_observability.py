@@ -256,3 +256,20 @@ def test_core_still_imports_no_telemetry_sdk():
             "print(len(bad))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "0"
+
+
+def test_metrics_endpoint_exposes_queue_depth(monkeypatch):
+    import importlib
+
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("AGENTOS_STORE", "memory")
+    from agentos.api import main
+    importlib.reload(main)
+    c = TestClient(main.app)
+    c.post("/agents", json={"name": "a", "type": "echo"})
+    c.post("/workflows", json={"name": "w", "nodes": [{"id": "s", "agent": "a"}]})
+    c.post("/workflows/w/runs")                              # 202: queued, no worker running
+    body = c.get("/metrics").text
+    assert "agentos_queue_depth 1.0" in body
+    assert "agentos_runs_started_total" in body

@@ -128,7 +128,7 @@ def test_reported_undeclared_effect_is_dead_lettered_with_the_class_named():
 
 # ------------------------------------------------------------------- cost (A6)
 
-def test_step_cost_over_budget_is_dead_lettered_and_run_ceiling_fails_after_recording():
+def test_step_cost_over_budget_is_dead_lettered_and_run_ceiling_suspends_after_recording():
     a = Agent(name="a1", type=AgentType.echo)
     ex = ScriptedExecutor({"a1": _result(amount="0.30", input_tokens=1000, output_tokens=50)})
     _, eng = _engine([a], _wf(Budget(max_step_cost="0.25"), agents=("a1", "a1")), ex)
@@ -138,12 +138,15 @@ def test_step_cost_over_budget_is_dead_lettered_and_run_ceiling_fails_after_reco
 
     _store, eng = _engine([a], _wf(Budget(max_run_cost="0.50"), agents=("a1", "a1")), ex)
     run = eng.start_run("w")
-    # s1 = 0.30 (ok), s2 = 0.60 total > 0.50 → recorded THEN failed (cost is in the log).
-    assert run.status is RunStatus.failed and "max_run_cost" in run.error
+    # s1 = 0.30 (ok), s2 = 0.60 total > 0.50 → recorded THEN suspended for a cost approval
+    # (Phase 3; Phase 2 failed here). The charge is in the log either way.
+    assert run.status is RunStatus.suspended
     assert [s.node_id for s in run.steps] == ["s1", "s2"]
     assert run.total_cost == "0.60"
     assert run.steps[1].cost.units[0].name == "input_tokens"
     assert run.steps[1].cost.pricing_snapshot_hash == "sha256:pricing-2026-09"
+    (a,) = run.approvals.values()
+    assert a.kind.value == "cost" and a.cost_at_request == "0.60" and a.proposed_ceiling == "1.10"
 
 
 def test_cost_is_decimal_not_float():
