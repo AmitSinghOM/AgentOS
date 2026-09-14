@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import string
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _dist_version
 from typing import Any
@@ -31,72 +30,27 @@ import httpx
 
 from agentos.core.models import Cost, Effect, EffectClass, Provenance, StepRequest, StepResult
 from agentos.core.ports import ProgressFn
+from agentos.providerkit.cassette import Cassette, CassetteTransport
+from agentos.providerkit.config import ProviderConfig
+from agentos.providerkit.errors import (
+    AuthenticationFailed,
+    BadResponse,
+    ModelNotFound,
+    ProviderRateLimited,
+    ProviderServerError,
+    ProviderUnreachable,
+    server_message,
+)
+from agentos.providerkit.pricing import PricingTable
+from agentos.providerkit.prompt import render_prompt
 
-from .cassette import Cassette, CassetteTransport
-from .config import ProviderConfig
-from .pricing import PricingTable
+from .config import from_env
 
 NAME = "openai-compat"
 try:
     VERSION = _dist_version("agentos-provider-openai-compat")
 except PackageNotFoundError:  # running from a source tree without install
     VERSION = "0.0.0+src"
-
-
-# ------------------------------------------------------------------ errors that explain
-
-class ProviderError(RuntimeError):
-    """Base: the message always says what happened AND what to do about it."""
-
-
-class ProviderUnreachable(ProviderError):
-    pass
-
-
-class AuthenticationFailed(ProviderError):
-    pass
-
-
-class ModelNotFound(ProviderError):
-    pass
-
-
-class ProviderRateLimited(ProviderError):
-    pass
-
-
-class ProviderServerError(ProviderError):
-    pass
-
-
-class BadResponse(ProviderError):
-    pass
-
-
-class TemplateError(ProviderError):
-    pass
-
-
-# ------------------------------------------------------------------ prompt templates
-
-class _Dotted(string.Formatter):
-    """`{run.topic}` / `{step.text}` lookups over the nested inputs map."""
-
-    def get_field(self, field_name: str, args: Any, kwargs: Any) -> tuple[Any, str]:
-        obj: Any = kwargs
-        for part in field_name.split("."):
-            if isinstance(obj, dict) and part in obj:
-                obj = obj[part]
-            else:
-                raise TemplateError(
-                    f"prompt template references {{{field_name}}} but the step inputs have "
-                    f"no such field; available top-level keys: "
-                    f"{sorted(kwargs) or 'none (add depends_on or pass run inputs)'}")
-        return obj, field_name
-
-
-def render_prompt(template: str, inputs: dict) -> str:
-    return _Dotted().vformat(template, (), inputs)
 
 
 # ------------------------------------------------------------------ the executor
@@ -107,7 +61,7 @@ class OpenAICompatExecutor:
 
     def __init__(self, config: ProviderConfig | None = None, *,
                  transport: httpx.BaseTransport | None = None, cassette_name: str | None = None):
-        self.config = config or ProviderConfig.from_env()
+        self.config = config or from_env()
         self.pricing = PricingTable(self.config.pricing_path)
         self._transport = transport
         self._cassette_name = cassette_name or self.config.cassette_name
@@ -229,7 +183,8 @@ class OpenAICompatExecutor:
         if self.config.cassettes != "off":
             cassette = Cassette(self.config.cassette_dir / f"{self._cassette_name}.json",
                                 source=self.config.base_url)
-            transport = CassetteTransport(cassette, self.config.cassettes, inner=transport)
+            transport = CassetteTransport(cassette, self.config.cassettes, inner=transport,
+                                          record_var="AGENTOS_OPENAI_CASSETTES")
         return httpx.Client(base_url=self.config.base_url, headers=headers,
                             timeout=timeout or self.config.timeout_seconds, transport=transport)
 
@@ -249,23 +204,23 @@ class OpenAICompatExecutor:
             raise AuthenticationFailed(
                 f"{self.config.base_url} rejected the credentials (HTTP {r.status_code}). "
                 f"Set AGENTOS_OPENAI_API_KEY (or OPENAI_API_KEY); key is currently "
-                f"{'set' if self.config.api_key else 'unset'}. {_server_message(r)}")
+                f"{'set' if self.config.api_key else 'unset'}. {server_message(r)}")
         if r.status_code == 404:
             raise ModelNotFound(
                 f"{self.config.base_url} has no model {model_id!r}. If this is Ollama: "
                 f"`ollama pull {model_id}`; otherwise fix the alias in AGENTOS_OPENAI_ALIASES "
-                f"or the agent's config.model. {_server_message(r)}")
+                f"or the agent's config.model. {server_message(r)}")
         if r.status_code == 429:
             raise ProviderRateLimited(
                 f"{self.config.base_url} rate-limited the request (HTTP 429); the step's retry "
-                f"policy applies. {_server_message(r)}")
+                f"policy applies. {server_message(r)}")
         if r.status_code >= 500:
             raise ProviderServerError(
                 f"{self.config.base_url} failed (HTTP {r.status_code}); the step's retry "
-                f"policy applies. {_server_message(r)}")
+                f"policy applies. {server_message(r)}")
         if r.status_code >= 400:
             raise BadResponse(f"{self.config.base_url} rejected the request (HTTP "
-                              f"{r.status_code}). {_server_message(r)}")
+                              f"{r.status_code}). {server_message(r)}")
         try:
             return r.json()
         except ValueError as exc:
@@ -280,10 +235,3 @@ class OpenAICompatExecutor:
         return "Check AGENTOS_OPENAI_BASE_URL (include the /v1 suffix) and that the server is up."
 
 
-def _server_message(r: httpx.Response) -> str:
-    try:
-        err = r.json().get("error")
-        msg = err.get("message") if isinstance(err, dict) else err
-        return f"Server said: {msg}" if msg else ""
-    except ValueError:
-        return f"Server said: {r.text[:160]!r}" if r.text else ""

@@ -24,22 +24,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev]" -e providers/openai-compat
+      - run: pip install -e ".[dev,providerkit]" -e providers/openai-compat -e providers/anthropic
       - name: Install and start Ollama
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
           nohup ollama serve > ollama.log 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:11434/v1/models && break; sleep 2; done
           ollama pull "${{ github.event.inputs.model || 'qwen2.5:0.5b' }}"
-      - name: Re-record cassettes against the live server
+      - name: Re-record cassettes against the live server (both wire formats)
         env:
           AGENTOS_OPENAI_ALIASES: '{"chat.fast": "${{ github.event.inputs.model || ''qwen2.5:0.5b'' }}"}'
-        run: python providers/openai-compat/scripts/record_cassettes.py --live
+          AGENTOS_ANTHROPIC_ALIASES: '{"chat.fast": "${{ github.event.inputs.model || ''qwen2.5:0.5b'' }}"}'
+        run: |
+          python providers/openai-compat/scripts/record_cassettes.py --live
+          python providers/anthropic/scripts/record_cassettes.py --live
       - name: Replay tests pass on the fresh recordings
-        run: pytest -q providers/openai-compat/tests -p no:cacheprovider
+        run: pytest -q providers/openai-compat/tests providers/anthropic/tests tests/test_quickstart_llm.py -p no:cacheprovider
       - name: Show what changed
-        run: git -P diff --stat -- providers/openai-compat/tests/cassettes
+        run: git -P diff --stat -- providers/*/tests/cassettes
       - uses: actions/upload-artifact@v4
         with:
           name: cassettes-${{ github.run_id }}
-          path: providers/openai-compat/tests/cassettes
+          path: providers/*/tests/cassettes

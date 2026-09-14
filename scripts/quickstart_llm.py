@@ -35,17 +35,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--api", default="http://localhost:8000")
     p.add_argument("--topic", default="event logs")
     p.add_argument("--sync", action="store_true", help="run in the API process (no worker)")
+    p.add_argument("--executor", default="openai-compat",
+                   help="which registered executor the example agents use (openai-compat | anthropic)")
     a = p.parse_args(argv)
 
     # 3. check what can run
     _, executors = call(a.api, "GET", "/executors")
     names = {e["name"]: e for e in executors}
-    if "openai-compat" not in names:
-        sys.exit("openai-compat is not registered: `pip install -e providers/openai-compat` "
+    if a.executor not in names:
+        sys.exit(f"{a.executor} is not registered: `pip install -e providers/<name>` "
                  "and restart the API and worker. Registered: " + ", ".join(sorted(names)))
-    health = names["openai-compat"].get("health", {})
+    health = names[a.executor].get("health", {})
     print(f"executors: {', '.join(sorted(names))}")
-    print(f"openai-compat: reachable={health.get('reachable')} "
+    print(f"{a.executor}: reachable={health.get('reachable')} "
           f"aliases_available={health.get('aliases_available')}")
     if not health.get("reachable"):
         sys.exit("model server unreachable: " + health.get("hint", health.get("error", "")))
@@ -53,7 +55,13 @@ def main(argv: list[str] | None = None) -> int:
     # 4. define agents and workflow (idempotent: re-posting the same body is a no-op)
     for f, path in (("poet_agent.json", "/agents"), ("critic_agent.json", "/agents"),
                     ("haiku_workflow.json", "/workflows")):
-        code, body = call(a.api, "POST", path, json.loads((EXAMPLES / f).read_text()))
+        definition = json.loads((EXAMPLES / f).read_text())
+        if path == "/agents" and a.executor != "openai-compat":
+            # Same agent, different wire format: the one field that changes. Versioned so
+            # it never overwrites the openai-compat definition (agent versions are immutable).
+            definition["executor"] = a.executor
+            definition["version"] = 2
+        code, body = call(a.api, "POST", path, definition)
         if code not in (200, 201):
             sys.exit(f"POST {path} {f}: HTTP {code} {body}")
         print(f"registered {f} → {code}")

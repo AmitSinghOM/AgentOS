@@ -1,7 +1,7 @@
 {
   "format": "agentos.cassette/1",
   "source": "http://127.0.0.1:11434/v1",
-  "recorded_at": "2026-09-14T09:19:37+00:00",
+  "recorded_at": "2026-09-14T09:50:15+00:00",
   "interactions": [
     {
       "key": "7e2815b27777bc211c53905972de07fdfd0ea826ca840a4ea0a83c89cf0b46b4",
@@ -24,7 +24,7 @@
         "headers": {
           "content-type": "application/json"
         },
-        "body": "{\"id\":\"chatcmpl-414\",\"object\":\"chat.completion\",\"created\":1789377577,\"model\":\"qwen2.5:0.5b\",\"system_fingerprint\":\"fp_ollama\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"{\\n  \\\"score\\\": 5,\\n  \\\"reason\\\": \\\"The haiku is a short poem that captures the essence of time and the passage of events. It uses simple language and imagery to convey the idea that the past, present, and future are intertwined, and the journey is a continuous flow. The haiku's structure and imagery make it a perfect choice for a haiku, which is a form of poetry that typically consists of three lines with a blank line in the middle. The score of 5 indicates that the haiku is well-written and captures the essence of the haiku form.\\\"\\n}\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":67,\"prompt_tokens_details\":{\"cached_tokens\":24},\"completion_tokens\":123,\"total_tokens\":190}}\n"
+        "body": "{\"id\":\"chatcmpl-234\",\"object\":\"chat.completion\",\"created\":1789379415,\"model\":\"qwen2.5:0.5b\",\"system_fingerprint\":\"fp_ollama\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"{\\n  \\\"score\\\": 5,\\n  \\\"reason\\\": \\\"The haiku is a short poem that captures the essence of time and the passage of events. It uses simple language and imagery to convey the idea that the past, present, and future are intertwined, and the journey is a continuous flow. The haiku's structure and imagery make it a perfect choice for a haiku, which is a form of poetry that typically consists of three lines with a blank line in the middle. The score of 5 indicates that the haiku is well-written and captures the essence of the haiku form.\\\"\\n}\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":67,\"prompt_tokens_details\":{\"cached_tokens\":24},\"completion_tokens\":123,\"total_tokens\":190}}\n"
       }
     },
     {
@@ -48,7 +48,7 @@
         "headers": {
           "content-type": "application/json"
         },
-        "body": "{\"id\":\"chatcmpl-40\",\"object\":\"chat.completion\",\"created\":1789377576,\"model\":\"qwen2.5:0.5b\",\"system_fingerprint\":\"fp_ollama\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Logs of events,\\nPast and present, now and forever,\\nTrace the journey.\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":33,\"prompt_tokens_details\":{\"cached_tokens\":5},\"completion_tokens\":17,\"total_tokens\":50}}\n"
+        "body": "{\"id\":\"chatcmpl-628\",\"object\":\"chat.completion\",\"created\":1789379414,\"model\":\"qwen2.5:0.5b\",\"system_fingerprint\":\"fp_ollama\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Logs of events,\\nPast and present, now and forever,\\nTrace the journey.\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":33,\"prompt_tokens_details\":{\"cached_tokens\":5},\"completion_tokens\":17,\"total_tokens\":50}}\n"
       }
     }
   ]
