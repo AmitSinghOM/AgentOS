@@ -106,7 +106,32 @@ the step's `provenance.executor` says `anthropic`. Point `AGENTOS_ANTHROPIC_BASE
 `{"chat.fast": "claude-3-5-haiku-latest"}` for Anthropic's models. Tested end to end in
 `tests/test_quickstart_llm.py::test_same_agents_run_on_the_anthropic_wire_format`.
 
-## 7. See it in Jaeger and Grafana (optional)
+## 7. A tool step before the model (optional)
+
+The built-in `tool` executor calls an HTTP API or runs a program as a step, under the same
+gate, cost meter and trust boundary as a model step. `examples/repo_facts_agent.json` fetches
+this repository's metadata from GitHub (no token needed) and `repo_poet` writes a haiku
+about `{facts.json.description}`:
+
+```bash
+for f in repo_facts_agent repo_poet_agent; do
+  curl -X POST localhost:8000/agents -H 'Content-Type: application/json' -d @examples/$f.json; done
+curl -X POST localhost:8000/workflows -H 'Content-Type: application/json' -d @examples/research_workflow.json
+curl -s -X POST localhost:8000/workflows/research/runs
+```
+
+Three things to notice in the definition. The URL is fixed — inputs can only fill
+`config.query` / `config.json` *values*, so a step upstream cannot redirect the request.
+The agent declares `read`; a `POST` tool declares `write_external` and is **suspended for
+approval before the request is sent**, exactly like a model step that declares it. And the
+response body becomes the next step's input as data — the poet sees it inside `<input>`
+tags like any other upstream output. `{"kind": "subprocess", "argv": [...]}` runs a program
+instead; inputs arrive on stdin as JSON, never in `argv`, and a timeout kills the whole
+process group. Calling something on your own machine (`http://localhost:…`) needs
+`"allow_private_networks": true` on the agent — link-local addresses (cloud metadata) are
+never allowed. Details: `agentos/agents/tool.py`.
+
+## 8. See it in Jaeger and Grafana (optional)
 
 `docker compose up -d` brings up Postgres, Jaeger, Prometheus and Grafana. Run the API and
 worker with `AGENTOS_OTEL_EXPORTER=otlp AGENTOS_PROMETHEUS=1`, re-run step 5 (or

@@ -112,3 +112,35 @@ def test_same_agents_run_on_the_anthropic_wire_format(monkeypatch):
     assert write["provenance"]["model_id"] == "qwen2.5:0.5b" and write["output"]["text"].strip()
     assert isinstance(review["output"]["json"]["score"], int | float)
     assert run["total_cost"] == "0"
+
+
+def test_research_example_fetch_then_poet(monkeypatch):
+    """docs/quickstart-llm.md §7: the tool step's response is the poet's input. GitHub is
+    mocked; the poet replays the openai-compat cassette recorded for this exact prompt."""
+    pytest.importorskip("agentos_provider_openai_compat")
+    monkeypatch.setenv("AGENTOS_STORE", "memory")
+    monkeypatch.setenv("AGENTOS_OPENAI_CASSETTES", "replay")
+    monkeypatch.setenv("AGENTOS_OPENAI_CASSETTE_DIR", str(CASSETTES))
+    monkeypatch.setenv("AGENTOS_OPENAI_CASSETTE", "research")
+    import httpx
+
+    from agentos.api import main
+    importlib.reload(main)
+
+    def github(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.github.com" and request.method == "GET"
+        assert request.headers["user-agent"] == "agentos-quickstart"
+        return httpx.Response(200, json={"full_name": "AmitSinghOM/AgentOS",
+                                         "description": "A control plane for durable, "
+                                         "observable, human-in-the-loop LLM agent workflows"})
+    main.executors["tool"]._transport = httpx.MockTransport(github)
+    c = TestClient(main.app)
+    for f in ("repo_facts_agent.json", "repo_poet_agent.json"):
+        _post_json(c, "/agents", f)
+    _post_json(c, "/workflows", "research_workflow.json")
+    run = c.post("/workflows/research/runs?sync=true").json()
+    assert run["status"] == "completed", run["error"]
+    facts, write = run["steps"]
+    assert facts["provenance"]["executor"] == "tool" and facts["output"]["status"] == 200
+    assert [e["effect_class"] for e in facts["effects"]] == ["read"]
+    assert write["output"]["text"].strip() and write["provenance"]["executor"] == "openai-compat"

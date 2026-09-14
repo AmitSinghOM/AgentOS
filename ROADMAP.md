@@ -200,7 +200,7 @@ test and run live for both.
 - [ ] ⏭ C12 executor-input trust boundary: tool results are data, never prompt (`agentos/protocols/`, A8)
 - [ ] ⏭ A11 `agentos export-run --format jsonl`
 - [x] **Second provider** `agentos-provider-anthropic` (Anthropic Messages wire format; Ollama's `/v1/messages` as the free default) — proved the seam: different request shape, auth header, error envelope (529), no `response_format`; zero changes to the core or the first provider. Shared pieces extracted to `agentos.providerkit` (cassettes, pricing, errors, templates, env config, conformance scenarios); the OpenAI provider refactored onto it
-- [ ] ⏭ Real `tool` agent (HTTP/subprocess) in core
+- [x] Real `tool` agent (HTTP/subprocess) in core — landed after Phase 5 (v0.7.0 slice)
 
 **Tag:** `v0.5.0-providers`. **Post:** "Providers Are Plugins: Surviving Model Churn With Aliases, Cassettes and a Pricing Hash."
 
@@ -227,7 +227,7 @@ from a real two-process run, which also exposed and fixed cross-process observab
 - [x] **C12 trust boundary** ([#12](https://github.com/AmitSinghOM/AgentOS/issues/12), `docs/TRUST_BOUNDARY.md`): control payloads are `principal` + `reason` and nothing else (`extra="forbid"`, 422 + logged, no event, no step); every appended event carries `prev_hash`/`hash` computed in the core, `fold()` verifies the chain (edit/insert/remove → `FoldError`, `GET /runs/{id}` 500, `GET /runs/{id}/integrity`), pre-v0.6.0 logs fold as before; model inputs delimited as `<input name=…>` with `DATA_BOUNDARY` in every system prompt (both providers); structural test that a step output cannot choose the next step, executor or effect class
 - [x] README screenshots: Jaeger span with `gen_ai.*`, Grafana dashboard, from a real two-process run (`docs/images/`). Taking them exposed and fixed a real defect: the worker's observers never saw `run.started`, so Prometheus labelled everything `workflow="unknown"` and Jaeger got orphan step spans. Now: trace/run-span ids derive from the run id, observers resolve run facts from the store, run-level happenings are child spans, and the worker serves `/metrics` on `:8001`
 
-- [ ] ⏭ Real `tool` agent (HTTP/subprocess) in core; results through `wrap_input`; `protocols/` (A8)
+- [x] Real `tool` agent (HTTP/subprocess) in core (`agentos/agents/tool.py`, v0.7.0 slice): operator-fixed url/argv, inputs only as query/json values or stdin JSON, `${ENV}` secrets redacted, effects by method/kind so the existing gate governs it, 1 MiB cap, egress guard (link-local never; private opt-in), process-group kill on timeout; results flow through `wrap_input`. Reviewed by the code-reviewer + security-reviewer pipeline (WARNING → fixed). ⏭ `protocols/` function-calling round trip (A8) still open
 - [ ] ⏭ A11 `agentos export-run --format jsonl`
 - [ ] ⏭ A12 global pause
 

@@ -20,6 +20,11 @@ EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 SCENARIOS: dict[str, tuple[dict, dict]] = {
     "plain": ({"model": "chat.fast"}, {"a": {"n": 1}}),
     "missing_model": ({"model": "no-such-model:1b", "prompt": "hi"}, {}),
+    # docs/quickstart-llm.md §7: the poet's prompt after the GitHub tool step (mocked in
+    # tests with exactly this description).
+    "research": (lambda: example_config("repo_poet_agent"),
+                 {"facts": {"json": {"description": "A control plane for durable, observable, "
+                                                    "human-in-the-loop LLM agent workflows"}}}),
 }
 # The quickstart chain (docs/quickstart-llm.md): poet → critic, recorded into ONE cassette
 # so the API-level quickstart test replays it end to end.
@@ -81,6 +86,7 @@ def record(make_executor: Callable[[str], Executor], cassette_dir: Path,
                 run("review", quickstart_requests(poet.output["text"])[1], ex)
         else:
             cfg, inputs = SCENARIOS[name]
+            cfg = cfg() if callable(cfg) else cfg
             run(name, request_for(name, cfg, inputs), ex)
         echo(f"{'':14s}  → {path}")
     return unexpected

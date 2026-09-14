@@ -97,6 +97,15 @@ snapshots (replay only events after the last snapshot). For agent workflows — 
 steps, not millions — this is comfortably within budget. We accept write amplification
 in exchange for bulletproof recovery and auditability.
 
+**State replay, not code replay (C14).** What is replayed is the *fold* — the scheduler's
+"which nodes are ready" question over the log — never the agent code. Steps are opaque;
+their outputs, effects and cost are recorded facts. Agent code may therefore be
+non-deterministic (a model call, `random()`, threads) and may change between attempts
+without stranding an in-flight run; a step that rolled a random number replays to the
+recorded roll. This is the core decision that separates AgentOS from Temporal-style
+durable execution and it is written up with its acceptance test in
+[docs/REPLAY.md](docs/REPLAY.md). The log is tamper-evident ([docs/TRUST_BOUNDARY.md](docs/TRUST_BOUNDARY.md) §2).
+
 **Rejected alternative:** mutable `run_state` row with a status column. Simpler, but a
 crash between "update row" and "commit side effect" leaves you unable to tell whether
 the step actually ran — which is exactly the bug class we are trying to eliminate.

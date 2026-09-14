@@ -1,0 +1,7 @@
+{
+  "name": "research",
+  "nodes": [
+    {"id": "facts", "agent": "repo_facts", "retry": {"max_attempts": 3, "backoff_seconds": 2}},
+    {"id": "write", "agent": "repo_poet", "depends_on": ["facts"]}
+  ]
+}
