@@ -40,10 +40,14 @@ def build_store():
 
 store = build_store()
 observers, prometheus = build_observers()
+queue_depth = None
+if prometheus is not None and hasattr(store, "queue_depth"):
+    from agentos.observability.prometheus import QueueDepthCollector
+    queue_depth = QueueDepthCollector(prometheus.registry, store.queue_depth)
 engine = Engine(store=store, blobs=store, executors={AgentType.echo.value: EchoExecutor()},
                 lease=store if hasattr(store, "acquire") else None, observers=observers)
 
-app = FastAPI(title="AgentOS", version="0.4.0-dev")
+app = FastAPI(title="AgentOS", version="0.4.0")
 
 
 @app.get("/health")
@@ -56,6 +60,8 @@ def metrics() -> Response:
     """Prometheus exposition. Every number here is derived from the event log."""
     if prometheus is None:
         raise HTTPException(status_code=404, detail="prometheus-client not installed or disabled")
+    if queue_depth is not None:
+        queue_depth.refresh()                 # the one metric that is not an event fact
     body, content_type = prometheus.render()
     return Response(content=body, media_type=content_type)
 

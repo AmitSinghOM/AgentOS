@@ -32,7 +32,14 @@ from agentos.core.events import (
     StepRetryRequested,
     StepStarted,
 )
-from agentos.core.models import Approval, ApprovalStatus, RunStatus, StepRecord, WorkflowRun
+from agentos.core.models import (
+    Approval,
+    ApprovalKind,
+    ApprovalStatus,
+    RunStatus,
+    StepRecord,
+    WorkflowRun,
+)
 
 
 class FoldError(ValueError):
@@ -139,6 +146,8 @@ def fold(events: Iterable[Event]) -> WorkflowRun:
                 approval_id=ev.approval_id, step_id=ev.step_id,
                 effect_classes=ev.effect_classes, reason=ev.reason,
                 requested_at=ev.occurred_at, expires_at=ev.expires_at,
+                kind=ev.kind, cost_at_request=ev.cost_at_request,
+                proposed_ceiling=ev.proposed_ceiling,
             )
         elif isinstance(ev, RunSuspended):
             run.status = RunStatus.suspended
@@ -146,6 +155,8 @@ def fold(events: Iterable[Event]) -> WorkflowRun:
             a = run.approvals[ev.approval_id]
             a.status, a.decided_by, a.decision_reason, a.decided_at = (
                 ApprovalStatus.granted, ev.principal, ev.reason, ev.occurred_at)
+            if a.kind is ApprovalKind.cost and a.proposed_ceiling is not None:
+                run.cost_ceiling = a.proposed_ceiling      # the grant raises the ceiling
             if run.status is RunStatus.suspended and not any(
                     x.status is ApprovalStatus.pending for x in run.approvals.values()):
                 run.status = RunStatus.running
