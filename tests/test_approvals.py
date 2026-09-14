@@ -284,3 +284,65 @@ def test_approval_api(monkeypatch):
     assert c.get("/approvals").json()["data"] == []
     assert c.post(f"/runs/{rid}/approvals/nope/reject",
                   json={"principal": {"kind": "human", "id": "amit"}}).status_code == 404
+
+
+# ---------------------------------------------------- cost-ceiling suspension (A6)
+
+def _cost_wf(max_run_cost="0.25"):
+    """Four steps at 0.10 each; ceiling trips after s3 (0.30 > 0.25)."""
+    store = MemoryStore()
+    store.put_agent(Agent(name="calc", type=AgentType.echo))
+    store.put_workflow(WorkflowDefinition(name="c", budget=Budget(max_run_cost=max_run_cost), nodes=[
+        {"id": "s1", "agent": "calc"}, {"id": "s2", "agent": "calc", "depends_on": ["s1"]},
+        {"id": "s3", "agent": "calc", "depends_on": ["s2"]},
+        {"id": "s4", "agent": "calc", "depends_on": ["s3"]}]))
+    ex = RecordingExecutor()
+    eng = Engine(store=store, blobs=store, executors={"echo": ex}, lease=store)
+    return store, eng, ex
+
+
+def test_cost_ceiling_suspends_after_recording_and_grant_raises_ceiling():
+    _store, eng, ex = _cost_wf()
+    run = eng.start_run("c")
+    assert run.status is RunStatus.suspended
+    assert [s.node_id for s in run.steps] == ["s1", "s2", "s3"]      # tripping step recorded
+    assert run.total_cost == "0.30" and [c[0] for c in ex.calls] == ["s1", "s2", "s3"]
+    (a,) = pending(run)
+    assert a.kind.value == "cost" and a.step_id == "s3" and a.effect_classes == []
+    assert a.cost_at_request == "0.30" and a.proposed_ceiling == "0.55"
+    assert "approving raises the ceiling to 0.55" in a.reason
+
+    with pytest.raises(ControlNotAllowed, match="cost ceiling"):
+        eng.approve(run.id, a.approval_id, principal=AGENT)         # money is human-only
+    run = eng.approve(run.id, a.approval_id, principal=HUMAN, reason="worth it")
+    assert run.status is RunStatus.running and run.cost_ceiling == "0.55"
+    final = eng.advance(run.id)
+    assert final.status is RunStatus.completed and final.total_cost == "0.40"
+    assert [c[0] for c in ex.calls] == ["s1", "s2", "s3", "s4"]     # s3 not re-run
+
+
+def test_cost_ceiling_rejection_fails_run_without_dead_letter():
+    store, eng, ex = _cost_wf()
+    run = eng.start_run("c")
+    (a,) = pending(run)
+    run = eng.reject(run.id, a.approval_id, principal=HUMAN, reason="over budget")
+    assert run.status is RunStatus.failed
+    assert "cost ceiling approval rejected by human:amit: over budget" in run.error
+    assert run.dead_lettered == {}                                   # nothing to reopen
+    assert [type(e).__name__ for e in store.read_events(run.id)][-2:] == \
+        ["ApprovalRejected", "RunFailed"]
+    assert len(ex.calls) == 3
+
+
+def test_cost_ceiling_trips_again_at_the_raised_ceiling():
+    _store, eng, _ex = _cost_wf(max_run_cost="0.15")                   # trips after s2 (0.20)
+    run = eng.start_run("c")
+    (a,) = pending(run)
+    assert a.cost_at_request == "0.20" and a.proposed_ceiling == "0.35"
+    eng.approve(run.id, a.approval_id, principal=HUMAN)
+    run = eng.advance(run.id)                                        # s3 → 0.30 ok, s4 → 0.40 > 0.35
+    assert run.status is RunStatus.suspended and run.total_cost == "0.40"
+    second = [x for x in pending(run)]
+    assert len(second) == 1 and second[0].cost_at_request == "0.40" and second[0].proposed_ceiling == "0.55"
+    eng.approve(run.id, second[0].approval_id, principal=HUMAN)
+    assert eng.advance(run.id).status is RunStatus.completed

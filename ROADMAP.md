@@ -143,24 +143,45 @@ current fixture does not model yet; they stay as checkboxes, not deletions.
 windows the code had); and set `progress()` as the cancellation token from the start rather
 than considering a signature change first.
 
-## Phase 3 — Human-in-the-Loop + Observability  ·  ~2-3 weekends
-**Goal:** production-shaped — pausable, traceable, costed.
+## Phase 3 — Human-in-the-Loop + Observability  ·  ~2-3 weekends  ·  ✅ shipped `v0.4.0-observable` (2026-09-14)
+**Goal:** production-shaped — pausable, traceable, costed. **Met:** approval as a run state
+(suspend before dispatch, principal-gated decisions, cost-ceiling suspension), OpenTelemetry
++ Prometheus derived from the log, Grafana dashboard. Items marked ⏭ carried forward — see
+the dated decision.
 
 - [x] Approval as a run state: the governor's tier-2 gate (`Budget.approval_required_for`, default write_external/spend/send_message/execute_code) appends `approval.requested` + `run.suspended` BEFORE dispatch — no `step.started`, no attempt consumed; lease released, run leaves the queue, sweep skips it. Approvals live in the log (`WorkflowRun.approvals`), not a side table
 - [x] `POST /runs/{id}/approvals/{aid}/approve|reject` (+ `GET /approvals` inbox, `GET /runs/{id}/approvals`): approve → `approval.granted`, running once no gate is pending, re-enqueued; reject → dead-letter naming the decider + run failed; `…/steps/{step}/retry` reopens and re-asks. `Budget.approval_timeout_seconds` → rejected by the `system` principal on the worker's sweep
 - [x] OpenTelemetry spans per run/step → Jaeger (docker compose) — `agentos/observability/otel.py` derives spans FROM THE LOG (`Observer` port; core imports no SDK); timestamps from `occurred_at`; `gen_ai.*` attributes pinned and checked against the installed semconv; replaying a log rebuilds identical spans (tested)
-- [~] Prometheus metrics: run latency, throughput, error rate, retries, dead-letters, cost, meters, approvals, suspended gauge — all from events (`agentos/observability/prometheus.py`, `GET /metrics`); queue depth is a scrape-time collector still to wire
+- [x] Prometheus metrics: run latency, throughput, error rate, retries, dead-letters, cost, meters, approvals, suspended gauge — all from events (`agentos/observability/prometheus.py`, `GET /metrics`); queue depth via a scrape-time `QueueDepthCollector` over `Store.queue_depth()` (contract-tested on all adapters)
 - [x] Token + cost accounting per step, rolled up per run (`step.completed.cost`, `WorkflowRun.total_cost`); Grafana dashboard provisioned (`deploy/grafana/dashboards/agentos-runs.json`: runs/min, error rate, awaiting approval, cost, latency p50/95/99, step outcomes, retries & dead-letters, tokens by agent, approval wait, cost/min)
-- [~] Grafana + Jaeger + Prometheus added to compose with provisioning; compose CI job checks all three are up; screenshots in README still to add (needs a run against a real provider)
+- [~] Grafana + Jaeger + Prometheus added to compose with provisioning; compose CI job checks all three are up; ⏭ screenshots in README (needs a run against a real provider — with the first provider plugin)
+- [x] **Cost-ceiling suspension** (DESIGN §8 budget guardrails, A6): exceeding `max_run_cost` records the tripping step, then suspends with a `kind=cost` approval whose grant raises the effective ceiling to `total + max_run_cost` (`run.cost_ceiling`, in the log); human-only unless `allow_agent_approval`; rejection fails the run (money already spent, nothing to reopen); trips again at the raised ceiling
 - [x] **C7** — approval is a run state; the gated step's `step.started.seq > approval.granted.seq` is asserted; it runs exactly once, tagged with its `approval_id` ([#7](https://github.com/AmitSinghOM/AgentOS/issues/7))
 - [x] **C8** — per-step cost on `step.completed`; run cost = sum of step costs (Decimal); Prometheus + OTel only, no SaaS anywhere ([#8](https://github.com/AmitSinghOM/AgentOS/issues/8))
-- [ ] **C12** — trust boundary on resume payloads and replayed events ([#12](https://github.com/AmitSinghOM/AgentOS/issues/12))
+- [ ] ⏭ **C12** — trust boundary on resume payloads and replayed events ([#12](https://github.com/AmitSinghOM/AgentOS/issues/12))
 - [x] **A9** OpenTelemetry GenAI semantic conventions (`gen_ai.*`) for spans; AgentOS-specific attributes under `agentos.*`; semconv version recorded on every span's resource
-- [ ] **A11** `agentos export-run --format jsonl`: inputs/outputs by hash + provenance for external evaluators (opik); AgentOS records, never scores
+- [ ] ⏭ **A11** `agentos export-run --format jsonl`: inputs/outputs by hash + provenance for external evaluators (opik); AgentOS records, never scores
 
 **Demo:** run pauses at approval, approve from another terminal, run resumes; show the
 Jaeger trace and the cost breakdown.
 **Tag:** `v0.4.0-observable`. **Post:** "Suspended Workflows: Human Approval as a First-Class State."
+
+**Carry-forward decision (2026-09-14).** Phase 3 is tagged with its goal met and the ⏭ items
+not done. C12 (trust boundary on resume payloads) is genuinely Phase 3 work that is not
+finished: resume/approve payloads are already schema-validated by the API models and the
+scheduler only dispatches steps it derives from the workflow definition, but the *executor
+input* trust boundary (tool results as data, never prompt) has no consumer until a real
+provider plugin exists, so it moves with the provider work. A11 (export for evaluators) and
+the README screenshots likewise need a real provider to be meaningful. A12 (global pause)
+is deferred once more because per-run pause covers every operational need so far; it will
+be one event type when the operator surface grows. Every ⏭ item across Phases 1–3 remains
+a checkbox, not a deletion, and the accumulated list is now the shape of Phase 4's first
+slice: **the first provider plugin**, which unblocks A3, A7, A8, A10, A11, C12 and the
+screenshots together.
+
+**What I'd do differently:** ship the `Observer` port with Phase 1. Deriving telemetry from
+the log turned out to need zero engine changes beyond the fan-out, and having spans earlier
+would have made the Toxiproxy investigations faster to read.
 
 ## Phase 4 — UI (optional)  ·  ~2 weekends
 **Goal:** a visual the recruiter screenshot remembers. Plays to frontend strength.

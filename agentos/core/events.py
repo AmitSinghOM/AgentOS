@@ -16,7 +16,15 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
-from agentos.core.models import BlobRef, Cost, Effect, EffectClass, Principal, Provenance
+from agentos.core.models import (
+    ApprovalKind,
+    BlobRef,
+    Cost,
+    Effect,
+    EffectClass,
+    Principal,
+    Provenance,
+)
 
 CURRENT_SCHEMA_VERSION = 1
 
@@ -176,6 +184,10 @@ class ApprovalRequested(Event):
     effect_classes: list[EffectClass]     # the declared classes that need a decision
     reason: str = ""
     expires_at: datetime | None = None
+    # v0.4.0, additive: cost-ceiling approvals (DESIGN §8 budget guardrails)
+    kind: ApprovalKind = ApprovalKind.effect
+    cost_at_request: str | None = None
+    proposed_ceiling: str | None = None
 
 
 class RunSuspended(Event):
