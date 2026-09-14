@@ -19,6 +19,23 @@ A notebook chaining three agent calls works until something real happens — the
 crashes mid-run, a model call times out, a step needs sign-off, or you need to explain
 why run #4821 cost $2.10. AgentOS handles those.
 
+## What it looks like running
+
+One trace per run, derived from the event log. This one wrote a haiku on a local model,
+suspended for a human's approval of a `spend` step, waited, and resumed after the grant —
+the gap is the human:
+
+![Jaeger: a run suspended for approval, then resumed](docs/images/jaeger-run-payment.png)
+
+The provisioned Grafana dashboard, from the same log: runs per minute, error rate, latency
+percentiles, step outcomes, retries and dead-letters, tokens by executor, approval wait,
+cost by workflow. Every number is a fold of events — replaying the log rebuilds it exactly.
+
+![Grafana: the AgentOS dashboard](docs/images/grafana-dashboard.png)
+
+Both are from a real two-process run (API + worker) against Ollama — see
+[`docs/quickstart-llm.md`](docs/quickstart-llm.md) §7 to reproduce them.
+
 ## Architecture (at a glance)
 
 ```mermaid

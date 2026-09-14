@@ -131,7 +131,7 @@ def test_genai_attribute_names_match_installed_semconv():
     assert GEN_AI_USAGE_OUTPUT_TOKENS == g.GEN_AI_USAGE_OUTPUT_TOKENS
 
 
-def test_otel_records_approval_and_dead_letter_as_run_events():
+def test_otel_records_approval_and_dead_letter_as_run_child_spans():
     exporter = InMemorySpanExporter()
     otel_obs = OtelObserver(processor=SimpleSpanProcessor(exporter))
     store, eng = build(observers=[otel_obs])
@@ -141,13 +141,55 @@ def test_otel_records_approval_and_dead_letter_as_run_events():
     assert run.status is RunStatus.suspended
     aid = next(iter(run.approvals))
     eng.reject(run.id, aid, principal=Principal(kind=PrincipalKind.human, id="amit"), reason="no")
-    run_span = spans_by_name(exporter)["run w"]
-    names = [e.name for e in run_span.events]
-    assert names == ["approval.requested", "run.suspended", "approval.rejected",
-                     "step.dead_lettered"]
-    rej = run_span.events[2]
+    spans = exporter.get_finished_spans()
+    run_span = next(s for s in spans if s.name == "run w")
+    # Run-level happenings are zero-duration CHILD spans of the run (any process can emit
+    # them), in event order, all in the run's trace and parented to the run span.
+    children = sorted((s for s in spans if s.parent is not None), key=lambda s: s.start_time)
+    assert [s.name for s in children] == ["approval.requested", "run.suspended",
+                                          "approval.rejected", "step.dead_lettered"]
+    assert all(s.context.trace_id == run_span.context.trace_id for s in children)
+    assert all(s.parent.span_id == run_span.context.span_id for s in children)
+    rej = children[2]
     assert rej.attributes["agentos.principal.kind"] == "human"
     assert run_span.status.status_code is StatusCode.ERROR
+
+
+def test_two_processes_produce_one_trace_per_run():
+    """The API appends run.started; a worker appends the rest; each has its own observer
+    and neither propagates context. Trace and run-span ids derive from the run id, and the
+    worker's observer resolves run facts from the store, so the pieces meet in one trace."""
+    from agentos.observability import replay, store_resolver
+    from agentos.observability.otel import run_ids
+
+    api_exp, worker_exp = InMemorySpanExporter(), InMemorySpanExporter()
+    store, eng = build()
+    api_obs = OtelObserver(processor=SimpleSpanProcessor(api_exp))
+    run_id = eng.create_run("w")                                   # "API process"
+    api_obs.observe(store.read_events(run_id)[0])                  # sees ONLY run.started
+    eng.advance(run_id)
+    worker_obs = OtelObserver(processor=SimpleSpanProcessor(worker_exp),
+                              resolve=store_resolver(store))       # "worker process"
+    for ev in store.read_events(run_id)[1:]:                       # never sees run.started
+        worker_obs.observe(ev)
+
+    assert api_exp.get_finished_spans() == ()                      # nothing dangling in the API
+    trace_id, run_span_id = run_ids(run_id)
+    worker_spans = worker_exp.get_finished_spans()
+    run_span = next(s for s in worker_spans if s.name.startswith("run "))
+    assert run_span.name == "run w"                                # resolved, not "unknown"
+    assert run_span.attributes["agentos.workflow.name"] == "w"
+    assert run_span.context.trace_id == trace_id and run_span.context.span_id == run_span_id
+    started_at = store.read_events(run_id)[0].occurred_at
+    assert run_span.start_time == int(started_at.timestamp() * 1e9)  # from run.started_at
+    steps = [s for s in worker_spans if s.name.startswith("step ")]
+    assert steps and all(s.context.trace_id == trace_id and s.parent.span_id == run_span_id
+                         for s in steps)
+    # And a full replay by one observer produces the identical run span ids.
+    again = InMemorySpanExporter()
+    replay(store, [run_id], [OtelObserver(processor=SimpleSpanProcessor(again))])
+    replayed = next(s for s in again.get_finished_spans() if s.name == "run w")
+    assert (replayed.context.trace_id, replayed.context.span_id) == (trace_id, run_span_id)
 
 
 # --------------------------------------------------------------------- Prometheus
@@ -273,3 +315,21 @@ def test_metrics_endpoint_exposes_queue_depth(monkeypatch):
     body = c.get("/metrics").text
     assert "agentos_queue_depth 1.0" in body
     assert "agentos_runs_started_total" in body
+
+
+def test_prometheus_in_the_worker_labels_by_workflow_via_the_resolver():
+    """Without the resolver every worker-side metric was workflow="unknown" (the API
+    appends run.started, the worker never sees it)."""
+    from agentos.observability import store_resolver
+
+    store, eng = build()
+    run_id = eng.create_run("w")
+    eng.advance(run_id)
+    p = PrometheusObserver(resolve=store_resolver(store))
+    for ev in store.read_events(run_id)[1:]:                       # no run.started
+        p.observe(ev)
+    assert _sample(p.registry, "agentos_runs_ended_total", workflow="w", outcome="completed") == 1
+    assert _sample(p.registry, "agentos_runs_ended_total", workflow="unknown",
+                   outcome="completed") is None
+    assert _sample(p.registry, "agentos_run_duration_seconds_count", workflow="w",
+                   outcome="completed") == 1                       # duration from started_at

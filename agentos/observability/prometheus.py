@@ -10,7 +10,10 @@ class, principal kind. Never run_id, never approval_id.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
+
+RunResolver = Callable[[str], "WorkflowRun | None"]
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -43,10 +46,14 @@ STEP_BUCKETS = (0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, float("inf"))
 
 
 class PrometheusObserver:
-    """Implements agentos.core.ports.Observer."""
+    """Implements agentos.core.ports.Observer. `resolve(run_id)` supplies run context
+    (workflow, started_at) for runs whose `run.started` this process did not observe —
+    the worker never does; the API appends it."""
 
-    def __init__(self, registry: CollectorRegistry | None = None) -> None:
+    def __init__(self, registry: CollectorRegistry | None = None, *,
+                 resolve: RunResolver | None = None) -> None:
         self.registry = registry or CollectorRegistry()
+        self._resolve = resolve
         r = self.registry
         self.runs_started = Counter("agentos_runs_started_total", "Runs started",
                                     ["workflow"], registry=r)
@@ -126,6 +133,14 @@ class PrometheusObserver:
             kind = event.principal.kind.value if event.principal else ""
             self.approvals_decided.labels(wf, decision, kind).inc()
             opened = self._approval_at.pop(event.approval_id, None)
+            if opened is None and self._resolve is not None:
+                # Requested in the worker, decided in the API: ask the log when.
+                try:
+                    run = self._resolve(event.run_id)
+                    a = run.approvals.get(event.approval_id) if run else None
+                    opened = (a.step_id, a.requested_at) if a else None
+                except Exception:  # noqa: BLE001 — telemetry must not raise
+                    opened = None
             if opened:
                 self.approval_wait.labels(wf, decision).observe(
                     (event.occurred_at - opened[1]).total_seconds())
@@ -138,7 +153,8 @@ class PrometheusObserver:
                        RunCancelled: "cancelled"}[type(event)]
             self._unsuspend(event.run_id, wf)
             self.runs_ended.labels(wf, outcome).inc()
-            started = self._run_started_at.pop(event.run_id, None)
+            started = self._run_info(event.run_id)
+            self._run_started_at.pop(event.run_id, None)
             if started:
                 self.run_seconds.labels(wf, outcome).observe(
                     (event.occurred_at - started[1]).total_seconds())
@@ -159,8 +175,22 @@ class PrometheusObserver:
             self.suspended.labels(wf).dec()
 
     def _workflow(self, event: Event) -> str:
-        entry = self._run_started_at.get(event.run_id)
+        entry = self._run_info(event.run_id)
         return entry[0] if entry else "unknown"
+
+    def _run_info(self, run_id: str) -> tuple[str, datetime] | None:
+        """(workflow, started_at). From run.started when this process saw it; otherwise
+        from the resolver — the worker never sees run.started (the API appends it)."""
+        entry = self._run_started_at.get(run_id)
+        if entry is None and self._resolve is not None:
+            try:
+                run = self._resolve(run_id)
+            except Exception:  # noqa: BLE001 — telemetry must not raise
+                run = None
+            if run is not None:
+                entry = (run.workflow, run.started_at)
+                self._run_started_at[run_id] = entry
+        return entry
 
     def _agent_for(self, event: StepCompleted) -> str:
         return event.provenance.executor if event.provenance else "unknown"

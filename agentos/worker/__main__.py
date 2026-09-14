@@ -15,7 +15,7 @@ from agentos.agents.echo import EchoExecutor
 from agentos.core.engine import Engine
 from agentos.core.faults import from_env
 from agentos.core.models import AgentType
-from agentos.observability import build_observers
+from agentos.observability import build_observers, store_resolver
 from agentos.plugins import discover_executors, store_pricing_snapshots
 from agentos.worker import Worker
 
@@ -47,7 +47,20 @@ def main(argv: list[str] | None = None) -> int:
 
     store = build_store()
     injector = from_env()
-    observers, _prom = build_observers()
+    observers, prom = build_observers(resolve=store_resolver(store))
+    if prom is not None and os.environ.get("AGENTOS_WORKER_METRICS_PORT", "8001") != "0":
+        # The worker has its own Prometheus registry (step/run outcomes happen here, the
+        # API only sees run.started); expose it so Prometheus scrapes both processes.
+        # Telemetry never breaks the worker: a busy port is a warning, not a crash.
+        from prometheus_client import start_http_server
+        port = int(os.environ.get("AGENTOS_WORKER_METRICS_PORT", "8001"))
+        try:
+            start_http_server(port, registry=prom.registry)
+            logging.getLogger("agentos.worker").info("worker metrics on :%d/metrics", port)
+        except OSError as exc:
+            logging.getLogger("agentos.worker").warning(
+                "worker metrics not served: port %d unavailable (%s); set "
+                "AGENTOS_WORKER_METRICS_PORT to another port or 0 to disable", port, exc)
     executors = {AgentType.echo.value: EchoExecutor(), **discover_executors()}
     store_pricing_snapshots(executors, store)
     engine = Engine(store=store, blobs=store, executors=executors,

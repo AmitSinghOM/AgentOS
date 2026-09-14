@@ -26,7 +26,7 @@ from agentos.core.fold import FoldError
 from agentos.core.integrity import IntegrityError, verify
 from agentos.core.models import Agent, AgentType, BlobRef, Principal, WorkflowDefinition
 from agentos.core.ports import ConflictError
-from agentos.observability import build_observers
+from agentos.observability import build_observers, store_resolver
 from agentos.plugins import describe, discover_executors, store_pricing_snapshots
 from agentos.store.memory import MemoryStore
 from agentos.store.sqlite import SqliteStore
@@ -46,7 +46,7 @@ def build_store():
 
 
 store = build_store()
-observers, prometheus = build_observers()
+observers, prometheus = build_observers(resolve=store_resolver(store))
 queue_depth = None
 if prometheus is not None and hasattr(store, "queue_depth"):
     from agentos.observability.prometheus import QueueDepthCollector

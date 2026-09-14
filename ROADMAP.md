@@ -154,7 +154,7 @@ the dated decision.
 - [x] OpenTelemetry spans per run/step → Jaeger (docker compose) — `agentos/observability/otel.py` derives spans FROM THE LOG (`Observer` port; core imports no SDK); timestamps from `occurred_at`; `gen_ai.*` attributes pinned and checked against the installed semconv; replaying a log rebuilds identical spans (tested)
 - [x] Prometheus metrics: run latency, throughput, error rate, retries, dead-letters, cost, meters, approvals, suspended gauge — all from events (`agentos/observability/prometheus.py`, `GET /metrics`); queue depth via a scrape-time `QueueDepthCollector` over `Store.queue_depth()` (contract-tested on all adapters)
 - [x] Token + cost accounting per step, rolled up per run (`step.completed.cost`, `WorkflowRun.total_cost`); Grafana dashboard provisioned (`deploy/grafana/dashboards/agentos-runs.json`: runs/min, error rate, awaiting approval, cost, latency p50/95/99, step outcomes, retries & dead-letters, tokens by agent, approval wait, cost/min)
-- [~] Grafana + Jaeger + Prometheus added to compose with provisioning; compose CI job checks all three are up; ⏭ screenshots in README (needs a run against a real provider — with the first provider plugin)
+- [x] Grafana + Jaeger + Prometheus added to compose with provisioning; compose CI job checks all three are up; screenshots in README landed in Phase 5 (2026-09-14) once a real provider existed
 - [x] **Cost-ceiling suspension** (DESIGN §8 budget guardrails, A6): exceeding `max_run_cost` records the tripping step, then suspends with a `kind=cost` approval whose grant raises the effective ceiling to `total + max_run_cost` (`run.cost_ceiling`, in the log); human-only unless `allow_agent_approval`; rejection fails the run (money already spent, nothing to reopen); trips again at the raised ceiling
 - [x] **C7** — approval is a run state; the gated step's `step.started.seq > approval.granted.seq` is asserted; it runs exactly once, tagged with its `approval_id` ([#7](https://github.com/AmitSinghOM/AgentOS/issues/7))
 - [x] **C8** — per-step cost on `step.completed`; run cost = sum of step costs (Decimal); Prometheus + OTel only, no SaaS anywhere ([#8](https://github.com/AmitSinghOM/AgentOS/issues/8))
@@ -196,7 +196,7 @@ test and run live for both.
 - [x] **A10 cassettes**: dependency-free JSON record/replay transport; committed cassettes recorded from a live Ollama (`source` in each file); nightly opt-in `provider-live` job installs Ollama on a runner, re-records, re-runs the replay tests, uploads the artifact
 - [x] **Run inputs**: `POST /workflows/{name}/runs {"inputs": …}` stored by hash (`run.started.inputs_ref`), visible to every step as `{run.…}`; workflows without inputs are byte-for-byte unchanged (golden logs still fold)
 - [x] **DX bar**: `docs/quickstart-llm.md` (five minutes, no key) executed by `tests/test_quickstart_llm.py` against the recorded cassette AND run end-to-end against live Ollama with separate API + worker; `scripts/quickstart_llm.py` does steps 3–5 in one command; every provider error message says what to do (`ollama serve`, `ollama pull x`, set `AGENTOS_OPENAI_API_KEY`, available template keys); typed config with documented env defaults; provider README
-- [ ] ⏭ README screenshots (Jaeger span with `gen_ai.*`, Grafana) — now recordable
+- [x] README screenshots (Jaeger span with `gen_ai.*`, Grafana) — done in Phase 5
 - [ ] ⏭ C12 executor-input trust boundary: tool results are data, never prompt (`agentos/protocols/`, A8)
 - [ ] ⏭ A11 `agentos export-run --format jsonl`
 - [x] **Second provider** `agentos-provider-anthropic` (Anthropic Messages wire format; Ollama's `/v1/messages` as the free default) — proved the seam: different request shape, auth header, error envelope (529), no `response_format`; zero changes to the core or the first provider. Shared pieces extracted to `agentos.providerkit` (cassettes, pricing, errors, templates, env config, conformance scenarios); the OpenAI provider refactored onto it
@@ -224,7 +224,8 @@ starting point rather than a by-product.
 system looks like running.
 
 - [x] **C12 trust boundary** ([#12](https://github.com/AmitSinghOM/AgentOS/issues/12), `docs/TRUST_BOUNDARY.md`): control payloads are `principal` + `reason` and nothing else (`extra="forbid"`, 422 + logged, no event, no step); every appended event carries `prev_hash`/`hash` computed in the core, `fold()` verifies the chain (edit/insert/remove → `FoldError`, `GET /runs/{id}` 500, `GET /runs/{id}/integrity`), pre-v0.6.0 logs fold as before; model inputs delimited as `<input name=…>` with `DATA_BOUNDARY` in every system prompt (both providers); structural test that a step output cannot choose the next step, executor or effect class
-- [ ] README screenshots: Jaeger span with `gen_ai.*`, Grafana dashboard, from a real run
+- [x] README screenshots: Jaeger span with `gen_ai.*`, Grafana dashboard, from a real two-process run (`docs/images/`). Taking them exposed and fixed a real defect: the worker's observers never saw `run.started`, so Prometheus labelled everything `workflow="unknown"` and Jaeger got orphan step spans. Now: trace/run-span ids derive from the run id, observers resolve run facts from the store, run-level happenings are child spans, and the worker serves `/metrics` on `:8001`
+
 - [ ] ⏭ Real `tool` agent (HTTP/subprocess) in core; results through `wrap_input`; `protocols/` (A8)
 - [ ] ⏭ A11 `agentos export-run --format jsonl`
 - [ ] ⏭ A12 global pause

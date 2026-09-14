@@ -12,15 +12,26 @@ the version used is recorded on every span (`agentos.semconv.version`).
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
 import logging
+import threading
+from collections.abc import Callable
 from datetime import datetime
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter, SpanProcessor
-from opentelemetry.trace import SpanKind, Status, StatusCode
+from opentelemetry.sdk.trace.id_generator import RandomIdGenerator
+from opentelemetry.trace import (
+    NonRecordingSpan,
+    SpanContext,
+    SpanKind,
+    Status,
+    StatusCode,
+    TraceFlags,
+)
 
 from agentos.core.events import (
     ApprovalGranted,
@@ -44,6 +55,8 @@ from agentos.core.events import (
 )
 from agentos.core.models import Meter, WorkflowRun
 
+RunResolver = Callable[[str], "WorkflowRun | None"]
+
 log = logging.getLogger("agentos.observability.otel")
 
 try:
@@ -66,12 +79,50 @@ def _ns(ts: datetime) -> int:
     return int(ts.timestamp() * 1_000_000_000)
 
 
+def run_ids(run_id: str) -> tuple[int, int]:
+    """(trace_id, run span_id) derived from the run id, so the API process (which appends
+    run.started) and the worker (which appends everything else) put their spans in the
+    same trace without propagating context between them. The run id is a uuid4 hex —
+    128 bits, exactly a trace id; anything else is hashed to size."""
+    if len(run_id) == 32 and all(c in "0123456789abcdef" for c in run_id):
+        trace_id = int(run_id, 16)
+    else:
+        trace_id = int(hashlib.sha256(run_id.encode()).hexdigest()[:32], 16)
+    span_id = int(hashlib.sha256(f"run:{run_id}".encode()).hexdigest()[:16], 16)
+    return trace_id or 1, span_id or 1
+
+
+class _ForcedIdGenerator(RandomIdGenerator):
+    """RandomIdGenerator that hands out a pre-set (trace_id, span_id) once, for the run
+    span, so its ids are the deterministic ones every step span points at."""
+
+    def __init__(self) -> None:
+        self._forced = threading.local()
+
+    def force(self, trace_id: int, span_id: int) -> None:
+        self._forced.ids = (trace_id, span_id)
+
+    def generate_trace_id(self) -> int:
+        ids = getattr(self._forced, "ids", None)
+        return ids[0] if ids else super().generate_trace_id()
+
+    def generate_span_id(self) -> int:
+        ids = getattr(self._forced, "ids", None)
+        if ids:
+            self._forced.ids = None
+            return ids[1]
+        return super().generate_span_id()
+
+
 class OtelObserver:
     """Implements agentos.core.ports.Observer."""
 
     def __init__(self, processor: SpanProcessor | None = None, *,
-                 exporter: SpanExporter | None = None, service_name: str = "agentos") -> None:
-        self._provider = TracerProvider(resource=Resource.create({
+                 exporter: SpanExporter | None = None, service_name: str = "agentos",
+                 resolve: RunResolver | None = None) -> None:
+        self._ids = _ForcedIdGenerator()
+        self._resolve = resolve
+        self._provider = TracerProvider(id_generator=self._ids, resource=Resource.create({
             "service.name": service_name,
             "agentos.semconv.version": SEMCONV_VERSION,
         }))
@@ -81,7 +132,9 @@ class OtelObserver:
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
             self._provider.add_span_processor(BatchSpanProcessor(exporter))
         self._tracer = self._provider.get_tracer("agentos", SEMCONV_VERSION)
-        self._runs: dict[str, trace.Span] = {}
+        # run.started facts per run, kept until the terminal event; the run span itself is
+        # created THEN, by whichever process sees the end (see _end_run).
+        self._runs: dict[str, dict] = {}
         self._steps: dict[tuple[str, str, int], trace.Span] = {}
 
     # ------------------------------------------------------------------ port
@@ -137,20 +190,46 @@ class OtelObserver:
 
     # ---------------------------------------------------------------- spans
     def _start_run(self, ev: RunStarted) -> None:
-        span = self._tracer.start_span(
-            f"run {ev.workflow}", kind=SpanKind.INTERNAL, start_time=_ns(ev.occurred_at),
-            attributes={
-                "agentos.run.id": ev.run_id, "agentos.workflow.name": ev.workflow,
-                "agentos.workflow.version": ev.workflow_version,
-                "agentos.request.id": ev.request_id,
-                "agentos.parent_run.id": ev.parent_run_id or "",
-            })
-        self._runs[ev.run_id] = span
+        self._runs[ev.run_id] = {
+            "start": ev.occurred_at, "agentos.run.id": ev.run_id,
+            "agentos.workflow.name": ev.workflow, "agentos.workflow.version": ev.workflow_version,
+            "agentos.request.id": ev.request_id, "agentos.parent_run.id": ev.parent_run_id or "",
+        }
+
+    def _run_facts(self, run_id: str) -> dict | None:
+        facts = self._runs.get(run_id)
+        if facts is None and self._resolve is not None:
+            try:
+                run = self._resolve(run_id)
+            except Exception:  # noqa: BLE001 — telemetry must not raise
+                run = None
+            if run is not None:
+                facts = {"start": run.started_at, "agentos.run.id": run_id,
+                         "agentos.workflow.name": run.workflow,
+                         "agentos.workflow.version": run.workflow_version,
+                         "agentos.request.id": run.request_id,
+                         "agentos.parent_run.id": run.parent_run_id or ""}
+                self._runs[run_id] = facts
+        return facts
+
+    def _run_context(self, run_id: str):
+        """Parent context for anything under a run: the deterministic run span ids, whether
+        or not this process will be the one to emit the run span."""
+        trace_id, span_id = run_ids(run_id)
+        return trace.set_span_in_context(NonRecordingSpan(SpanContext(
+            trace_id, span_id, is_remote=True, trace_flags=TraceFlags(TraceFlags.SAMPLED))))
 
     def _end_run(self, ev: Event, code: StatusCode, attrs: dict) -> None:
-        span = self._runs.pop(ev.run_id, None)
-        if span is None:
-            return
+        facts = self._run_facts(ev.run_id) or {
+            "start": ev.occurred_at, "agentos.run.id": ev.run_id,
+            "agentos.workflow.name": "unknown", "agentos.run.start_unknown": True}
+        self._runs.pop(ev.run_id, None)
+        trace_id, span_id = run_ids(ev.run_id)
+        self._ids.force(trace_id, span_id)
+        span = self._tracer.start_span(
+            f"run {facts['agentos.workflow.name']}", kind=SpanKind.INTERNAL,
+            start_time=_ns(facts["start"]),
+            attributes={k: v for k, v in facts.items() if k != "start"})
         span.set_attributes(attrs)
         span.set_status(Status(code))
         span.end(end_time=_ns(ev.occurred_at))
@@ -161,10 +240,8 @@ class OtelObserver:
             s.end(end_time=_ns(ev.occurred_at))
 
     def _start_step(self, ev: StepStarted) -> None:
-        parent = self._runs.get(ev.run_id)
-        ctx = trace.set_span_in_context(parent) if parent is not None else None
         span = self._tracer.start_span(
-            f"step {ev.step_id}", context=ctx, kind=SpanKind.INTERNAL,
+            f"step {ev.step_id}", context=self._run_context(ev.run_id), kind=SpanKind.INTERNAL,
             start_time=_ns(ev.occurred_at),
             attributes={
                 "agentos.run.id": ev.run_id, "agentos.step.id": ev.step_id,
@@ -189,9 +266,15 @@ class OtelObserver:
             span.add_event(name, attributes=attrs, timestamp=_ns(ev.occurred_at))
 
     def _run_event(self, ev: Event, name: str, attrs: dict) -> None:
-        span = self._runs.get(ev.run_id)
-        if span is not None:
-            span.add_event(name, attributes=attrs, timestamp=_ns(ev.occurred_at))
+        """Run-level happenings (approval asked/decided, suspended, substitution, dead
+        letter) are zero-duration child spans of the run, not span events: the process
+        that sees them is often not the one that will emit the run span."""
+        span = self._tracer.start_span(
+            name, context=self._run_context(ev.run_id), kind=SpanKind.INTERNAL,
+            start_time=_ns(ev.occurred_at),
+            attributes={"agentos.run.id": ev.run_id,
+                        **{k: v for k, v in attrs.items() if v is not None}})
+        span.end(end_time=_ns(ev.occurred_at))
 
     @staticmethod
     def _completion_attrs(ev: StepCompleted) -> dict:
