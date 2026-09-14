@@ -183,7 +183,26 @@ screenshots together.
 the log turned out to need zero engine changes beyond the fan-out, and having spans earlier
 would have made the Toxiproxy investigations faster to read.
 
-## Phase 4 — UI (optional)  ·  ~2 weekends
+## Phase 4 — Providers + developer experience  ·  ~2 weekends
+**Goal:** a real model in five minutes with no API key, from a package a stranger would
+adopt for a pilot. Providers are plugins (§2.2); the core still ships `echo` only.
+
+- [x] **First provider plugin** `agentos-provider-openai-compat` (`providers/openai-compat/`, its own distribution, MIT): any OpenAI-compatible chat-completions server over plain `httpx` — Ollama zero-config default, vLLM, LM Studio, OpenRouter, OpenAI. No vendor SDK: the wire format is the contract
+- [x] **Entry-point discovery** (`agentos.executors` group) in the composition roots (`agentos/plugins.py`); a broken plugin is skipped with a warning naming it, never fatal; `Agent.executor` routes by name; a missing executor fails the run with the install hint. `GET /executors` shows each plugin's `describe()` + `health()` (server reachable? aliases available?)
+- [x] **A3 capability aliases + `executor.substituted`**: `chat.fast` → concrete id via the plugin's `resolve(req)`; a changed resolution mid-run is recorded before the next step, with principal `system:<executor>`; completed steps never re-run
+- [x] **A6 closed**: metered `Cost` from real token usage; Decimal amounts; pricing table content-addressed, stored in the BlobStore at startup, fetchable at `GET /blobs/{sha256}`; local open-weight families priced 0, unpriced models marked `priced=false`
+- [x] **A10 cassettes**: dependency-free JSON record/replay transport; committed cassettes recorded from a live Ollama (`source` in each file); nightly opt-in `provider-live` job installs Ollama on a runner, re-records, re-runs the replay tests, uploads the artifact
+- [x] **Run inputs**: `POST /workflows/{name}/runs {"inputs": …}` stored by hash (`run.started.inputs_ref`), visible to every step as `{run.…}`; workflows without inputs are byte-for-byte unchanged (golden logs still fold)
+- [x] **DX bar**: `docs/quickstart-llm.md` (five minutes, no key) executed by `tests/test_quickstart_llm.py` against the recorded cassette AND run end-to-end against live Ollama with separate API + worker; `scripts/quickstart_llm.py` does steps 3–5 in one command; every provider error message says what to do (`ollama serve`, `ollama pull x`, set `AGENTOS_OPENAI_API_KEY`, available template keys); typed config with documented env defaults; provider README
+- [ ] ⏭ README screenshots (Jaeger span with `gen_ai.*`, Grafana) — now recordable
+- [ ] ⏭ C12 executor-input trust boundary: tool results are data, never prompt (`agentos/protocols/`, A8)
+- [ ] ⏭ A11 `agentos export-run --format jsonl`
+- [ ] ⏭ Second provider (Anthropic or Bedrock) to prove the plugin seam with a different wire format
+- [ ] ⏭ Real `tool` agent (HTTP/subprocess) in core
+
+**Tag:** `v0.5.0-providers`. **Post:** "Providers Are Plugins: Surviving Model Churn With Aliases, Cassettes and a Pricing Hash."
+
+## Phase 5 — UI (optional)  ·  ~2 weekends
 **Goal:** a visual the recruiter screenshot remembers. Plays to frontend strength.
 
 - [ ] React + (Cloudscape or shadcn) app
@@ -191,7 +210,7 @@ would have made the Toxiproxy investigations faster to read.
 - [ ] Event-log timeline view (time-travel debugging over the log)
 - [ ] Cost + latency panel per run
 
-**Tag:** `v0.5.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
+**Tag:** `v0.6.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
 
 ---
 

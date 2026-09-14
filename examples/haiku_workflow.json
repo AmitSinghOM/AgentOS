@@ -1,0 +1,9 @@
+{
+  "name": "haiku",
+  "budget": {"max_run_cost": "0.01"},
+  "nodes": [
+    {"id": "write", "agent": "poet"},
+    {"id": "review", "agent": "critic", "depends_on": ["write"],
+     "retry": {"max_attempts": 3, "backoff_seconds": 1}}
+  ]
+}

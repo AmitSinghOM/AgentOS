@@ -1,0 +1,10 @@
+{
+  "name": "critic",
+  "type": "llm",
+  "executor": "openai-compat",
+  "config": {
+    "model": "chat.fast",
+    "json_output": true,
+    "prompt": "Rate this haiku from 1 to 5 and say why, as JSON with keys score and reason:\n\n{write.text}"
+  }
+}

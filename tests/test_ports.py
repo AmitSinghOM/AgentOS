@@ -198,7 +198,7 @@ def test_missing_executor_fails_the_run_not_the_process():
     _store, _executor, engine = _engine(agent_type=AgentType.llm)
     run = engine.start_run("diamond")
     assert run.status is RunStatus.failed
-    assert "no executor registered" in (run.error or "")
+    assert "needs executor" in (run.error or "") and "are registered" in (run.error or "")
     assert run.ended_at is not None
 
 
