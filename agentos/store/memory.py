@@ -190,3 +190,10 @@ class MemoryStore:
         with self._cv:
             self._inflight = [(t, r) for t, r in self._inflight if r != run_id]
             heapq.heapify(self._inflight)
+            if run_id in self._queue:          # same as the SQL adapters: ack removes the
+                self._queue.remove(run_id)     # run whether waiting or in flight
+
+    def queue_depth(self) -> int:
+        """Runs waiting or in flight (not yet acked)."""
+        with self._cv:
+            return len(self._queue) + len(self._inflight)

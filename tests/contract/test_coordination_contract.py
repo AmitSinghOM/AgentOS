@@ -164,3 +164,16 @@ def test_queue_is_fifo_and_two_pullers_never_share_a_delivery(coord):
     for t in ts:
         t.join()
     assert sorted(got) == ["a", "b", "c", "d"]              # each exactly once
+
+
+def test_queue_depth_counts_waiting_and_inflight(coord):
+    coord.visibility_seconds = 30.0
+    assert coord.queue_depth() == 0
+    coord.push("a")
+    coord.push("b")
+    assert coord.queue_depth() == 2
+    assert coord.pull(0.2) in ("a", "b")
+    assert coord.queue_depth() == 2                          # in flight still counts
+    coord.ack("a")
+    coord.ack("b")
+    assert coord.queue_depth() == 0

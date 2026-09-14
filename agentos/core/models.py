@@ -287,6 +287,11 @@ class ApprovalStatus(str, Enum):
     rejected = "rejected"
 
 
+class ApprovalKind(str, Enum):
+    effect = "effect"                      # a step declares gated effect classes (before dispatch)
+    cost = "cost"                          # the run's rolling cost exceeded max_run_cost
+
+
 class Approval(BaseModel):
     """Folded view of one approval gate (C7). Lives in the log as
     approval.requested / approval.granted / approval.rejected."""
@@ -294,6 +299,9 @@ class Approval(BaseModel):
     approval_id: str
     step_id: str
     effect_classes: list[EffectClass]
+    kind: ApprovalKind = ApprovalKind.effect
+    cost_at_request: str | None = None     # kind=cost: rolling total when the ceiling tripped
+    proposed_ceiling: str | None = None    # kind=cost: the ceiling a grant establishes
     status: ApprovalStatus = ApprovalStatus.pending
     reason: str = ""                       # why it was requested
     requested_at: datetime
@@ -323,6 +331,7 @@ class WorkflowRun(BaseModel):
     cancel_requested: bool = False                            # request persisted, not yet finalized
     pause_requested: bool = False
     approvals: dict[str, Approval] = Field(default_factory=dict)  # approval_id → gate
+    cost_ceiling: str | None = None                           # raised by granted cost approvals
     total_cost: str = "0"                                     # decimal string, rolled up
     started_at: datetime = Field(default_factory=_now)
     ended_at: datetime | None = None

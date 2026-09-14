@@ -332,5 +332,9 @@ class SqliteStore:
         with self._lock:
             self._conn.execute("DELETE FROM queue WHERE run_id = ?", (run_id,))
 
+    def queue_depth(self) -> int:
+        (n,) = self._conn.execute("SELECT COUNT(*) FROM queue").fetchone()
+        return int(n)
+
     def close(self) -> None:
         self._conn.close()

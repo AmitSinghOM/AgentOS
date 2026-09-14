@@ -333,6 +333,11 @@ class PostgresStore:
         with self._pool.connection() as conn:
             conn.execute("DELETE FROM queue WHERE run_id = %s", (run_id,))
 
+    def queue_depth(self) -> int:
+        with self._pool.connection() as conn:
+            (n,) = conn.execute("SELECT COUNT(*) FROM queue").fetchone()
+        return int(n)
+
     # lifecycle
     def connection(self):
         """Raw pooled connection — used by the lease adapter, never by the core."""
