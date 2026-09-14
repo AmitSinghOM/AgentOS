@@ -140,13 +140,15 @@ def test_discover_executors_loads_good_skips_broken_and_dedupes(monkeypatch, cap
     assert "registered twice" in msgs and "did not produce an Executor" in msgs
 
 
-def test_installed_provider_is_discovered_through_its_entry_point():
+def test_installed_providers_are_discovered_through_their_entry_points():
     pytest.importorskip("agentos_provider_openai_compat")
     found = plugins.discover_executors()
     assert "openai-compat" in found
-    d = plugins.describe(found)[0]
-    assert d["name"] == "openai-compat" and d["describe"]["aliases"]["chat.fast"]
-    assert "reachable" in d["health"]
+    by_name = {d["name"]: d for d in plugins.describe(found)}
+    d = by_name["openai-compat"]
+    assert d["describe"]["aliases"]["chat.fast"] and "reachable" in d["health"]
+    if "anthropic" in found:                                 # second provider, same seam
+        assert by_name["anthropic"]["describe"]["wire_format"] == "anthropic-messages"
 
 
 def test_pricing_snapshot_is_stored_as_a_blob():

@@ -1,7 +1,7 @@
 {
   "format": "agentos.cassette/1",
   "source": "http://127.0.0.1:11434/v1",
-  "recorded_at": "2026-09-14T09:19:36+00:00",
+  "recorded_at": "2026-09-14T09:50:14+00:00",
   "interactions": [
     {
       "key": "6393f2456295848e9e47fbfd656ac09a38a62570532f5dc026a64781ce1c1fa8",

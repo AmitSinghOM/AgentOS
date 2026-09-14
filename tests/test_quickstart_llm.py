@@ -86,3 +86,29 @@ def test_examples_are_valid_definitions():
         assert a["config"]["model"] == "chat.fast"
     wf = json.loads((EXAMPLES / "haiku_workflow.json").read_text())
     assert [n["id"] for n in wf["nodes"]] == ["write", "review"]
+
+
+def test_same_agents_run_on_the_anthropic_wire_format(monkeypatch):
+    """The plugin seam, proven: change `executor`, nothing else. Replays the cassette the
+    Anthropic provider recorded from the same local Ollama via /v1/messages."""
+    pytest.importorskip("agentos_provider_anthropic")
+    monkeypatch.setenv("AGENTOS_STORE", "memory")
+    monkeypatch.setenv("AGENTOS_ANTHROPIC_CASSETTES", "replay")
+    monkeypatch.setenv("AGENTOS_ANTHROPIC_CASSETTE_DIR",
+                       str(ROOT / "providers" / "anthropic" / "tests" / "cassettes"))
+    monkeypatch.setenv("AGENTOS_ANTHROPIC_CASSETTE", "quickstart")
+    from agentos.api import main
+    importlib.reload(main)
+    c = TestClient(main.app)
+    for f in ("poet_agent.json", "critic_agent.json"):
+        a = json.loads((EXAMPLES / f).read_text())
+        a["executor"] = "anthropic"
+        assert c.post("/agents", json=a).status_code == 201
+    _post_json(c, "/workflows", "haiku_workflow.json")
+    run = c.post("/workflows/haiku/runs?sync=true", json={"inputs": {"topic": "event logs"}}).json()
+    assert run["status"] == "completed", run["error"]
+    write, review = run["steps"]
+    assert write["provenance"]["executor"] == "anthropic"
+    assert write["provenance"]["model_id"] == "qwen2.5:0.5b" and write["output"]["text"].strip()
+    assert isinstance(review["output"]["json"]["score"], int | float)
+    assert run["total_cost"] == "0"

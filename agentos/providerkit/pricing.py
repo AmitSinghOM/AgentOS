@@ -41,12 +41,15 @@ class PricingTable:
             return Decimal(0), Decimal(0)
         return None
 
-    def cost(self, model_id: str, input_tokens: int, output_tokens: int) -> tuple[Cost, bool]:
+    def cost(self, model_id: str, input_tokens: int, output_tokens: int,
+             extra_meters: list[Meter] | None = None) -> tuple[Cost, bool]:
         """Returns (Cost, priced). `priced=False` means the model is not in the table: the
-        meters are still recorded, the amount is 0, and the step output says so."""
+        meters are still recorded, the amount is 0, and the step output says so.
+        `extra_meters` are recorded but not priced (e.g. cached input tokens, which the
+        caller has already counted inside `input_tokens` at the full rate — conservative)."""
         units = [Meter(name="input_tokens", quantity=input_tokens),
                  Meter(name="output_tokens", quantity=output_tokens),
-                 Meter(name="requests", quantity=1)]
+                 Meter(name="requests", quantity=1), *(extra_meters or [])]
         prices = self.price_of(model_id)
         if prices is None:
             return Cost(units=units, amount="0", currency=self.currency,
