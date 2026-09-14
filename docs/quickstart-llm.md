@@ -109,9 +109,17 @@ the step's `provenance.executor` says `anthropic`. Point `AGENTOS_ANTHROPIC_BASE
 ## 7. See it in Jaeger and Grafana (optional)
 
 `docker compose up -d` brings up Postgres, Jaeger, Prometheus and Grafana. Run the API and
-worker with `AGENTOS_OTEL_EXPORTER=otlp AGENTOS_PROMETHEUS=1`, re-run step 5, then open
-[Jaeger](http://localhost:16686) for one span per step with `gen_ai.request.model` and
-token counts, and [Grafana](http://localhost:3000) (admin/admin) for the AgentOS dashboard.
+worker with `AGENTOS_OTEL_EXPORTER=otlp AGENTOS_PROMETHEUS=1`, re-run step 5 (or
+`python scripts/demo_traffic.py` for a few minutes of varied runs: both providers, an
+approval, a dead-letter), then open [Jaeger](http://localhost:16686) — one trace per run,
+the run span parenting each step span with `gen_ai.request.model` and token counts, and
+approvals as child spans — and [Grafana](http://localhost:3000) (admin/admin) for the
+AgentOS dashboard. The worker serves its own metrics on `:8001` (`AGENTOS_WORKER_METRICS_PORT`);
+Prometheus scrapes both processes.
+
+![Jaeger: a run suspended for approval, then resumed](images/jaeger-run-payment.png)
+
+![Grafana: the provisioned AgentOS dashboard](images/grafana-dashboard.png)
 
 ## When something goes wrong
 

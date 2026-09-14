@@ -38,7 +38,7 @@
      "targets": [
        {"expr": "sum by (step) (rate(agentos_step_retries_scheduled_total[5m]))", "legendFormat": "retry {{step}}", "refId": "A"},
        {"expr": "sum by (step, effect_class) (rate(agentos_steps_dead_lettered_total[5m]))", "legendFormat": "dead-letter {{step}} {{effect_class}}", "refId": "B"}]},
-    {"id": 8, "type": "timeseries", "title": "Tokens / s by agent", "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+    {"id": 8, "type": "timeseries", "title": "Tokens / s by executor", "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
      "datasource": {"uid": "agentos-prom"},
      "targets": [{"expr": "sum by (agent, meter) (rate(agentos_meter_units_total{meter=~\".*tokens\"}[5m]))", "legendFormat": "{{agent}} {{meter}}", "refId": "A"}]},
 
