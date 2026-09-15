@@ -12,6 +12,7 @@ import os
 import sys
 
 from agentos.agents.echo import EchoExecutor
+from agentos.agents.tool import ToolExecutor
 from agentos.core.engine import Engine
 from agentos.core.faults import from_env
 from agentos.core.models import AgentType
@@ -61,7 +62,8 @@ def main(argv: list[str] | None = None) -> int:
             logging.getLogger("agentos.worker").warning(
                 "worker metrics not served: port %d unavailable (%s); set "
                 "AGENTOS_WORKER_METRICS_PORT to another port or 0 to disable", port, exc)
-    executors = {AgentType.echo.value: EchoExecutor(), **discover_executors()}
+    executors = {AgentType.echo.value: EchoExecutor(), AgentType.tool.value: ToolExecutor(),
+                 **discover_executors()}
     store_pricing_snapshots(executors, store)
     engine = Engine(store=store, blobs=store, executors=executors,
                     faults=injector, lease=store, observers=observers)

@@ -1,0 +1,11 @@
+{
+  "name": "repo_facts",
+  "type": "tool",
+  "declared_effects": ["read"],
+  "config": {
+    "kind": "http",
+    "url": "https://api.github.com/repos/AmitSinghOM/AgentOS",
+    "headers": {"Accept": "application/vnd.github+json", "User-Agent": "agentos-quickstart"},
+    "timeout": 20
+  }
+}

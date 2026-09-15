@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from agentos.agents.echo import EchoExecutor
+from agentos.agents.tool import ToolExecutor
 from agentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
 from agentos.core.fold import FoldError
 from agentos.core.integrity import IntegrityError, verify
@@ -51,7 +52,8 @@ queue_depth = None
 if prometheus is not None and hasattr(store, "queue_depth"):
     from agentos.observability.prometheus import QueueDepthCollector
     queue_depth = QueueDepthCollector(prometheus.registry, store.queue_depth)
-executors = {AgentType.echo.value: EchoExecutor(), **discover_executors()}
+executors = {AgentType.echo.value: EchoExecutor(), AgentType.tool.value: ToolExecutor(),
+             **discover_executors()}
 pricing_snapshots = store_pricing_snapshots(executors, store)
 engine = Engine(store=store, blobs=store, executors=executors,
                 lease=store if hasattr(store, "acquire") else None, observers=observers)
