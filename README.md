@@ -41,19 +41,20 @@ Both are from a real two-process run (API + worker) against Ollama — see
 ```mermaid
 flowchart TD
     C[Client] -->|define / start / approve| API[FastAPI API]
-    API -->|enqueue| Q[(Redis Queue)]
-    Q --> ENG[Workflow Engine<br/>topological scheduler]
-    ENG --> ROUTER[Agent Router]
-    ROUTER --> LLM[LLM Agents]
-    ROUTER --> TOOL[Tool Agents]
-    ENG -->|append events| PG[(PostgreSQL<br/>event-sourced state)]
-    ENG -.locks / retries.-> R[(Redis)]
-    ENG -.traces.-> OTEL[OpenTelemetry → Jaeger]
-    ENG -.metrics.-> PROM[Prometheus → Grafana]
+    API -->|append run.started, enqueue| PG[(PostgreSQL or SQLite<br/>event log · queue · leases · blobs)]
+    PG --> W[Worker<br/>fenced lease, wave scheduler]
+    W --> EXEC[Executors]
+    EXEC --> PROV[Provider plugins<br/>openai-compat · anthropic]
+    EXEC --> TOOL[tool<br/>HTTP · subprocess]
+    W -->|append events| PG
+    PG -.observers derive.-> OTEL[OpenTelemetry → Jaeger]
+    PG -.observers derive.-> PROM[Prometheus → Grafana]
 ```
 
-PostgreSQL is the source of truth (append-only event log). Redis is the speed layer
-(locks, retry timers, cache) and is safe to flush.
+One store is the whole truth: the append-only, hash-chained event log, plus the queue,
+fenced leases and content-addressed blobs, behind one `Store` port with PostgreSQL, SQLite
+and in-memory adapters. There is no second system to keep consistent. Snapshots bound
+replay cost and are only a cache of the fold.
 
 ## Quick start
 
@@ -155,7 +156,7 @@ See [ROADMAP.md](./ROADMAP.md).
 
 | Phase | Ships | Status |
 |-------|-------|--------|
-| 0 · Walking skeleton | API + Postgres + Redis up, single-step run end-to-end | ✅ `v0.1.0-skeleton` |
+| 0 · Walking skeleton | API + Postgres up, single-step run end-to-end | ✅ `v0.1.0-skeleton` |
 | 1 · Durable execution | Event-sourced state, idempotent steps, crash-resume | ✅ `v0.2.0-durable` |
 | 2 · DAG orchestration | Parallel branches, agent versioning, retries + DLQ | ✅ `v0.3.0-dag` |
 | 3 · HITL + observability | Approval gates, OpenTelemetry, cost dashboard | ✅ `v0.4.0-observable` |

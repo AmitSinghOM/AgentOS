@@ -9,8 +9,10 @@ session advisory locks for per-run leases live in `agentos/store/pg_lease.py`.
   serializes concurrent appenders so exactly one sees the expected seq.
 - `runs.request_id UNIQUE` makes run start idempotent under concurrency.
 
-Schema management: `SqlStore.migrate()` creates tables idempotently. Alembic arrives with
-the first schema change; for a brand-new schema, `CREATE TABLE IF NOT EXISTS` is honest.
+Schema management: numbered, forward-only, raw-SQL migrations in `agentos/store/migrations.py`,
+recorded in `schema_migrations` and applied on startup (`migrate()`), idempotent so a
+database created before the ledger adopts it silently. Chosen over Alembic on purpose —
+see that module's docstring.
 """
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ from agentos.core.coordination import LeaseToken
 from agentos.core.events import Event, RunStarted, from_record
 from agentos.core.models import Agent, BlobRef, WorkflowDefinition
 from agentos.core.ports import ConflictError
+from agentos.store import migrations
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_versions (
@@ -88,11 +91,40 @@ class PostgresStore:
                                     kwargs=opts, open=True)
         self.migrate()
 
-    def migrate(self) -> None:
+    def migrate(self) -> list[int]:
+        """Apply pending schema migrations (agentos/store/migrations.py); idempotent."""
         with self._pool.connection() as conn:
             if self._schema:
                 conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{self._schema}"')
-            conn.execute(SCHEMA)
+            return migrations.apply(
+                "postgres", SCHEMA, conn.execute,
+                lambda: {r[0] for r in conn.execute(
+                    "SELECT version FROM schema_migrations").fetchall()},
+                lambda v, d, at: conn.execute(
+                    "INSERT INTO schema_migrations VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                    (v, d, at)))
+
+    def schema_version(self) -> int:
+        with self._pool.connection() as conn:
+            (v,) = conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+                                ).fetchone()
+        return int(v)
+
+    # snapshots (C15): a bounded optimization of the fold, never the source of truth
+    def put_snapshot(self, run_id: str, seq: int, last_hash: str | None, state: dict) -> None:
+        with self._pool.connection() as conn:
+            conn.execute(
+                "INSERT INTO run_snapshots (run_id, seq, last_hash, state, taken_at) "
+                "VALUES (%s, %s, %s, %s::jsonb, now()) ON CONFLICT (run_id) DO UPDATE SET "
+                "seq = EXCLUDED.seq, last_hash = EXCLUDED.last_hash, state = EXCLUDED.state, "
+                "taken_at = EXCLUDED.taken_at",
+                (run_id, seq, last_hash, json.dumps(state, sort_keys=True, default=str)))
+
+    def get_snapshot(self, run_id: str) -> tuple[int, str | None, dict] | None:
+        with self._pool.connection() as conn:
+            row = conn.execute("SELECT seq, last_hash, state FROM run_snapshots WHERE run_id = %s",
+                               (run_id,)).fetchone()
+        return (int(row[0]), row[1], row[2]) if row else None
 
     # definitions (agents immutable per (name, version))
     def put_agent(self, agent: Agent) -> None:

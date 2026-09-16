@@ -60,7 +60,7 @@ from agentos.core.events import (
     StepStarted,
 )
 from agentos.core.faults import FaultInjector, NoFaults
-from agentos.core.fold import fold
+from agentos.core.fold import FoldError, fold, fold_from
 from agentos.core.integrity import chain
 from agentos.core.models import (
     HUMAN_ONLY_EFFECTS,
@@ -237,12 +237,15 @@ class Engine:
                  clock: Callable[[], float] = time.monotonic,
                  wall: Callable[[], datetime] = lambda: datetime.now(UTC),
                  lease: Lease | None = None,
-                 observers: Sequence[Observer] = ()) -> None:
+                 observers: Sequence[Observer] = (),
+                 snapshot_every: int = 200) -> None:
         """`executors` maps an AgentType value (e.g. "echo") to the adapter that runs it.
         `clock` is monotonic (durations, rate limits); `wall` is the timestamp source for
         `retry_at` so tests can pin it. `lease` lets control requests be finalized
         immediately when no worker holds the run (idle/paused runs). `observers` receive
-        every committed event (telemetry adapters)."""
+        every committed event (telemetry adapters). `snapshot_every` bounds replay cost
+        (C15): once a run's log has grown that many events past its last snapshot, the
+        folded state is stored and later reads fold only the tail; 0 disables."""
         self._store = store
         self._blobs = blobs
         self._executors = executors
@@ -251,13 +254,13 @@ class Engine:
         self._wall = wall
         self._lease = lease
         self._observers = tuple(observers)
+        self._snapshot_every = snapshot_every
 
     # ----------------------------------------------------------------- queries
     def get_run(self, run_id: str, *, hydrate: bool = True) -> WorkflowRun | None:
-        events = self._store.read_events(run_id)
-        if not events:
+        run = self._fold_run(run_id)
+        if run is None:
             return None
-        run = fold(events)
         if hydrate:
             for step in run.steps:
                 if step.output_ref is not None:
@@ -265,6 +268,40 @@ class Engine:
             if run.inputs_ref is not None:
                 run.inputs = json.loads(self._blobs.get(run.inputs_ref))
         return run
+
+    def _fold_run(self, run_id: str) -> WorkflowRun | None:
+        """State = fold(log). With a snapshot (C15): state = fold_from(snapshot, tail),
+        reading only the events after it. A snapshot that fails to chain to the tail, or
+        whose state does not parse, is IGNORED and the whole log is folded instead — the
+        log is the source of truth and a bad cache must never make a run unreadable."""
+        snap = self._store.get_snapshot(run_id) if self._snapshot_every else None
+        if snap is not None:
+            seq, last_hash, state = snap
+            try:
+                base = WorkflowRun.model_validate(state)
+                if base.last_seq == seq and base.last_hash == last_hash:
+                    tail = self._store.read_events(run_id, after_seq=seq)
+                    return fold_from(base, tail)
+            except (FoldError, ValueError) as exc:
+                _log.warning("run %s: snapshot at seq %s unusable (%s); folding the full log",
+                             run_id, seq, exc)
+        events = self._store.read_events(run_id)
+        if not events:
+            return None
+        return fold(events)
+
+    def _maybe_snapshot(self, run_id: str, last_seq: int) -> None:
+        """Called when an advance() returns: if the log grew `snapshot_every` events past
+        the last snapshot, store the folded (unhydrated) state at the current tail."""
+        if not self._snapshot_every:
+            return
+        snap = self._store.get_snapshot(run_id)
+        if last_seq - (snap[0] if snap else 0) < self._snapshot_every:
+            return
+        run = self._fold_run(run_id)          # cheap: folds from the previous snapshot
+        if run is not None:
+            self._store.put_snapshot(run_id, run.last_seq, run.last_hash,
+                                     run.model_dump(mode="json", exclude={"inputs"}))
 
     def is_terminal(self, run_id: str) -> bool:
         run = self.get_run(run_id, hydrate=False)
@@ -690,12 +727,15 @@ class Engine:
                     ))
                     log.append(RunSuspended(run_id=run_id))
                     return self.get_run(run_id)  # type: ignore[return-value]
-                run = self.get_run(run_id, hydrate=False)  # type: ignore[assignment]
+                # No refold per wave: everything the next wave needs (attempts, outputs,
+                # models, approvals) is tracked locally; a per-wave fold made a 1000-step
+                # run O(n²) (found by the C15 acceptance test).
             log.append(RunCompleted(run_id=run_id))
             return self.get_run(run_id)  # type: ignore[return-value]
         finally:
             log.close()
             pool.shutdown(wait=False, cancel_futures=True)
+            self._maybe_snapshot(run_id, log.last_seq)
 
     # ---------------------------------------------------------------- one step
     def _approval_gate(self, node: WorkflowNode, run: WorkflowRun, budget: Budget) -> str:

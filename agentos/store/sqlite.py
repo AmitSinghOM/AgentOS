@@ -25,6 +25,7 @@ from agentos.core.coordination import LeaseToken
 from agentos.core.events import Event, RunStarted, from_record
 from agentos.core.models import Agent, BlobRef, WorkflowDefinition
 from agentos.core.ports import ConflictError
+from agentos.store import migrations
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_versions (
@@ -83,8 +84,36 @@ class SqliteStore:
                                      isolation_level=None)  # autocommit; explicit BEGIN
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.executescript(SCHEMA)
+        self.migrate()
         self._lock = threading.RLock()
+
+    def migrate(self) -> list[int]:
+        """Apply pending schema migrations (agentos/store/migrations.py); idempotent."""
+        return migrations.apply(
+            "sqlite", SCHEMA, self._conn.executescript,
+            lambda: {r[0] for r in self._conn.execute(
+                "SELECT version FROM schema_migrations").fetchall()},
+            lambda v, d, at: self._conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations VALUES (?, ?, ?)", (v, d, at)))
+
+    def schema_version(self) -> int:
+        (v,) = self._conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+                                  ).fetchone()
+        return int(v)
+
+    # snapshots (C15): a bounded optimization of the fold, never the source of truth
+    def put_snapshot(self, run_id: str, seq: int, last_hash: str | None, state: dict) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO run_snapshots VALUES (?, ?, ?, ?, ?)",
+                (run_id, seq, last_hash, json.dumps(state, sort_keys=True, default=str),
+                 time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+
+    def get_snapshot(self, run_id: str) -> tuple[int, str | None, dict] | None:
+        row = self._conn.execute(
+            "SELECT seq, last_hash, state FROM run_snapshots WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        return (int(row[0]), row[1], json.loads(row[2])) if row else None
 
     # definitions (agents immutable per (name, version))
     def put_agent(self, agent: Agent) -> None:

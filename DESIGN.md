@@ -179,8 +179,11 @@ deployment change, not an architecture change.
 
 ## 7. Tech Stack
 
-Python 3.11 · FastAPI · SQLAlchemy 2.x + PostgreSQL · Redis · Pydantic v2 ·
-OpenTelemetry · Prometheus · pytest · Docker Compose. Bedrock + OpenAI agent providers.
+Python 3.11+ · FastAPI · Pydantic v2 · PostgreSQL (psycopg 3) or SQLite behind one `Store`
+port · OpenTelemetry · Prometheus · pytest · Docker Compose · MIT. Model providers are
+separate plugins (`agentos-provider-openai-compat`, `agentos-provider-anthropic`) over plain
+HTTP; the core imports no vendor SDK. Redis and SQLAlchemy were in the original plan and
+were removed once the queue and leases lived in the store (Phase 1) — one system of record.
 
 (Stack chosen deliberately to match production patterns I use day-to-day, so the design
 decisions are battle-tested rather than tutorial-deep.)

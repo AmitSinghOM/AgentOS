@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import heapq
+import json
 import threading
 import time
 from collections import deque
@@ -21,6 +22,7 @@ class MemoryStore:
         self._agents: dict[tuple[str, int], Agent] = {}
         self._workflows: dict[str, WorkflowDefinition] = {}
         self._events: dict[str, list[dict]] = {}          # run_id → records in seq order
+        self._snapshots: dict[str, tuple[int, str | None, str]] = {}
         self._requests: dict[str, str] = {}               # request_id → run_id
         self._fences: dict[str, int] = {}                 # run_id → highest fence seen
         self._blobs: dict[str, tuple[bytes, str]] = {}
@@ -100,6 +102,16 @@ class MemoryStore:
         # Round-trip through records so this adapter has the same serialization
         # behaviour as a real database (enum → str → enum), cf. agno #8454.
         return [from_record(r) for r in self._events.get(run_id, []) if r["seq"] > after_seq]
+
+    # snapshots (C15): a bounded optimization of the fold, never the source of truth
+    def put_snapshot(self, run_id: str, seq: int, last_hash: str | None, state: dict) -> None:
+        with self._lock:                      # stored as JSON text: same round trip as SQL
+            self._snapshots[run_id] = (seq, last_hash, json.dumps(state, sort_keys=True,
+                                                                     default=str))
+
+    def get_snapshot(self, run_id: str) -> tuple[int, str | None, dict] | None:
+        snap = self._snapshots.get(run_id)
+        return (snap[0], snap[1], json.loads(snap[2])) if snap else None
 
     def list_run_ids(self) -> list[str]:
         return list(self._events)
