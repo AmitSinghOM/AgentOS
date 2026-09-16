@@ -305,3 +305,37 @@ def test_a_failing_snapshot_write_never_fails_the_advance(caplog):
     assert any("snapshot skipped" in r.getMessage() and "disk full" in r.getMessage()
                for r in caplog.records)
     assert eng.get_run(run.id).status is RunStatus.completed     # log still folds
+
+
+def test_a_snapshot_beyond_the_log_is_ignored_even_with_no_tail():
+    # Review finding F2: with nothing after the snapshot there was no chain link to check,
+    # so a snapshot whose seq is past the log's tail (events restored from an older backup
+    # than run_snapshots) was served as truth. The anchor event itself is now verified.
+    store = CountingStore()
+    store.put_agent(Agent(name="g", type=AgentType.echo))
+    store.put_workflow(WorkflowDefinition(name="w", nodes=[
+        {"id": "a", "agent": "g"}, {"id": "b", "agent": "g", "depends_on": ["a"]}]))
+    eng = Engine(store=store, blobs=store, executors={"echo": EchoExecutor()}, lease=store,
+                 snapshot_every=1)
+    run = eng.start_run("w")
+    snap_seq, snap_hash, state = store.get_snapshot(run.id)
+    assert snap_seq == run.last_seq                                  # taken at the tail
+
+    # 1. A valid anchor with an empty tail IS used, and costs exactly one event read.
+    store.reads.clear()
+    assert eng.get_run(run.id, hydrate=False).status is RunStatus.completed
+    assert store.reads == [1]
+
+    # 2. Same state, claiming a seq beyond the log: nothing to chain to, so previously it
+    #    was believed. Now the missing anchor event means the whole log is folded instead.
+    forged = state | {"status": "failed", "last_seq": snap_seq + 5}
+    store._snapshots[run.id] = (snap_seq + 5, snap_hash, json.dumps(forged))  # bypass monotonic guard on purpose
+    store.reads.clear()
+    got = eng.get_run(run.id, hydrate=False)
+    assert got.status is RunStatus.completed and got.last_seq == run.last_seq
+    assert store.reads[-1] == run.last_seq                          # fell back to the full log
+
+    # 3. Right seq, wrong hash at that seq, empty tail: also a stranger.
+    store._snapshots[run.id] = (snap_seq, "00" * 32, json.dumps(state | {"status": "failed",
+                                                                          "last_hash": "00" * 32}))
+    assert eng.get_run(run.id, hydrate=False).status is RunStatus.completed

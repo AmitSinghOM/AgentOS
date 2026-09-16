@@ -280,8 +280,16 @@ class Engine:
             try:
                 base = WorkflowRun.model_validate(state)
                 if base.last_seq == seq and base.last_hash == last_hash:
-                    tail = self._store.read_events(run_id, after_seq=seq)
-                    return fold_from(base, tail)
+                    # Read the anchor event too (one extra row), so the snapshot is bound
+                    # to the log even when nothing follows it: a snapshot whose seq is
+                    # beyond the log, or whose hash is not the log's at that seq, is a
+                    # stranger and is ignored. `hash` is None on both sides for pre-chain
+                    # logs, so the comparison still holds there.
+                    events = self._store.read_events(run_id, after_seq=seq - 1)
+                    if events and events[0].seq == seq and events[0].hash == last_hash:
+                        return fold_from(base, events[1:])
+                    _log.warning("run %s: snapshot at seq %s does not anchor to the log; "
+                                 "folding the full log", run_id, seq)
             except (FoldError, ValueError) as exc:
                 _log.warning("run %s: snapshot at seq %s unusable (%s); folding the full log",
                              run_id, seq, exc)
