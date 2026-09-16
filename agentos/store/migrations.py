@@ -12,8 +12,11 @@ must be idempotent (`IF NOT EXISTS`) so a database created before the ledger exi
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
+
+_log = logging.getLogger("agentos.store")
 
 # (version, description, {dialect: sql})
 MIGRATIONS: list[tuple[int, str, dict[str, str]]] = [
@@ -79,4 +82,7 @@ def apply(dialect: str, baseline_sql: str, execute_script: Callable[[str], None]
         execute_script(sql)
         record(version, description, datetime.now(UTC).isoformat(timespec="seconds"))
         applied.append(version)
+        # Visible once per upgrade, so an operator moving a v0.6 database forward can see
+        # what changed (review finding F6); silent on an already-current database.
+        _log.info("%s schema migration %d applied: %s", dialect, version, description)
     return applied
