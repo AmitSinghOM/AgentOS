@@ -339,3 +339,33 @@ def test_a_snapshot_beyond_the_log_is_ignored_even_with_no_tail():
     store._snapshots[run.id] = (snap_seq, "00" * 32, json.dumps(state | {"status": "failed",
                                                                           "last_hash": "00" * 32}))
     assert eng.get_run(run.id, hydrate=False).status is RunStatus.completed
+
+
+def test_snapshot_every_zero_disables_snapshots_entirely():
+    # Review finding F1: the knob is operator-facing (AGENTOS_SNAPSHOT_EVERY); 0 must mean
+    # no snapshot is written AND none is consulted, so every read is the full fold.
+    store = CountingStore()
+    store.put_agent(Agent(name="g", type=AgentType.echo))
+    store.put_workflow(WorkflowDefinition(name="w", nodes=[
+        {"id": "a", "agent": "g"}, {"id": "b", "agent": "g", "depends_on": ["a"]}]))
+    store.put_snapshot("planted", 1, None, {})                    # never read below
+    eng = Engine(store=store, blobs=store, executors={"echo": EchoExecutor()}, lease=store,
+                 snapshot_every=0)
+    run = eng.start_run("w")
+    assert run.status is RunStatus.completed
+    assert store.get_snapshot(run.id) is None
+    store.reads.clear()
+    assert eng.get_run(run.id, hydrate=False).status is RunStatus.completed
+    assert store.reads == [run.last_seq]                         # one full-log read
+
+
+def test_snapshot_every_env_is_validated_and_names_the_variable(monkeypatch):
+    from agentos.api.main import snapshot_every_from_env
+    monkeypatch.delenv("AGENTOS_SNAPSHOT_EVERY", raising=False)
+    assert snapshot_every_from_env() == 200
+    monkeypatch.setenv("AGENTOS_SNAPSHOT_EVERY", "0")
+    assert snapshot_every_from_env() == 0
+    for bad in ("-1", "many", ""):
+        monkeypatch.setenv("AGENTOS_SNAPSHOT_EVERY", bad)
+        with pytest.raises(RuntimeError, match="AGENTOS_SNAPSHOT_EVERY"):
+            snapshot_every_from_env()

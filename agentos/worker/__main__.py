@@ -65,8 +65,14 @@ def main(argv: list[str] | None = None) -> int:
     executors = {AgentType.echo.value: EchoExecutor(), AgentType.tool.value: ToolExecutor(),
                  **discover_executors()}
     store_pricing_snapshots(executors, store)
+    # AGENTOS_SNAPSHOT_EVERY (default 200; 0 disables): kept in step with agentos/api/main.py,
+    # not imported from it — importing the API module would build the API's own store.
+    raw = os.environ.get("AGENTOS_SNAPSHOT_EVERY", "200")
+    if not raw.isdigit():
+        raise RuntimeError(f"AGENTOS_SNAPSHOT_EVERY must be an integer >= 0, got {raw!r}")
     engine = Engine(store=store, blobs=store, executors=executors,
-                    faults=injector, lease=store, observers=observers)
+                    faults=injector, lease=store, observers=observers,
+                    snapshot_every=int(raw))
     worker = Worker(engine, store, lease=store, queue=store, holder=args.holder,
                     lease_ttl=args.lease_ttl, faults=injector)
     if args.once:
