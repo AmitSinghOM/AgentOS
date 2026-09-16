@@ -103,9 +103,13 @@ class MemoryStore:
         # behaviour as a real database (enum → str → enum), cf. agno #8454.
         return [from_record(r) for r in self._events.get(run_id, []) if r["seq"] > after_seq]
 
-    # snapshots (C15): a bounded optimization of the fold, never the source of truth
+    # snapshots (C15): a bounded optimization of the fold, never the source of truth.
+    # Monotonic per run (see SqliteStore.put_snapshot).
     def put_snapshot(self, run_id: str, seq: int, last_hash: str | None, state: dict) -> None:
         with self._lock:                      # stored as JSON text: same round trip as SQL
+            current = self._snapshots.get(run_id)
+            if current is not None and current[0] >= seq:
+                return
             self._snapshots[run_id] = (seq, last_hash, json.dumps(state, sort_keys=True,
                                                                      default=str))
 

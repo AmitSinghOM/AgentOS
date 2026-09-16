@@ -110,14 +110,15 @@ class PostgresStore:
                                 ).fetchone()
         return int(v)
 
-    # snapshots (C15): a bounded optimization of the fold, never the source of truth
+    # snapshots (C15): a bounded optimization of the fold, never the source of truth.
+    # Monotonic per run (see SqliteStore.put_snapshot).
     def put_snapshot(self, run_id: str, seq: int, last_hash: str | None, state: dict) -> None:
         with self._pool.connection() as conn:
             conn.execute(
                 "INSERT INTO run_snapshots (run_id, seq, last_hash, state, taken_at) "
                 "VALUES (%s, %s, %s, %s::jsonb, now()) ON CONFLICT (run_id) DO UPDATE SET "
                 "seq = EXCLUDED.seq, last_hash = EXCLUDED.last_hash, state = EXCLUDED.state, "
-                "taken_at = EXCLUDED.taken_at",
+                "taken_at = EXCLUDED.taken_at WHERE run_snapshots.seq < EXCLUDED.seq",
                 (run_id, seq, last_hash, json.dumps(state, sort_keys=True, default=str)))
 
     def get_snapshot(self, run_id: str) -> tuple[int, str | None, dict] | None:

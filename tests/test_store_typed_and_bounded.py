@@ -180,6 +180,20 @@ def test_definitions_and_snapshot_state_round_trip(store):
     assert store.get_snapshot("nope") is None
 
 
+def test_put_snapshot_is_monotonic_per_run(store):
+    # Review finding F5: a stale worker (lease lost) also reaches advance()'s finally and
+    # snapshots from the store at an OLDER seq; it must not replace the newer snapshot.
+    store.append_events("mono-run", 0, chain([E.RunStarted(
+        run_id="mono-run", workflow="w", workflow_version=1, request_id="mono-req")], 0, None))
+    store.put_snapshot("mono-run", 10, "aa" * 32, {"last_seq": 10})
+    store.put_snapshot("mono-run", 5, "bb" * 32, {"last_seq": 5})        # older: ignored
+    assert store.get_snapshot("mono-run")[:2] == (10, "aa" * 32)
+    store.put_snapshot("mono-run", 10, "cc" * 32, {"last_seq": 10})      # equal: ignored
+    assert store.get_snapshot("mono-run")[:2] == (10, "aa" * 32)
+    store.put_snapshot("mono-run", 11, "dd" * 32, {"last_seq": 11})      # newer: replaces
+    assert store.get_snapshot("mono-run") == (11, "dd" * 32, {"last_seq": 11})
+
+
 def test_schema_is_versioned_and_migrations_are_idempotent(store):
     if not hasattr(store, "schema_version"):
         pytest.skip("memory adapter has no schema")
@@ -264,3 +278,30 @@ def test_a_snapshot_that_does_not_chain_to_the_log_is_ignored_not_trusted():
     state["last_hash"] = "00" * 32
     store.put_snapshot(run.id, snap_seq - 2, "00" * 32, state | {"last_seq": snap_seq - 2})
     assert eng.get_run(run.id).status is RunStatus.completed
+
+
+class SnapshotWriteFails(MemoryStore):
+    """A store whose snapshot cache is broken; the event log itself is fine."""
+
+    def put_snapshot(self, run_id, seq, last_hash, state):
+        raise RuntimeError("disk full (snapshots only)")
+
+
+def test_a_failing_snapshot_write_never_fails_the_advance(caplog):
+    # Review finding F8: `_maybe_snapshot` runs in advance()'s `finally`, after the run's
+    # events are committed. A cache-write error must be logged, not raised — otherwise the
+    # worker sees a failed advance for a run that progressed, and any exception that ended
+    # the advance would be replaced by the snapshot's.
+    store = SnapshotWriteFails()
+    store.put_agent(Agent(name="g", type=AgentType.echo))
+    store.put_workflow(WorkflowDefinition(name="w", nodes=[
+        {"id": "a", "agent": "g"}, {"id": "b", "agent": "g", "depends_on": ["a"]}]))
+    eng = Engine(store=store, blobs=store, executors={"echo": EchoExecutor()}, lease=store,
+                 snapshot_every=1)
+    with caplog.at_level("WARNING", logger="agentos.engine"):
+        run = eng.start_run("w")
+    assert run.status is RunStatus.completed and len(run.steps) == 2
+    assert store.get_snapshot(run.id) is None                     # nothing cached
+    assert any("snapshot skipped" in r.getMessage() and "disk full" in r.getMessage()
+               for r in caplog.records)
+    assert eng.get_run(run.id).status is RunStatus.completed     # log still folds

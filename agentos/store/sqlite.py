@@ -101,11 +101,16 @@ class SqliteStore:
                                   ).fetchone()
         return int(v)
 
-    # snapshots (C15): a bounded optimization of the fold, never the source of truth
+    # snapshots (C15): a bounded optimization of the fold, never the source of truth.
+    # Monotonic per run: a stale worker (lease lost) also reaches advance()'s finally and
+    # snapshots from the store; an older seq must not replace the live worker's newer one.
     def put_snapshot(self, run_id: str, seq: int, last_hash: str | None, state: dict) -> None:
         with self._lock:
             self._conn.execute(
-                "INSERT OR REPLACE INTO run_snapshots VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO run_snapshots VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(run_id) DO UPDATE SET seq = excluded.seq, "
+                "last_hash = excluded.last_hash, state = excluded.state, "
+                "taken_at = excluded.taken_at WHERE excluded.seq > run_snapshots.seq",
                 (run_id, seq, last_hash, json.dumps(state, sort_keys=True, default=str),
                  time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
 

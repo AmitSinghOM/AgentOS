@@ -292,16 +292,21 @@ class Engine:
 
     def _maybe_snapshot(self, run_id: str, last_seq: int) -> None:
         """Called when an advance() returns: if the log grew `snapshot_every` events past
-        the last snapshot, store the folded (unhydrated) state at the current tail."""
+        the last snapshot, store the folded (unhydrated) state at the current tail.
+        Derived work: like observers, it must never fail an advance whose events are
+        already committed, nor replace the exception that ended the advance."""
         if not self._snapshot_every:
             return
-        snap = self._store.get_snapshot(run_id)
-        if last_seq - (snap[0] if snap else 0) < self._snapshot_every:
-            return
-        run = self._fold_run(run_id)          # cheap: folds from the previous snapshot
-        if run is not None:
-            self._store.put_snapshot(run_id, run.last_seq, run.last_hash,
-                                     run.model_dump(mode="json", exclude={"inputs"}))
+        try:
+            snap = self._store.get_snapshot(run_id)
+            if last_seq - (snap[0] if snap else 0) < self._snapshot_every:
+                return
+            run = self._fold_run(run_id)          # cheap: folds from the previous snapshot
+            if run is not None:
+                self._store.put_snapshot(run_id, run.last_seq, run.last_hash,
+                                         run.model_dump(mode="json", exclude={"inputs"}))
+        except Exception as exc:  # noqa: BLE001 — a cache write must not break the worker
+            _log.warning("run %s: snapshot skipped (%s); the log is intact", run_id, exc)
 
     def is_terminal(self, run_id: str) -> bool:
         run = self.get_run(run_id, hydrate=False)
