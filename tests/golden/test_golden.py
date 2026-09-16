@@ -72,3 +72,19 @@ def test_subset_drift_allows_additive_fields_but_catches_changes():
     assert _subset_drift(rec, {"status": "completed", "steps": []}) == ["$.steps: length 1 → 0"]
     assert _subset_drift(rec, {"status": "completed", "steps": [{"node_id": "b", "attempt": 1}]}) \
         == ["$.steps[0].node_id: 'a' → 'b'"]
+
+
+@pytest.mark.parametrize("path", FILES, ids=[p.stem for p in FILES])
+def test_fold_from_any_cut_point_equals_the_full_fold(path: Path):
+    """C15 invariant (review finding F9): for EVERY k, continuing a fold from the state at k
+    yields exactly the full fold. Run over the whole golden corpus so `_apply`'s seeded
+    accumulators are checked against every event type and log shape we have ever
+    released, and so a WorkflowRun field added later but not re-seeded fails here."""
+    from agentos.core.fold import fold_from
+    doc = json.loads(path.read_text())
+    events = [from_record(r) for r in doc["events"]]
+    full = fold(events).model_dump(mode="json")
+    for k in range(1, len(events) + 1):
+        snapshot = fold(events[:k])
+        continued = fold_from(snapshot, events[k:]).model_dump(mode="json")
+        assert continued == full, f"{path.stem}: fold_from at k={k} diverges from fold"
