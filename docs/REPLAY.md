@@ -69,11 +69,16 @@ test runs a 1,000-step chain: each `step.completed` record is the same size as t
 (the log is appended, never rewritten), a fresh engine reads ≤ 100 events to reconstruct
 the run, and the full fold of the log agrees with the snapshot fold exactly.
 
-Never the source of truth: the first event after a snapshot must chain to the snapshot's
-`last_hash` (C12), a snapshot whose seq/hash do not match the log is ignored and the whole
-log folded instead, and `GET /runs/{id}/integrity` always folds from seq 1. A snapshot with
-a *consistent* hash but tampered state would be believed by `fold_from` — it is a cache
-with the same trust level as the store itself; the full fold is the audit.
+Never the source of truth: the snapshot's anchor event (seq N with `last_hash`) must exist
+in the log, and the first event after it must chain to it (C12); a snapshot whose anchor is
+missing, whose hash is not the log's at that seq, or whose tail does not chain is ignored and
+the whole log folded instead — including when nothing follows it. `GET /runs/{id}/integrity`
+always folds from seq 1. A snapshot with a *consistent* anchor but tampered state would be
+believed by `fold_from` — it is a cache with the same trust level as the store itself; the
+full fold is the audit (`TRUST_BOUNDARY.md` §2). Writing one can never fail an advance (a
+cache error is logged; the log is already committed) and `put_snapshot` is monotonic per run,
+so a worker that lost its lease cannot regress the live worker's newer snapshot. The knob is
+`AGENTOS_SNAPSHOT_EVERY` (default 200; 0 disables).
 
 Finding along the way: the acceptance test exposed an O(n²) in the engine — a per-wave
 refold of the whole log added in Phase 3 — which made a 1,000-step run take 17 s. Removing
