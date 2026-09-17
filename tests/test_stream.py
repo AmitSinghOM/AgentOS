@@ -71,8 +71,21 @@ def test_stream_replays_a_finished_run_and_ends_after_the_terminal_event(api):
 
     assert [int(f["id"]) for f in frames] == [e["seq"] for e in events]
     assert [f["event"] for f in frames] == [e["event_type"] for e in events]
-    assert [json.loads(f["data"]) for f in frames] == events     # same bytes as /events
+    assert [json.loads(f["data"]) for f in frames] == events     # same values as /events
     assert frames[-1]["event"] == "run.completed"                 # and nothing after it
+
+
+def test_stream_data_is_byte_identical_to_the_events_endpoint_including_non_ascii(api):
+    """Non-ASCII in a record (a cancel reason) must render identically on both paths:
+    Starlette's JSONResponse uses ensure_ascii=False; the first draft of the stream did not."""
+    run = api.post("/workflows/w/runs").json()                   # 202, not advanced
+    api.post(f"/runs/{run['id']}/cancel", json={"reason": "café ☕ 日本語"})
+    raw = api.get(f"/runs/{run['id']}/events").content.decode()
+    events_bytes = raw[raw.index("[") + 1: raw.rindex("]")]      # the array body, verbatim
+    with api.stream("GET", f"/runs/{run['id']}/stream") as r:
+        frames = _frames(r.read().decode())
+    assert "café ☕ 日本語" in "".join(f["data"] for f in frames)
+    assert ",".join(f["data"] for f in frames) == events_bytes
 
 
 def test_last_event_id_and_after_resume_from_a_seq(api):

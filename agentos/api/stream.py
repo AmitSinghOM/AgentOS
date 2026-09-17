@@ -82,8 +82,11 @@ def parse_after(last_event_id: str | None, after: int) -> int:
 
 
 def format_event(record: dict) -> str:
-    """One SSE frame. `data` is single-line JSON (no raw newlines), so one `data:` line."""
-    payload = json.dumps(record, separators=(",", ":"), default=str)
+    """One SSE frame. `data` is single-line JSON (no raw newlines), so one `data:` line.
+    `ensure_ascii=False` + compact separators is exactly what Starlette's JSONResponse
+    renders for GET /runs/{id}/events, so the two views are byte-identical, not just
+    value-equal (a review caught the first draft escaping non-ASCII)."""
+    payload = json.dumps(record, separators=(",", ":"), ensure_ascii=False, default=str)
     return f"id: {record['seq']}\nevent: {record['event_type']}\ndata: {payload}\n\n"
 
 
