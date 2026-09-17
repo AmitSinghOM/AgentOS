@@ -71,7 +71,31 @@ curl -s -X POST localhost:8000/workflows/haiku/runs -H 'Content-Type: applicatio
      -d '{"inputs": {"topic": "event logs"}}'
 ```
 
-That returns `202` and a run id; the worker picks it up. Watch it finish:
+That returns `202` and a run id; the worker picks it up. Watch it live — one Server-Sent
+Event per log record, from whichever process appended it:
+
+```bash
+curl -N localhost:8000/runs/{run_id}/stream
+```
+
+```
+id: 1
+event: run.started
+data: {"seq":1,"event_type":"run.started",...}
+
+id: 2
+event: step.started
+data: {"seq":2,"step_id":"poet",...}
+...
+id: 9
+event: run.completed
+```
+
+The stream closes after the terminal event. Dropped? Reconnect with the last `id` you saw
+(`-H 'Last-Event-ID: 5'`, or `?after=5`) and you get only what you missed. Long waits (a
+run suspended for approval) get a `: keep-alive` comment every 15 s and the connection is
+closed after an hour regardless — reconnect the same way. It is event-level, not
+token-level. Or fetch the finished run in one call:
 
 ```bash
 curl -s localhost:8000/runs/{run_id} | python -m json.tool

@@ -9,6 +9,7 @@ Configuration (env):
   AGENTOS_STORE           memory | sqlite | postgres  (default: sqlite)
   AGENTOS_SQLITE_PATH     file path                   (default: ./agentos.db)
   AGENTOS_SNAPSHOT_EVERY  events between run snapshots (default: 200; 0 disables, C15)
+  AGENTOS_STREAM_*        SSE poll / keep-alive / max seconds (see agentos.api.stream)
 """
 from __future__ import annotations
 
@@ -18,11 +19,12 @@ import os
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from agentos.agents.echo import EchoExecutor
 from agentos.agents.tool import ToolExecutor
+from agentos.api.stream import MEDIA_TYPE, StreamConfig, parse_after, stream_run
 from agentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
 from agentos.core.fold import FoldError
 from agentos.core.integrity import IntegrityError, verify
@@ -74,6 +76,8 @@ def snapshot_every_from_env() -> int:
 engine = Engine(store=store, blobs=store, executors=executors,
                 lease=store if hasattr(store, "acquire") else None, observers=observers,
                 snapshot_every=snapshot_every_from_env())
+
+stream_config = StreamConfig.from_env()
 
 app = FastAPI(title="AgentOS", version="0.7.0")
 
@@ -266,6 +270,26 @@ def get_run_events(run_id: str, after: int = 0) -> dict:
         raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
     return {"data": [e.to_record() for e in events],
             "last_seq": events[-1].seq if events else after}
+
+
+@app.get("/runs/{run_id}/stream")
+def stream_run_events(run_id: str, after: int = 0,
+                      last_event_id: str | None = Header(default=None)) -> StreamingResponse:
+    """Server-Sent Events over the log (Phase 7): one frame per record, `id` = seq,
+    `event` = event_type, `data` = the same JSON as GET /runs/{id}/events. Resumable via
+    `Last-Event-ID` (or `?after=`), closes on the terminal event or after
+    AGENTOS_STREAM_MAX_SECONDS. Works from any process — it reads the store, not a bus."""
+    try:
+        start = parse_after(last_event_id, after)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not store.read_events(run_id, after_seq=0):
+        raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
+    return StreamingResponse(
+        stream_run(store, run_id, after=start, config=stream_config),
+        media_type=MEDIA_TYPE,
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 class ControlBody(BaseModel):
