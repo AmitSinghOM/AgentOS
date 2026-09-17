@@ -281,15 +281,74 @@ replay was sub-millisecond then. The deferral was correct on cost, but the *inte
 the review found gaps in — and interfaces are cheaper to get right before four phases of
 callers exist.
 
-## Phase 7 — UI (optional)  ·  ~2 weekends
+## Landscape check — 2026-09-17 (after `v0.7.0-complete`)
+
+The survey that scoped Phases 1–6 (`Study/AGENTOS_LANDSCAPE.md`, 2026-09-13) was re-checked
+against primary sources on 2026-09-17. Three layers are all called "the production LLM
+handler for agents"; AgentOS competes in exactly one of them.
+
+| Layer | Examples | What was verified today | AgentOS |
+| --- | --- | --- | --- |
+| Hosted agent runtime | Bedrock AgentCore, Azure Foundry, Vertex Agent Engine | AgentCore docs: sessions are microVMs for up to 8 h and "session state is ephemeral and should not be used for long-term durability" | Not this. AgentOS is what you would run *inside* one. |
+| Agent SDK / inner harness | LangGraph, OpenAI Agents SDK, PydanticAI, ADK, crewAI, Strands | Temporal (Aug 2026): "these things are commoditized at this point" | Deliberately not this. Core ships `echo` + `tool`; models are plugins. |
+| Durable execution / outer harness | Temporal (+ Agent Harness, pre-preview Aug 20 2026), Restate, DBOS, Hatchet, Inngest, LangGraph checkpointers | See table below | **This is the game.** |
+
+**Layer-3 comparison, verified 2026-09-17.**
+
+| Property | AgentOS `v0.7.0` | Temporal + Agent Harness | LangGraph 1.2 | DBOS / Hatchet |
+| --- | --- | --- | --- | --- |
+| Source of truth | Append-only hash-chained log; snapshots derived and anchor-verified | Event history, replay-based | Per-superstep checkpoints; docs: they "grow unboundedly … add a cron job to delete" | Postgres step checkpoints |
+| Exactly-once step | Idempotency key + fence; real kill-9 test in CI | Yes (activity replay) | User code before `interrupt()` re-runs; side effects must be idempotent (documented rule) | Yes |
+| Constraint on step code | None — the *log* is the contract (`docs/REPLAY.md`) | Workflow code must be deterministic | Node re-execution rules | Light |
+| Approval | Run state, gated **before dispatch**, `Principal`-typed, human-only for spend/write | Harness: "a seam between the model deciding to use a capability and that capability executing" — same seam, pre-preview | `interrupt()` pattern; #8026 still asks for an approval node | Not first-class |
+| Cost | Metered Decimal, pricing-snapshot hash, ceiling → suspension | No | No (LangSmith, commercial) | No |
+| Tamper evidence | Chain verified on fold; `GET /runs/{id}/integrity` | No | No | No |
+| Cancel | Persisted event + cooperative token | Yes | `RunControl.request_drain()` is process-local, never preempts a running node | Partial |
+| **Streaming** | **None** (no SSE/WebSocket endpoint) | Yes | Yes | Yes |
+| Users / proof | 0 stars, 1 maintainer, 72 commits | $12.55B valuation on this thesis | 41k★ | Production |
+
+**What this changes in the plan.** Two gaps are disqualifying for anyone evaluating AgentOS
+for a pilot, and both are cheap relative to what is built: there is no way to *watch* a run
+(every production runtime streams), and there is no way to bring the agent loop you already
+use (Temporal's harness wraps the OpenAI Agents SDK / PydanticAI / Gemini; AgentOS asks you
+to model steps as its DAG). The optional UI moves to Phase 8; Phase 7 closes these two.
+
+The three properties no competitor has — declared-then-do with typed principals, state
+replay instead of code replay, and verified derived state — are exactly the ones that are
+hard to retrofit, and are the reason to keep the core as it is rather than chase the
+feature table. Full comparison and the mentor read: `Study/AGENTOS_LANDSCAPE.md` §5.
+
+## Phase 7 — Streaming + inner harness  ·  ~1-2 weekends
+**Goal:** a pilot evaluator can watch a run live from any process, and can run the agent
+SDK they already use as a step, governed by AgentOS's gate, cost meter and log.
+
+- [ ] **Run stream** `GET /runs/{id}/stream` (SSE): a *consumer of the log*, like the
+  observers — the API polls `read_events(after_seq)` so it works from any process with no
+  in-memory subscription map (mastra #19252 / C6); `Last-Event-ID` = `seq` for resume;
+  closes on the terminal event; keep-alive comments; poll interval and max duration from
+  env. Event-level, not token-level: token deltas need an executor hook and are a ⏭ item
+- [ ] **Inner-harness executor** `agentos-provider-openai-agents` (`providers/openai-agents/`):
+  runs an OpenAI Agents SDK agent as one AgentOS step. Tools the SDK agent may call are
+  restricted to those whose effect class the AgentOS agent *declared*; tool calls and
+  usage land in provenance/cost; a step declaring `approval_required_for` classes is gated
+  before dispatch by the existing tier-2 gate (whole-step granularity). Tested against a
+  fake `Model` (the SDK's own test pattern), no network; live path via Ollama's
+  OpenAI-compatible endpoint. ⏭ mid-step suspension on the SDK's `needs_approval`
+  interruptions (requires persisting `RunState` as a blob and a resume protocol)
+- [ ] ⏭ Token-level streaming via a `progress(fraction, note)`-style executor hook
+- [ ] ⏭ PydanticAI inner harness (same shape as the above once it exists)
+
+**Tag:** `v0.8.0-watchable`. **Post:** "The Stream Is the Log."
+
+## Phase 8 — UI (optional)  ·  ~2 weekends
 **Goal:** a visual the recruiter screenshot remembers. Plays to frontend strength.
 
-- [ ] React + (Cloudscape or shadcn) app
+- [ ] React + (Cloudscape or shadcn) app over `GET /runs/{id}/stream`
 - [ ] Live workflow run graph: nodes light up as steps complete
 - [ ] Event-log timeline view (time-travel debugging over the log)
 - [ ] Cost + latency panel per run
 
-**Tag:** `v0.8.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
+**Tag:** `v0.9.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
 
 ---
 
