@@ -1,0 +1,17 @@
+{
+  "schema": "agentos.pricing/1",
+  "as_of": "2025-06",
+  "currency": "USD",
+  "unit": "per_1m_tokens",
+  "note": "Snapshot used to price steps; its sha256 is recorded on every step as cost.pricing_snapshot_hash and the bytes are stored in the BlobStore at startup, so a charge is explainable after prices change. Models not listed are priced 0 and marked priced=false in the step output. Override with AGENTOS_OPENAI_AGENTS_PRICING=/path/to/pricing.json.",
+  "models": {
+    "gpt-4o-mini": {"input": "0.15", "output": "0.60"},
+    "gpt-4o": {"input": "2.50", "output": "10.00"},
+    "gpt-4.1": {"input": "2.00", "output": "8.00"},
+    "gpt-4.1-mini": {"input": "0.40", "output": "1.60"},
+    "gpt-4.1-nano": {"input": "0.10", "output": "0.40"},
+    "o3-mini": {"input": "1.10", "output": "4.40"}
+  },
+  "free_prefixes": ["qwen", "llama", "gemma", "mistral", "phi", "deepseek", "smollm", "tinyllama"],
+  "free_prefixes_note": "Locally served open-weight families (Ollama, vLLM) are priced 0 and marked priced=true: running them costs electricity, not an invoice."
+}

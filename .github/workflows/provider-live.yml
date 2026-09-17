@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev,providerkit]" -e providers/openai-compat -e providers/anthropic
+      - run: pip install -e ".[dev,providerkit]" -e providers/openai-compat -e providers/anthropic -e providers/openai-agents
       - name: Install and start Ollama
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
