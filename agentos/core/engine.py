@@ -32,6 +32,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import ClassVar
 from uuid import uuid4
 
 from agentos.core import faults
@@ -65,6 +66,7 @@ from agentos.core.fold import FoldError, fold, fold_from
 from agentos.core.integrity import chain
 from agentos.core.models import (
     HUMAN_ONLY_EFFECTS,
+    Agent,
     Approval,
     ApprovalKind,
     ApprovalStatus,
@@ -133,6 +135,35 @@ class _Unrecoverable(Exception):
 
 
 _Started = tuple[WorkflowNode, StepRequest, Executor]
+
+
+@dataclass(frozen=True)
+class _Gate:
+    """Tier-2 gate decision for one node (see Engine._approval_gate). `kind` is one of
+    "run" (dispatch now; `approval_id` set when a grant is being consumed), "pending"
+    (asked, undecided — keep waiting), "request" (ask now for `classes`)."""
+
+    kind: str
+    approval_id: str | None = None
+    classes: tuple[EffectClass, ...] = ()
+
+    RUN: ClassVar[_Gate]
+    PENDING: ClassVar[_Gate]
+
+
+_Gate.RUN = _Gate("run")
+_Gate.PENDING = _Gate("pending")
+
+
+def _classes_needing_approval(agent: Agent, budget: Budget) -> set[EffectClass]:
+    """The declared classes that tier 2 must ask about: outside `allowed`, inside
+    `approval_required_for`. Empty when the agent runs freely — and ALSO empty when any
+    declared class is tier 3 (in neither set): that step is refused at `_execute`, and an
+    approval request must never be raised for something the budget forbids outright."""
+    declared = set(agent.declared_effects)
+    if declared - budget.allowed_effect_classes - budget.approval_required_for:
+        return set()
+    return (declared - budget.allowed_effect_classes) & budget.approval_required_for
 
 
 @dataclass
@@ -738,21 +769,17 @@ class Engine:
         runnable: list[tuple[WorkflowNode, str | None]] = []
         requested_now = False
         for node in ready:
-            gate = self._approval_gate(node, ctx.run, ctx.budget)
-            if gate == "run":
-                runnable.append((node, None))
-            elif gate == "pending":
-                pass                                      # already asked; keep waiting
-            elif gate.startswith("granted:"):
-                runnable.append((node, gate.split(":", 1)[1]))
-            else:                                         # "request:<classes>"
-                self._request_effect_approval(log, ctx, node, gate.split(":", 1)[1], now)
+            gate = self._approval_gate(ctx, node)
+            if gate.kind == "run":
+                runnable.append((node, gate.approval_id))
+            elif gate.kind == "request":
+                self._request_effect_approval(log, ctx, node, list(gate.classes), now)
                 requested_now = True
+            # "pending": already asked; keep waiting
         return runnable, requested_now
 
     def _request_effect_approval(self, log: _Log, ctx: _WaveContext, node: WorkflowNode,
-                                 classes_csv: str, now: datetime) -> None:
-        classes = [EffectClass(c) for c in classes_csv.split(",")]
+                                 classes: list[EffectClass], now: datetime) -> None:
         approval_id = uuid4().hex
         expires = self._approval_expiry(ctx.budget, now)
         log.append(ApprovalRequested(
@@ -775,12 +802,7 @@ class Engine:
         retry can fix (unknown agent, missing executor) fails the run."""
         started: list[_Started] = []
         for node, approval_id in runnable:
-            prepared = self._prepare(log, ctx.run_id, node, ctx.attempts, ctx.outputs,
-                                     ctx.budget, ctx.run.agent_versions, approval_id,
-                                     run_inputs=ctx.run_inputs, models=ctx.models)
-            if isinstance(prepared, str):
-                raise _Unrecoverable(prepared, step_id=node.id)
-            started.append(prepared)
+            started.append(self._prepare(log, ctx, node, approval_id))
         return started
 
     def _settle_wave(self, log: _Log, ctx: _WaveContext, pool: ThreadPoolExecutor,
@@ -856,43 +878,80 @@ class Engine:
         log.append(RunSuspended(run_id=ctx.run_id))
 
     # ---------------------------------------------------------------- one step
-    def _approval_gate(self, node: WorkflowNode, run: WorkflowRun, budget: Budget) -> str:
-        """Tier-2 gate. Returns "run" (no approval needed), "pending" (asked, undecided),
-        "granted:<approval_id>", or "request:<c1,c2>" (needs asking now). Steps with
-        classes outside both tiers are left to the tier-3 refusal in _execute."""
-        pinned = run.agent_versions.get(node.agent)
+    def _pinned_agent(self, ctx: _WaveContext, node: WorkflowNode) -> tuple[Agent | None, int | None]:
+        """The agent version this run PINNED for `node` (DESIGN §5), or the latest for
+        runs that predate pinning (empty pins). Shared by the gate and by dispatch so
+        both always decide on the same definition."""
+        pinned = ctx.run.agent_versions.get(node.agent)
         agent = self._store.get_agent(node.agent, version=pinned) if pinned else \
             self._store.get_agent(node.agent)
-        if agent is None:
-            return "run"                                   # _prepare reports the error
-        declared = set(agent.declared_effects)
-        if declared - budget.allowed_effect_classes - budget.approval_required_for:
-            return "run"                                   # tier 3: _execute refuses it
-        needs = (declared - budget.allowed_effect_classes) & budget.approval_required_for
-        if not needs:
-            return "run"
-        mine = [a for a in run.approvals.values()
-                if a.step_id == node.id and a.kind is ApprovalKind.effect]
-        for a in mine:
-            if a.status is ApprovalStatus.granted:
-                return f"granted:{a.approval_id}"
-        if any(a.status is ApprovalStatus.pending for a in mine):
-            return "pending"
-        return "request:" + ",".join(sorted(c.value for c in needs))
+        return agent, pinned
 
-    def _prepare(self, log: _Log, run_id: str, node: WorkflowNode, attempts: dict[str, int],
-                 outputs: dict[str, dict], budget: Budget, pins: dict[str, int],
-                 approval_id: str | None = None, *, run_inputs: dict | None = None,
-                 models: dict[str, str] | None = None):
-        """Resolve the PINNED agent version + executor, append step.started. Returns
-        (node, req, executor) or an error string for definition problems that no retry
-        can fix. Runs that predate pinning (empty pins) resolve the latest version."""
-        pinned = pins.get(node.agent)
-        agent = self._store.get_agent(node.agent, version=pinned) if pinned else \
-            self._store.get_agent(node.agent)
+    def _approval_gate(self, ctx: _WaveContext, node: WorkflowNode) -> _Gate:
+        """Tier-2 gate (C7). Unknown agents and tier-3 classes (outside both `allowed` and
+        `approval_required_for`) return RUN so the error surfaces in the log at dispatch
+        (`_prepare`) or as a refusal (`_execute`) — never as a silent skip and never as an
+        approval request for something the budget forbids outright."""
+        agent, _ = self._pinned_agent(ctx, node)
+        if agent is None:
+            return _Gate.RUN
+        needs = _classes_needing_approval(agent, ctx.budget)
+        if not needs:
+            return _Gate.RUN
+        decided = self._existing_effect_approval(ctx, node)
+        if decided is not None:
+            return decided
+        return _Gate("request", classes=tuple(sorted(needs, key=lambda c: c.value)))
+
+    @staticmethod
+    def _existing_effect_approval(ctx: _WaveContext, node: WorkflowNode) -> _Gate | None:
+        """A grant for this step is consumed (RUN with its id); an undecided request means
+        keep waiting; otherwise None — the caller asks. Only kind=effect approvals count."""
+        mine = [a for a in ctx.run.approvals.values()
+                if a.step_id == node.id and a.kind is ApprovalKind.effect]
+        granted = next((a for a in mine if a.status is ApprovalStatus.granted), None)
+        if granted is not None:
+            return _Gate("run", approval_id=granted.approval_id)
+        if any(a.status is ApprovalStatus.pending for a in mine):
+            return _Gate.PENDING
+        return None
+
+    def _prepare(self, log: _Log, ctx: _WaveContext, node: WorkflowNode,
+                 approval_id: str | None) -> _Started:
+        """Dispatch one node: resolve the pinned agent + its executor, build the
+        StepRequest, record any model substitution, append step.started. Definition
+        problems no retry can fix raise _Unrecoverable (the run fails, in the log)."""
+        agent, executor = self._resolve(ctx, node)
+        upstream = {dep: ctx.outputs[dep] for dep in node.depends_on}
+        if ctx.run_inputs:
+            upstream[RUN_INPUTS_KEY] = ctx.run_inputs
+        key = idempotency_key(ctx.run_id, node.id, upstream)
+        attempt = ctx.attempts.get(node.id, 0) + 1
+        ctx.attempts[node.id] = attempt
+        declared = frozenset(agent.declared_effects)
+        deadline = (self._wall() + timedelta(seconds=ctx.budget.max_step_wall_seconds)
+                    if ctx.budget.max_step_wall_seconds else None)
+        req = StepRequest(
+            run_id=ctx.run_id, step_id=node.id, attempt=attempt, idempotency_key=key,
+            agent=agent, inputs=upstream, inputs_ref=self._blobs.put(_canonical(upstream)),
+            declared_effects=declared, budget=ctx.budget, deadline=deadline,
+            approval_id=approval_id,
+        )
+        self._record_substitution(log, ctx, req, executor)
+        log.append(StepStarted(
+            run_id=ctx.run_id, step_id=node.id, attempt=attempt, agent=agent.name,
+            idempotency_key=key, declared_effects=sorted(declared), agent_version=agent.version,
+        ))
+        return node, req, executor
+
+    def _resolve(self, ctx: _WaveContext, node: WorkflowNode) -> tuple[Agent, Executor]:
+        """The pinned agent and the registered executor it names, or _Unrecoverable with
+        the message a user can act on (which version is missing; what to pip install)."""
+        agent, pinned = self._pinned_agent(ctx, node)
         if agent is None:
             which = f" v{pinned}" if pinned else ""
-            return f"node {node.id!r} references unknown agent {node.agent!r}{which}"
+            raise _Unrecoverable(f"node {node.id!r} references unknown agent "
+                                 f"{node.agent!r}{which}", step_id=node.id)
         exec_name = agent.executor or agent.type.value
         executor = self._executors.get(exec_name)
         if executor is None:
@@ -900,42 +959,28 @@ class Engine:
             hint = (" — install the provider distribution (e.g. `pip install "
                     "agentos-provider-openai-compat`) and restart the API and worker"
                     if agent.executor else "")
-            return (f"agent {agent.name!r} needs executor {exec_name!r} but only "
-                    f"[{have}] are registered{hint}")
+            raise _Unrecoverable(f"agent {agent.name!r} needs executor {exec_name!r} but only "
+                                 f"[{have}] are registered{hint}", step_id=node.id)
+        return agent, executor
 
-        upstream = {dep: outputs[dep] for dep in node.depends_on}
-        if run_inputs:
-            upstream[RUN_INPUTS_KEY] = run_inputs
-        key = idempotency_key(run_id, node.id, upstream)
-        attempt = attempts.get(node.id, 0) + 1
-        attempts[node.id] = attempt
-        declared = frozenset(agent.declared_effects)
-        deadline = (self._wall() + timedelta(seconds=budget.max_step_wall_seconds)
-                    if budget.max_step_wall_seconds else None)
-        req = StepRequest(
-            run_id=run_id, step_id=node.id, attempt=attempt, idempotency_key=key,
-            agent=agent, inputs=upstream, inputs_ref=self._blobs.put(_canonical(upstream)),
-            declared_effects=declared, budget=budget, deadline=deadline,
-            approval_id=approval_id,
-        )
-        # §11 A3: record a model substitution BEFORE the step starts, never silently.
+    def _record_substitution(self, log: _Log, ctx: _WaveContext, req: StepRequest,
+                             executor: Executor) -> None:
+        """§11 A3: if the executor now resolves this agent to a different model than the
+        one it last ran on in this run, record it BEFORE the step starts, never silently."""
         now_model = resolve_model(executor, req)
-        if models is not None and now_model is not None:
-            before = models.get(agent.name)
-            if before is not None and before != now_model:
-                log.append(ExecutorSubstituted(
-                    run_id=run_id, step_id=node.id, agent=agent.name, executor=executor.name,
-                    from_model=before, to_model=now_model,
-                    reason=f"executor {executor.name!r} now resolves agent {agent.name!r} "
-                           f"to {now_model!r} (was {before!r})",
-                    principal=Principal(kind=PrincipalKind.system, id=executor.name),
-                ))
-            models[agent.name] = now_model
-        log.append(StepStarted(
-            run_id=run_id, step_id=node.id, attempt=attempt, agent=agent.name,
-            idempotency_key=key, declared_effects=sorted(declared), agent_version=agent.version,
-        ))
-        return node, req, executor
+        if now_model is None:
+            return
+        agent = req.agent.name
+        before = ctx.models.get(agent)
+        if before is not None and before != now_model:
+            log.append(ExecutorSubstituted(
+                run_id=ctx.run_id, step_id=req.step_id, agent=agent, executor=executor.name,
+                from_model=before, to_model=now_model,
+                reason=f"executor {executor.name!r} now resolves agent {agent!r} "
+                       f"to {now_model!r} (was {before!r})",
+                principal=Principal(kind=PrincipalKind.system, id=executor.name),
+            ))
+        ctx.models[agent] = now_model
 
     def _execute(self, log: _Log, req: StepRequest, executor: Executor,
                  heartbeat: Callable[[], bool] | None):
