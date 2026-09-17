@@ -29,6 +29,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
@@ -119,6 +120,59 @@ class _StepCrashed(Exception):
     def __init__(self, error: str) -> None:
         super().__init__(error)
         self.error = error
+
+
+class _Unrecoverable(Exception):
+    """Internal: a wave hit something no retry can fix (definition error, dead-letter).
+    Raised inside advance()'s loop and turned into run.failed there, so every such exit
+    still passes through the same `finally` (log close, pool shutdown, snapshot)."""
+
+    def __init__(self, error: str, *, step_id: str | None = None) -> None:
+        super().__init__(error)
+        self.error, self.step_id = error, step_id
+
+
+_Started = tuple[WorkflowNode, StepRequest, Executor]
+
+
+@dataclass
+class _WaveContext:
+    """What one advance() carries between waves, derived once from the folded run and
+    kept current locally — never re-folded per wave (see advance())."""
+
+    run: WorkflowRun
+    wf: WorkflowDefinition
+    budget: Budget
+    heartbeat: Callable[[], bool] | None
+    node_count: int
+    done: set[str]
+    outputs: dict[str, dict]
+    run_inputs: dict | None
+    models: dict[str, str]
+    attempts: dict[str, int]
+    pending: dict[str, datetime]
+    total: Decimal
+
+    @property
+    def run_id(self) -> str:
+        return self.run.id
+
+    @property
+    def finished(self) -> bool:
+        return len(self.done) >= self.node_count
+
+    @property
+    def has_pending_approval(self) -> bool:
+        return any(a.status is ApprovalStatus.pending for a in self.run.approvals.values())
+
+    @property
+    def cost_ceiling(self) -> Decimal | None:
+        """The run's raised ceiling if a cost approval was granted, else the budget's."""
+        if self.run.cost_ceiling:
+            return Decimal(self.run.cost_ceiling)
+        if self.budget.max_run_cost is not None:
+            return Decimal(self.budget.max_run_cost)
+        return None
 
 
 def _canonical(obj: dict) -> bytes:
@@ -573,7 +627,12 @@ class Engine:
         that already completed, and appends with optimistic concurrency + the caller's
         lease fence, so calling it twice — or from two processes — cannot double-execute
         a step. `heartbeat()` is called before each wave and on every progress() call;
-        returning False means the lease is lost and advancing stops (LeaseLost)."""
+        returning False means the lease is lost and advancing stops (LeaseLost).
+
+        One loop iteration (`_run_waves`) is one *wave* — gate → dispatch → verify →
+        record (DESIGN §8) — spelled out as `_ready_nodes`, `_gate_wave`, `_start_wave`,
+        `_settle_wave`, `_after_wave`. Every exit passes through the `finally` here, which
+        is what stops a straggler thread from writing after a terminal event."""
         run = self.get_run(run_id, hydrate=False)
         if run is None:
             raise KeyError(f"unknown run {run_id!r}")
@@ -595,12 +654,57 @@ class Engine:
             return self._fail(log, f"workflow {wf.name!r} is v{wf.version} but run "
                                    f"pinned v{run.workflow_version}")
 
-        by_id = {n.id: n for n in wf.nodes}
-        done: set[str] = {s.node_id for s in run.steps}
-        outputs: dict[str, dict] = {
-            s.node_id: json.loads(self._blobs.get(s.output_ref))
-            for s in run.steps if s.output_ref is not None
-        }
+        ctx = self._wave_context(run, wf, heartbeat)
+        pool = ThreadPoolExecutor(max_workers=max(1, wf.max_parallelism),
+                                  thread_name_prefix=f"agentos-{run_id[:8]}")
+        try:
+            self._run_waves(log, ctx, pool)
+        except _Unrecoverable as stop:
+            return self._fail(log, stop.error, step_id=stop.step_id)
+        finally:
+            log.close()
+            pool.shutdown(wait=False, cancel_futures=True)
+            self._maybe_snapshot(run_id, log.last_seq)
+        return self.get_run(run_id)  # type: ignore[return-value]
+
+    # ---------------------------------------------------------------- one wave
+    def _run_waves(self, log: _Log, ctx: _WaveContext, pool: ThreadPoolExecutor) -> None:
+        """The loop: one iteration per wave until the run completes or must stop (control
+        request, suspension, backoff). Returns normally in every stopping case; raises
+        LeaseLost / Crash / _Unrecoverable for the caller's `finally` to see."""
+        while not ctx.finished:
+            if ctx.heartbeat is not None and not ctx.heartbeat():
+                raise LeaseLost(f"run {ctx.run_id!r}: lease lost")
+            # Control requests appended by the API since our last write (C5).
+            log.poll_control()
+            if self._apply_control(log, ctx.run.status):
+                return
+
+            ready, now = self._ready_nodes(ctx)
+            runnable, requested_now = self._gate_wave(log, ctx, ready, now)
+            if not runnable:
+                if requested_now or ctx.has_pending_approval:
+                    log.append(RunSuspended(run_id=ctx.run_id))
+                # Otherwise everything runnable is waiting on a backoff: hand control
+                # back; the caller re-enqueues with next_retry_delay().
+                return
+
+            started = self._start_wave(log, ctx, runnable)
+            interrupted = self._settle_wave(log, ctx, pool, started)
+            if self._after_wave(log, ctx, started, now,
+                                interrupted=interrupted, requested_now=requested_now):
+                return
+            # No refold per wave: everything the next wave needs (attempts, outputs,
+            # models, approvals) is tracked in ctx; a per-wave fold made a 1000-step
+            # run O(n²) (found by the C15 acceptance test).
+        log.append(RunCompleted(run_id=ctx.run_id))
+
+    def _wave_context(self, run: WorkflowRun, wf: WorkflowDefinition,
+                      heartbeat: Callable[[], bool] | None) -> _WaveContext:
+        """Everything the waves need, derived ONCE from the folded run and then kept
+        current locally (see the no-refold note in advance())."""
+        outputs = {s.node_id: json.loads(self._blobs.get(s.output_ref))
+                   for s in run.steps if s.output_ref is not None}
         run_inputs = json.loads(self._blobs.get(run.inputs_ref)) if run.inputs_ref else None
         # §11 A3: the concrete model each agent last ran on in this run (substitutions
         # included), so a changed alias resolution is recorded before the step runs.
@@ -610,145 +714,146 @@ class Engine:
                 models[_agent_of(s, wf)] = s.provenance.model_id
         for sub in run.substitutions:
             models[sub.agent] = sub.to_model
-        attempts = dict(run.attempts)
-        pending = dict(run.pending_retries)
-        total = Decimal(run.total_cost)
-        budget = wf.budget
-        pool = ThreadPoolExecutor(max_workers=max(1, wf.max_parallelism),
-                                  thread_name_prefix=f"agentos-{run_id[:8]}")
-        try:
-            while len(done) < len(by_id):
-                if heartbeat is not None and not heartbeat():
-                    raise LeaseLost(f"run {run_id!r}: lease lost")
-                # Control requests appended by the API since our last write (C5).
-                log.poll_control()
-                if self._apply_control(log, run.status):
-                    return self.get_run(run_id)  # type: ignore[return-value]
+        return _WaveContext(
+            run=run, wf=wf, budget=wf.budget, heartbeat=heartbeat,
+            node_count=len({n.id for n in wf.nodes}),
+            done={s.node_id for s in run.steps}, outputs=outputs, run_inputs=run_inputs,
+            models=models, attempts=dict(run.attempts), pending=dict(run.pending_retries),
+            total=Decimal(run.total_cost),
+        )
 
-                ready = [n for n in wf.nodes
-                         if n.id not in done and all(d in done for d in n.depends_on)]
-                now = self._wall()
-                waiting = [n for n in ready if pending.get(n.id, now) > now]
-                ready = [n for n in ready if n not in waiting]
+    def _ready_nodes(self, ctx: _WaveContext) -> tuple[list[WorkflowNode], datetime]:
+        """Nodes whose dependencies are all done and whose retry backoff has elapsed."""
+        now = self._wall()
+        ready = [n for n in ctx.wf.nodes
+                 if n.id not in ctx.done and all(d in ctx.done for d in n.depends_on)
+                 and not ctx.pending.get(n.id, now) > now]
+        return ready, now
 
-                # ---- declare-then-do, tier 2 (C7): steps whose declared effects need a
-                # decision are suspended BEFORE dispatch — no step.started, no attempt.
-                runnable: list[tuple[WorkflowNode, str | None]] = []
-                requested_now = False
-                for node in ready:
-                    gate = self._approval_gate(node, run, budget)
-                    if gate == "run":
-                        runnable.append((node, None))
-                    elif gate == "pending":
-                        pass                              # already asked; keep waiting
-                    elif gate.startswith("granted:"):
-                        runnable.append((node, gate.split(":", 1)[1]))
-                    else:                                 # "request:<classes>"
-                        classes = [EffectClass(c) for c in gate.split(":", 1)[1].split(",")]
-                        approval_id = uuid4().hex
-                        expires = (now + timedelta(seconds=budget.approval_timeout_seconds)
-                                   if budget.approval_timeout_seconds else None)
-                        log.append(ApprovalRequested(
-                            run_id=run_id, approval_id=approval_id, step_id=node.id,
-                            effect_classes=classes, expires_at=expires,
-                            reason=f"step {node.id!r} declares "
-                                   f"{', '.join(c.value for c in classes)}",
-                        ))
-                        run.approvals[approval_id] = Approval(
-                            approval_id=approval_id, step_id=node.id, effect_classes=classes,
-                            requested_at=now, expires_at=expires)
-                        requested_now = True
+    def _gate_wave(self, log: _Log, ctx: _WaveContext, ready: list[WorkflowNode],
+                   now: datetime) -> tuple[list[tuple[WorkflowNode, str | None]], bool]:
+        """Declare-then-do, tier 2 (C7): steps whose declared effects need a decision are
+        suspended BEFORE dispatch — no step.started, no attempt. Returns the runnable
+        (node, granted approval_id) pairs and whether any approval was requested now."""
+        runnable: list[tuple[WorkflowNode, str | None]] = []
+        requested_now = False
+        for node in ready:
+            gate = self._approval_gate(node, ctx.run, ctx.budget)
+            if gate == "run":
+                runnable.append((node, None))
+            elif gate == "pending":
+                pass                                      # already asked; keep waiting
+            elif gate.startswith("granted:"):
+                runnable.append((node, gate.split(":", 1)[1]))
+            else:                                         # "request:<classes>"
+                self._request_effect_approval(log, ctx, node, gate.split(":", 1)[1], now)
+                requested_now = True
+        return runnable, requested_now
 
-                if not runnable:
-                    if requested_now or any(a.status is ApprovalStatus.pending
-                                            for a in run.approvals.values()):
-                        log.append(RunSuspended(run_id=run_id))
-                        return self.get_run(run_id)  # type: ignore[return-value]
-                    # Everything runnable is waiting on a backoff. Hand control back;
-                    # the caller re-enqueues with next_retry_delay().
-                    return self.get_run(run_id)  # type: ignore[return-value]
+    def _request_effect_approval(self, log: _Log, ctx: _WaveContext, node: WorkflowNode,
+                                 classes_csv: str, now: datetime) -> None:
+        classes = [EffectClass(c) for c in classes_csv.split(",")]
+        approval_id = uuid4().hex
+        expires = self._approval_expiry(ctx.budget, now)
+        log.append(ApprovalRequested(
+            run_id=ctx.run_id, approval_id=approval_id, step_id=node.id,
+            effect_classes=classes, expires_at=expires,
+            reason=f"step {node.id!r} declares {', '.join(c.value for c in classes)}",
+        ))
+        ctx.run.approvals[approval_id] = Approval(
+            approval_id=approval_id, step_id=node.id, effect_classes=classes,
+            requested_at=now, expires_at=expires)
 
-                # ---- one wave: start all, execute concurrently, settle sequentially.
-                started: list[tuple[WorkflowNode, StepRequest, Executor]] = []
-                for node, approval_id in runnable:
-                    prepared = self._prepare(log, run_id, node, attempts, outputs, budget,
-                                             run.agent_versions, approval_id,
-                                             run_inputs=run_inputs, models=models)
-                    if isinstance(prepared, str):          # unrecoverable definition error
-                        return self._fail(log, prepared, step_id=node.id)
-                    started.append(prepared)
+    @staticmethod
+    def _approval_expiry(budget: Budget, now: datetime) -> datetime | None:
+        return (now + timedelta(seconds=budget.approval_timeout_seconds)
+                if budget.approval_timeout_seconds else None)
 
-                futures = {
-                    req.step_id: pool.submit(self._execute, log, req, executor, heartbeat)
-                    for _, req, executor in started
-                }
-                # Settle EVERY step of the wave before deciding the run's fate, so a
-                # completed sibling of a dead-lettered step is recorded, never lost (C4).
-                dead: list[tuple[str, str]] = []
-                interrupted = False
-                for node, req, executor in started:
-                    outcome = futures[req.step_id].result()   # re-raises Crash/LeaseLost
-                    if outcome[0] == "cancelled":
-                        log.append(StepCancelled(run_id=run_id, step_id=req.step_id,
-                                                 attempt=req.attempt))
-                        interrupted = True
-                        continue
-                    kind, payload = self._settle(log, node, req, executor, outcome, budget)
-                    if kind == "retry":
-                        pending[req.step_id] = payload
-                    elif kind == "dead":
-                        dead.append((req.step_id, payload))
-                    else:  # "done"
-                        result: StepResult = payload
-                        outputs[req.step_id] = result.output
-                        done.add(req.step_id)
-                        total += result.cost.decimal()
-                if dead:
-                    step_id, cause = dead[0]
-                    return self._fail(log, f"step {step_id!r} dead-lettered: {cause}",
-                                      step_id=step_id)
-                # A cancel that arrived mid-wave: every finished sibling is now recorded
-                # (C4); interrupted ones are step.cancelled; finalize.
-                log.poll_control()
-                if interrupted or log.cancel_requested:
-                    log.cancel_requested = True
-                    self._apply_control(log, run.status)
-                    return self.get_run(run_id)  # type: ignore[return-value]
-                if requested_now:
-                    # Gated siblings were asked for while this wave ran; the wave is
-                    # recorded, now suspend until they are decided.
-                    log.append(RunSuspended(run_id=run_id))
-                    return self.get_run(run_id)  # type: ignore[return-value]
-                ceiling = Decimal(run.cost_ceiling) if run.cost_ceiling else (
-                    Decimal(budget.max_run_cost) if budget.max_run_cost is not None else None)
-                if ceiling is not None and total > ceiling:
-                    # Budget guardrail (DESIGN §8): the tripping step is already recorded,
-                    # so the charge is in the log; now SUSPEND for a cost approval whose
-                    # grant raises the ceiling by one more budget's worth (C7 / A6).
-                    tripping = started[-1][1].step_id if started else ""
-                    approval_id = uuid4().hex
-                    proposed = total + Decimal(budget.max_run_cost or "0")
-                    expires = (now + timedelta(seconds=budget.approval_timeout_seconds)
-                               if budget.approval_timeout_seconds else None)
-                    log.append(ApprovalRequested(
-                        run_id=run_id, approval_id=approval_id, step_id=tripping,
-                        effect_classes=[], kind=ApprovalKind.cost,
-                        cost_at_request=str(total), proposed_ceiling=str(proposed),
-                        expires_at=expires,
-                        reason=f"run cost {total} exceeds ceiling {ceiling}; approving raises "
-                               f"the ceiling to {proposed}",
-                    ))
-                    log.append(RunSuspended(run_id=run_id))
-                    return self.get_run(run_id)  # type: ignore[return-value]
-                # No refold per wave: everything the next wave needs (attempts, outputs,
-                # models, approvals) is tracked locally; a per-wave fold made a 1000-step
-                # run O(n²) (found by the C15 acceptance test).
-            log.append(RunCompleted(run_id=run_id))
-            return self.get_run(run_id)  # type: ignore[return-value]
-        finally:
-            log.close()
-            pool.shutdown(wait=False, cancel_futures=True)
-            self._maybe_snapshot(run_id, log.last_seq)
+    def _start_wave(self, log: _Log, ctx: _WaveContext,
+                    runnable: list[tuple[WorkflowNode, str | None]]) -> list[_Started]:
+        """Dispatch: append step.started for every runnable node. A definition error no
+        retry can fix (unknown agent, missing executor) fails the run."""
+        started: list[_Started] = []
+        for node, approval_id in runnable:
+            prepared = self._prepare(log, ctx.run_id, node, ctx.attempts, ctx.outputs,
+                                     ctx.budget, ctx.run.agent_versions, approval_id,
+                                     run_inputs=ctx.run_inputs, models=ctx.models)
+            if isinstance(prepared, str):
+                raise _Unrecoverable(prepared, step_id=node.id)
+            started.append(prepared)
+        return started
+
+    def _settle_wave(self, log: _Log, ctx: _WaveContext, pool: ThreadPoolExecutor,
+                     started: list[_Started]) -> bool:
+        """Execute the wave concurrently, then verify + record sequentially. Settles EVERY
+        step of the wave before deciding the run's fate, so a completed sibling of a
+        dead-lettered step is recorded, never lost (C4). Returns whether a step was
+        interrupted by a cancel; the first dead-letter fails the run."""
+        futures = {req.step_id: pool.submit(self._execute, log, req, executor, ctx.heartbeat)
+                   for _, req, executor in started}
+        dead: list[tuple[str, str]] = []
+        interrupted = False
+        for node, req, executor in started:
+            outcome = futures[req.step_id].result()       # re-raises Crash/LeaseLost
+            if outcome[0] == "cancelled":
+                log.append(StepCancelled(run_id=ctx.run_id, step_id=req.step_id,
+                                         attempt=req.attempt))
+                interrupted = True
+                continue
+            kind, payload = self._settle(log, node, req, executor, outcome, ctx.budget)
+            if kind == "retry":
+                ctx.pending[req.step_id] = payload
+            elif kind == "dead":
+                dead.append((req.step_id, payload))
+            else:  # "done"
+                result: StepResult = payload
+                ctx.outputs[req.step_id] = result.output
+                ctx.done.add(req.step_id)
+                ctx.total += result.cost.decimal()
+        if dead:
+            step_id, cause = dead[0]
+            raise _Unrecoverable(f"step {step_id!r} dead-lettered: {cause}", step_id=step_id)
+        return interrupted
+
+    def _after_wave(self, log: _Log, ctx: _WaveContext, started: list[_Started],
+                    now: datetime, *, interrupted: bool, requested_now: bool) -> bool:
+        """After a wave is recorded: finalize a cancel that arrived mid-wave, suspend for
+        approvals asked during the wave, or suspend for a cost-ceiling approval. Returns
+        True when advancing must stop."""
+        # A cancel that arrived mid-wave: every finished sibling is now recorded (C4);
+        # interrupted ones are step.cancelled; finalize.
+        log.poll_control()
+        if interrupted or log.cancel_requested:
+            log.cancel_requested = True
+            self._apply_control(log, ctx.run.status)
+            return True
+        if requested_now:
+            # Gated siblings were asked for while this wave ran; the wave is recorded,
+            # now suspend until they are decided.
+            log.append(RunSuspended(run_id=ctx.run_id))
+            return True
+        ceiling = ctx.cost_ceiling
+        if ceiling is not None and ctx.total > ceiling:
+            self._request_cost_approval(log, ctx, started, now, ceiling)
+            return True
+        return False
+
+    def _request_cost_approval(self, log: _Log, ctx: _WaveContext, started: list[_Started],
+                               now: datetime, ceiling: Decimal) -> None:
+        """Budget guardrail (DESIGN §8): the tripping step is already recorded, so the
+        charge is in the log; now SUSPEND for a cost approval whose grant raises the
+        ceiling by one more budget's worth (C7 / A6)."""
+        tripping = started[-1][1].step_id if started else ""
+        proposed = ctx.total + Decimal(ctx.budget.max_run_cost or "0")
+        log.append(ApprovalRequested(
+            run_id=ctx.run_id, approval_id=uuid4().hex, step_id=tripping,
+            effect_classes=[], kind=ApprovalKind.cost,
+            cost_at_request=str(ctx.total), proposed_ceiling=str(proposed),
+            expires_at=self._approval_expiry(ctx.budget, now),
+            reason=f"run cost {ctx.total} exceeds ceiling {ceiling}; approving raises "
+                   f"the ceiling to {proposed}",
+        ))
+        log.append(RunSuspended(run_id=ctx.run_id))
 
     # ---------------------------------------------------------------- one step
     def _approval_gate(self, node: WorkflowNode, run: WorkflowRun, budget: Budget) -> str:
