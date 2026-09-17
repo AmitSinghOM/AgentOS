@@ -149,6 +149,8 @@ def test_installed_providers_are_discovered_through_their_entry_points():
     assert d["describe"]["aliases"]["chat.fast"] and "reachable" in d["health"]
     if "anthropic" in found:                                 # second provider, same seam
         assert by_name["anthropic"]["describe"]["wire_format"] == "anthropic-messages"
+    if "openai-agents" in found:                             # inner harness, same seam
+        assert by_name["openai-agents"]["describe"]["wire_format"] == "openai-agents-sdk"
 
 
 def test_pricing_snapshot_is_stored_as_a_blob():

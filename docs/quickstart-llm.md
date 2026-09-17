@@ -106,6 +106,23 @@ the step's `provenance.executor` says `anthropic`. Point `AGENTOS_ANTHROPIC_BASE
 `{"chat.fast": "claude-3-5-haiku-latest"}` for Anthropic's models. Tested end to end in
 `tests/test_quickstart_llm.py::test_same_agents_run_on_the_anthropic_wire_format`.
 
+## 6b. Bring the agent loop you already use (optional)
+
+A third executor, `openai-agents`, runs an **OpenAI Agents SDK** agent as one AgentOS
+step — the SDK owns the loop (model, tools, turns), AgentOS owns the gate, the cost meter
+and the log. Same one-field change:
+
+```bash
+pip install -e providers/openai-agents    # then restart the API and worker
+sed 's/"openai-compat"/"openai-agents"/' examples/poet_agent.json > /tmp/poet.json
+```
+
+Give it tools by name — the tools are the operator's Python, registered on the worker,
+never code in the agent JSON — and the model is offered only those whose effect class the
+agent *declared*; a step declaring `spend` or `write_external` is suspended for approval
+before the SDK ever runs. `tool_calls`, `tools_withheld`, `turns` and the SDK's summed
+token usage land on `step.completed`. Details in `providers/openai-agents/README.md`.
+
 ## 7. A tool step before the model (optional)
 
 The built-in `tool` executor calls an HTTP API or runs a program as a step, under the same

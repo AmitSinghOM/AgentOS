@@ -35,7 +35,8 @@ target-version = "py311"
 [tool.pytest.ini_options]
 # The provider's tests live with the provider (its own distribution) but run from the
 # root too; they importorskip when the provider is not installed.
-testpaths = ["tests", "providers/openai-compat/tests", "providers/anthropic/tests"]
+testpaths = ["tests", "providers/openai-compat/tests", "providers/anthropic/tests",
+             "providers/openai-agents/tests"]
 markers = [
     "network: needs real Postgres + Toxiproxy (tests/chaos/network); skipped without AGENTOS_TEST_PG_DSN",
 ]
@@ -69,6 +70,7 @@ forbidden_modules = [
     "openai", "anthropic", "boto3", "botocore",
     "opentelemetry", "prometheus_client",
     "httpx", "agentos_provider_openai_compat",   # providers are plugins (§2.2)
+    "agents", "agentos_provider_openai_agents",  # the inner harness is a plugin too
 ]
 allow_indirect_imports = true
 
