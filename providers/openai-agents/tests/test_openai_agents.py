@@ -153,7 +153,10 @@ def test_interruptions_raise_instead_of_auto_approving():
             self.new_items = []
             self.final_output = None
 
-    ex, _ = executor([], run=lambda *a, **k: Paused())
+    async def paused(*a, **k):
+        return Paused()
+
+    ex, _ = executor([], run=paused)
     with pytest.raises(ProviderError, match=r"paused for tool approval on \['charge'\].*gated"):
         ex.execute(request({}), noop_progress)
 
@@ -171,6 +174,31 @@ def test_sdk_failures_map_to_the_providerkit_vocabulary():
     ex, _ = executor([[function_call("utc_now", {}, call_id=f"c{i}")] for i in range(4)])
     with pytest.raises(BadResponse, match="exceeded max_turns=2"):
         ex.execute(request({"tools": ["utc_now"], "max_turns": 2}), noop_progress)
+
+
+def test_the_default_model_client_is_closed_after_every_run(monkeypatch):
+    """Review finding: a per-step AsyncOpenAI that is never closed leaks connection pools
+    in a long-lived worker. The executor now creates it inside the step's own event loop
+    and closes it in `finally` — on success and on failure."""
+    closed: list[str] = []
+
+    class FakeClient:
+        is_closed = False
+
+        async def close(self):
+            closed.append("closed")
+
+    ex = OpenAIAgentsExecutor(from_env({}), registry=REGISTRY)
+    scripted = ScriptedModel([[assistant_message("ok")]], default_usage=USAGE)
+    monkeypatch.setattr(ex, "_model_factory", lambda _id: (scripted, FakeClient()))
+    assert ex.execute(request({}), noop_progress).output["text"] == "ok"
+    assert closed == ["closed"]
+
+    failing = ScriptedModel([ModelBehaviorError("bad")], default_usage=USAGE)
+    monkeypatch.setattr(ex, "_model_factory", lambda _id: (failing, FakeClient()))
+    with pytest.raises(BadResponse):
+        ex.execute(request({}), noop_progress)
+    assert closed == ["closed", "closed"]
 
 
 def test_describe_and_health_report_without_a_server():

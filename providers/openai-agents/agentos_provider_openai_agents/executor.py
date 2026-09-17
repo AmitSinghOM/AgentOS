@@ -1,6 +1,6 @@
 """OpenAI Agents SDK as an AgentOS inner harness.
 
-One AgentOS step = one SDK run (`Runner.run_sync`): the model may loop, call tools and
+One AgentOS step = one SDK run (`Runner.run` on a fresh event loop): the model may loop, call tools and
 reason as many times as `max_turns` allows, and the whole trajectory is recorded as ONE
 `step.completed` — with every tool call's name and argument/output hashes in the output,
 the SDK's summed token usage metered as cost, and an `Effect` per class of tool actually
@@ -24,9 +24,10 @@ Boundaries, each tested:
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _dist_version
 from typing import Any
@@ -72,8 +73,10 @@ except PackageNotFoundError:  # running from a checkout without install
 
 DEFAULT_MAX_TURNS = 6
 JSON_INSTRUCTION = "Respond with a single JSON object and nothing else."
-ModelFactory = Callable[[str], Model]
-RunFn = Callable[..., Any]
+# A factory returns the SDK Model, or (Model, client) when it created a client the
+# executor must close after the run — the default factory does; test factories do not.
+ModelFactory = Callable[[str], "Model | tuple[Model, openai.AsyncOpenAI]"]
+RunFn = Callable[..., Awaitable[Any]]
 
 
 class OpenAIAgentsExecutor:
@@ -83,7 +86,7 @@ class OpenAIAgentsExecutor:
     def __init__(self, config: ProviderConfig | None = None, *,
                  registry: ToolRegistry | None = None,
                  model_factory: ModelFactory | None = None,
-                 run: RunFn = Runner.run_sync) -> None:
+                 run: RunFn = Runner.run) -> None:
         self.config = config or from_env()
         self.pricing = PricingTable(self.config.pricing_path)
         self.registry = registry if registry is not None else load_registry()
@@ -137,17 +140,12 @@ class OpenAIAgentsExecutor:
             {"instructions": instructions, "input": user, "tools": sorted(by_name)},
             sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
-        sdk_agent = Agent(
-            name=req.agent.name, instructions=instructions,
-            model=self._model_factory(model_id),
-            tools=[function_tool(s.fn, name_override=s.name, description_override=s.description)
-                   for s in offered],
-            model_settings=ModelSettings(temperature=cfg.get("temperature", 0)),
-        )
+        tools = [function_tool(s.fn, name_override=s.name, description_override=s.description)
+                 for s in offered]
         max_turns = int(cfg.get("max_turns", DEFAULT_MAX_TURNS))
         progress(0.0, f"agents-sdk run model={model_id} tools={sorted(by_name)} "
                       f"max_turns={max_turns}")
-        result = self._run_sdk(sdk_agent, user, max_turns, model_id)
+        result = self._run_sdk(req.agent.name, instructions, tools, cfg, user, max_turns, model_id)
 
         if result.interruptions:
             names = sorted({i.raw_item.name for i in result.interruptions
@@ -213,10 +211,28 @@ class OpenAIAgentsExecutor:
             user = "Hello."
         return instructions, user
 
-    def _run_sdk(self, sdk_agent: Agent, user: str, max_turns: int, model_id: str):
+    def _run_sdk(self, name: str, instructions: str, tools: list, cfg: dict, user: str,
+                 max_turns: int, model_id: str):
+        """One fresh event loop per step (`asyncio.run`): the model client is created,
+        used and CLOSED inside it, so a long-lived worker thread accumulates no open
+        connection pools (a review found `Runner.run_sync` deliberately leaves the
+        thread's loop — and anything bound to it — open after the run)."""
+        async def _arun():
+            made = self._model_factory(model_id)
+            model, client = made if isinstance(made, tuple) else (made, None)
+            try:
+                sdk_agent = Agent(
+                    name=name, instructions=instructions, model=model, tools=tools,
+                    model_settings=ModelSettings(temperature=cfg.get("temperature", 0)),
+                )
+                return await self._run(sdk_agent, user, max_turns=max_turns,
+                                       run_config=RunConfig(tracing_disabled=True))
+            finally:
+                if client is not None:
+                    await client.close()
+
         try:
-            return self._run(sdk_agent, user, max_turns=max_turns,
-                             run_config=RunConfig(tracing_disabled=True))
+            return asyncio.run(_arun())
         except MaxTurnsExceeded as exc:
             raise BadResponse(f"agents-sdk run exceeded max_turns={max_turns} on {model_id}: "
                               f"{exc}") from exc
@@ -263,11 +279,13 @@ class OpenAIAgentsExecutor:
                           for c in calls if c["name"] in by_name})
         return calls, classes
 
-    def _default_model(self, model_id: str) -> Model:
+    def _default_model(self, model_id: str) -> tuple[Model, openai.AsyncOpenAI]:
+        """Called INSIDE the step's event loop so the client binds to it; returned with the
+        model so `_run_sdk` closes it when the run ends."""
         client = openai.AsyncOpenAI(base_url=self.config.base_url,
                                     api_key=self.config.api_key or "ollama",
                                     timeout=self.config.timeout_seconds)
-        return OpenAIChatCompletionsModel(model=model_id, openai_client=client)
+        return OpenAIChatCompletionsModel(model=model_id, openai_client=client), client
 
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.config.api_key}"} if self.config.api_key else {}
