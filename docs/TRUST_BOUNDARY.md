@@ -55,6 +55,16 @@ is not the engine — including a future "import a log" feature — and it makes
 detectable in the audit trail rather than silent. Signing the chain tail is a KeyStore
 concern (A7) and is out of scope here.
 
+Snapshots (C15, `run_snapshots`) sit inside this boundary, not outside it. A snapshot is the
+folded state at seq N plus the hash of event N; a read folds it forward from the events after
+N. Before it is used, the engine checks that event N exists in the log with that hash (so a
+snapshot from another log, from a stale backup, or beyond the log's tail is ignored and the
+whole log folded instead), and the events after it must chain to it. The `state` column
+itself is not hashed: with write access to the store one can edit it consistently with its
+anchor, exactly as one can recompute the chain. So the snapshot has the same trust level as
+the log, no less and no more; `GET /runs/{id}/integrity` never reads it (full fold from
+seq 1) and is the audit. Details and the acceptance tests: `docs/REPLAY.md`, "Snapshots".
+
 Tests: `::test_every_appended_event_is_chained_and_the_fold_verifies_it`,
 `::test_a_tampered_log_does_not_fold_and_the_api_says_so[edit|insert|remove]`,
 `::test_control_requests_appended_by_the_api_join_the_chain`,

@@ -76,19 +76,51 @@ def fold(events: Iterable[Event], *, verify_integrity: bool = True) -> WorkflowR
         parent_run_id=first.parent_run_id,
         inputs_ref=first.inputs_ref,
         last_seq=first.seq,
+        last_hash=first.hash,
     )
-    completed: dict[str, StepRecord] = {}
-    order: list[str] = []
-    total = Decimal(0)
-    expected_seq = first.seq
+    _apply(run, events[1:])
+    run.integrity_verified = verified
+    return run
 
-    for ev in events[1:]:
+
+def fold_from(snapshot: WorkflowRun, events: Iterable[Event], *,
+              verify_integrity: bool = True) -> WorkflowRun:
+    """Continue a fold from a snapshotted state (C15). `events` are the log entries after
+    `snapshot.last_seq`. The first of them must chain to `snapshot.last_hash`, so a
+    snapshot that does not belong to this log — or a log edited behind it — is refused
+    exactly like any other integrity violation. Never re-verifies the prefix: that is what
+    `GET /runs/{id}/integrity` (a full fold) is for."""
+    events = list(events)
+    run = snapshot.model_copy(deep=True)
+    if not events:
+        return run
+    if verify_integrity:
+        try:
+            run.integrity_verified += verify(
+                events, prev_hash=snapshot.last_hash, chained=snapshot.last_hash is not None)
+        except IntegrityError as exc:
+            raise FoldError(f"log integrity violation after snapshot seq "
+                            f"{snapshot.last_seq}: {exc}") from exc
+    _apply(run, events)
+    return run
+
+
+def _apply(run: WorkflowRun, events: list[Event]) -> None:
+    """Apply events in order to `run`, mutating it. `run.steps` / `run.total_cost` are the
+    accumulators, so the same function serves a fresh fold and a snapshot continuation."""
+    completed: dict[str, StepRecord] = {s.node_id: s for s in run.steps}
+    order: list[str] = [s.node_id for s in run.steps]
+    total = Decimal(run.total_cost)
+    expected_seq = run.last_seq
+
+    for ev in events:
         expected_seq += 1
         if ev.seq != expected_seq:
             raise FoldError(f"seq gap: expected {expected_seq}, got {ev.seq}")
         if ev.run_id != run.id:
             raise FoldError(f"event for run {ev.run_id!r} in log of {run.id!r}")
         run.last_seq = ev.seq
+        run.last_hash = ev.hash
 
         if isinstance(ev, StepStarted):
             run.attempts[ev.step_id] = ev.attempt
@@ -185,6 +217,3 @@ def fold(events: Iterable[Event], *, verify_integrity: bool = True) -> WorkflowR
 
     run.steps = [completed[s] for s in order]
     run.total_cost = str(total)
-    run.last_hash = events[-1].hash
-    run.integrity_verified = verified
-    return run

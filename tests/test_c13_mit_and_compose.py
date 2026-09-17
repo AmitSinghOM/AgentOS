@@ -15,7 +15,7 @@ USER_FACING = [ROOT / "README.md", ROOT / "docs" / "quickstart-llm.md",
 HOSTED_TIER = re.compile(r"\b(sign ?up|create an account|free tier|paid plan|upgrade to|"
                          r"enterprise (edition|licen[cs]e)|hosted (tier|version)|"
                          r"cloud account required|api key required)\b", re.IGNORECASE)
-OSS_IMAGES = {"postgres", "redis", "jaegertracing/jaeger", "prom/prometheus", "grafana/grafana"}
+OSS_IMAGES = {"postgres", "jaegertracing/jaeger", "prom/prometheus", "grafana/grafana"}
 
 
 def test_license_is_mit_everywhere():

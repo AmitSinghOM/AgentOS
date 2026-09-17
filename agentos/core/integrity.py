@@ -46,12 +46,13 @@ class IntegrityError(ValueError):
     """The log does not verify: an event was altered, inserted or removed."""
 
 
-def verify(events: Sequence[Event]) -> int:
+def verify(events: Sequence[Event], *, prev_hash: str | None = None,
+           chained: bool = False) -> int:
     """Check the chain over an ordered log. Returns the number of hashed events verified.
-    Raises IntegrityError with the seq of the first event that fails."""
-    prev: str | None = None
+    Raises IntegrityError with the seq of the first event that fails. `prev_hash` /
+    `chained` describe the log prefix this slice continues (a snapshot's tail, C15)."""
+    prev: str | None = prev_hash
     verified = 0
-    chained = False
     for ev in events:
         if ev.hash is None:
             if chained:

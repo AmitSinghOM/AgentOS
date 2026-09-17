@@ -6,8 +6,9 @@ This module is the composition root: the one place that knows which concrete sto
 blob store and executors are wired into the core. Nothing in `agentos.core` does.
 
 Configuration (env):
-  AGENTOS_STORE        memory | sqlite      (default: sqlite)
-  AGENTOS_SQLITE_PATH  file path            (default: ./agentos.db)
+  AGENTOS_STORE           memory | sqlite | postgres  (default: sqlite)
+  AGENTOS_SQLITE_PATH     file path                   (default: ./agentos.db)
+  AGENTOS_SNAPSHOT_EVERY  events between run snapshots (default: 200; 0 disables, C15)
 """
 from __future__ import annotations
 
@@ -55,8 +56,24 @@ if prometheus is not None and hasattr(store, "queue_depth"):
 executors = {AgentType.echo.value: EchoExecutor(), AgentType.tool.value: ToolExecutor(),
              **discover_executors()}
 pricing_snapshots = store_pricing_snapshots(executors, store)
+
+
+def snapshot_every_from_env() -> int:
+    """AGENTOS_SNAPSHOT_EVERY: events a run's log may grow before its folded state is
+    cached (C15). 0 disables snapshots (every read folds the whole log)."""
+    raw = os.environ.get("AGENTOS_SNAPSHOT_EVERY", "200")
+    try:
+        value = int(raw)
+    except ValueError:
+        raise RuntimeError(f"AGENTOS_SNAPSHOT_EVERY must be an integer >= 0, got {raw!r}") from None
+    if value < 0:
+        raise RuntimeError(f"AGENTOS_SNAPSHOT_EVERY must be an integer >= 0, got {raw!r}")
+    return value
+
+
 engine = Engine(store=store, blobs=store, executors=executors,
-                lease=store if hasattr(store, "acquire") else None, observers=observers)
+                lease=store if hasattr(store, "acquire") else None, observers=observers,
+                snapshot_every=snapshot_every_from_env())
 
 app = FastAPI(title="AgentOS", version="0.6.0")
 

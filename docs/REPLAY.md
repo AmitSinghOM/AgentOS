@@ -59,9 +59,32 @@ yields byte-identical state including that roll. A code-replay engine would have
 re-executed `a`'s function and, on seeing a different random value, raised
 non-determinism. Here there is nothing to disagree with: the roll is a fact in the log.
 
+## Snapshots (C15)
+
+A snapshot is the folded `WorkflowRun` at seq N, stored with `last_hash`. The engine takes
+one whenever a run's log has grown `snapshot_every` events (default 200) past the previous
+snapshot, and reads by folding the snapshot plus the events after N (`fold_from`), so a
+resume touches at most `snapshot_every` events regardless of run length. The acceptance
+test runs a 1,000-step chain: each `step.completed` record is the same size as the first
+(the log is appended, never rewritten), a fresh engine reads ≤ 100 events to reconstruct
+the run, and the full fold of the log agrees with the snapshot fold exactly.
+
+Never the source of truth: the snapshot's anchor event (seq N with `last_hash`) must exist
+in the log, and the first event after it must chain to it (C12); a snapshot whose anchor is
+missing, whose hash is not the log's at that seq, or whose tail does not chain is ignored and
+the whole log folded instead — including when nothing follows it. `GET /runs/{id}/integrity`
+always folds from seq 1. A snapshot with a *consistent* anchor but tampered state would be
+believed by `fold_from` — it is a cache with the same trust level as the store itself; the
+full fold is the audit (`TRUST_BOUNDARY.md` §2). Writing one can never fail an advance (a
+cache error is logged; the log is already committed) and `put_snapshot` is monotonic per run,
+so a worker that lost its lease cannot regress the live worker's newer snapshot. The knob is
+`AGENTOS_SNAPSHOT_EVERY` (default 200; 0 disables).
+
+Finding along the way: the acceptance test exposed an O(n²) in the engine — a per-wave
+refold of the whole log added in Phase 3 — which made a 1,000-step run take 17 s. Removing
+it (the state the next wave needs is tracked locally) brought it to under half a second.
+
 ## Related
 
 - Tamper-evidence of those facts: `TRUST_BOUNDARY.md` §2.
-- Snapshots (C15, #15) would be a *bounded optimization* of the fold — a cached
-  `WorkflowRun` at seq N plus the events after N — and never a second source of truth. Not
-  built; replay of the longest log in the test suite is sub-millisecond.
+- Snapshots (C15, #15): see the section above.

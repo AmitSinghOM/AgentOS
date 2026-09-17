@@ -56,6 +56,13 @@ class Store(Protocol):
     def list_run_ids(self) -> list[str]: ...
     def run_id_for_request(self, request_id: str) -> str | None: ...
 
+    # Snapshots (C15): a folded WorkflowRun at `seq`, so a resume reads only the events
+    # after it. A bounded OPTIMIZATION of the fold, never the source of truth: the engine
+    # re-verifies the chain link (first event after the snapshot must chain to
+    # `last_hash`), and `GET /runs/{id}/integrity` always folds the whole log.
+    def put_snapshot(self, run_id: str, seq: int, last_hash: str | None, state: dict) -> None: ...
+    def get_snapshot(self, run_id: str) -> tuple[int, str | None, dict] | None: ...
+
 
 class BlobStore(Protocol):
     """Content-addressed payload storage. Events carry a BlobRef; bytes live here.

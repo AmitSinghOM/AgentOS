@@ -4,6 +4,7 @@ broken (docs/DEVELOPMENT_STRUCTURE.md §1)."""
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Sequence
 
 import pytest
@@ -67,6 +68,14 @@ class FakeStore:
 
     def read_events(self, run_id, after_seq=0):
         return [from_record(r) for r in self.logs.get(run_id, []) if r["seq"] > after_seq]
+
+    # Snapshots are part of the port (C15); a stranger's adapter implements them too.
+    def put_snapshot(self, run_id, seq, last_hash, state):
+        self.snaps = getattr(self, "snaps", {})
+        self.snaps[run_id] = (seq, last_hash, json.loads(json.dumps(state, default=str)))
+
+    def get_snapshot(self, run_id):
+        return getattr(self, "snaps", {}).get(run_id)
 
     def list_run_ids(self): return list(self.logs)
     def run_id_for_request(self, request_id): return self.requests.get(request_id)

@@ -101,7 +101,7 @@ jobs:
       - run: pytest -v tests/chaos/network -rs
 
   compose:
-    # Phase 0 gate: `docker compose up` brings up Postgres + Redis and both pass
+    # Phase 0 gate: `docker compose up` brings up Postgres and the observability stack; all pass
     # their healthchecks. The API does not talk to them until Phase 1.
     runs-on: ubuntu-latest
     steps:
@@ -109,7 +109,6 @@ jobs:
       - run: cp .env.example .env
       - run: docker compose up -d --wait --wait-timeout 90
       - run: docker compose exec -T postgres pg_isready -U agentos
-      - run: docker compose exec -T redis redis-cli ping | grep -q PONG
       # The UIs have no compose healthcheck, so `--wait` returns before they listen;
       # retry briefly instead of failing the release gate on a connection reset.
       - run: curl -fsS --retry 10 --retry-all-errors --retry-delay 2 http://localhost:16686/ > /dev/null      # jaeger UI up
