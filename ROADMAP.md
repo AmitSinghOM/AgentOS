@@ -60,10 +60,10 @@ forward — see the dated decision at the end of this phase.
     - [~] A6 metered `Cost{units: [Meter], amount (decimal string), currency, pricing_snapshot_hash}`; per-step and rolling run ceilings enforced; dead-lettered cost still counted. Pricing table as a blob: with the first provider plugin
     - [ ] ⏭ A10 provider plugins tested against recorded cassettes; live re-record is a nightly opt-in job
 - [x] Worker process consuming a run queue, decoupled from the API (`agentos/worker/`; queue is a `Queue` port with SQLite/Postgres/Memory adapters — Redis is now an optional adapter, not a requirement: see ADR note below)
-- [ ] ⏭ Real tool agent (HTTP/subprocess) in core; LLM executors live in provider plugins (see longevity structure)
+- [x] Real tool agent (HTTP/subprocess) in core — landed Phase 6 (`agentos/agents/tool.py`); LLM executors live in provider plugins
 - [x] Idempotency keys on step execution (`run_id:step_id:sha256(inputs)`); completed steps replayed from the log, never re-executed
 - [x] Per-run lease with **fencing tokens** (`Lease` port; a stale holder cannot append) — SQLite/Postgres/Memory adapters, one contract suite
-- [ ] ⏭ State snapshots to bound replay cost (log stays the source of truth; replay of tens of steps is sub-millisecond today, so this is an optimization not a correctness gap)
+- [x] State snapshots to bound replay cost — landed in Phase 6 (`v0.7.0`), log stays the source of truth
 - [x] **Chaos suite** (`tests/chaos/`): deterministic fault points in the worker, run in CI on every PR — see *Chaos engineering plan* below. The `kill -9` demo is `tests/chaos/test_kill9_real_process.py` (real subprocess, exit 137).
   - [x] `FaultInjector` port consulted at named points; production binding is a no-op (`core/faults.py`)
   - [x] `before_effect_commit` → step re-runs, exactly one completion (C1)
@@ -78,9 +78,9 @@ forward — see the dated decision at the end of this phase.
 - [x] **C2** — idempotent enqueue and append, `UNIQUE(run_id, seq)` ([#2](https://github.com/AmitSinghOM/AgentOS/issues/2))
 - [x] **C3** — replay by `step_id` + `workflow_version`, never by position ([#3](https://github.com/AmitSinghOM/AgentOS/issues/3))
 - [x] **C6** — separate API/worker, per-run lease, no process-local live state ([#6](https://github.com/AmitSinghOM/AgentOS/issues/6))
-- [ ] **C10** — persistence behind a port; typed serialization round-trips ([#10](https://github.com/AmitSinghOM/AgentOS/issues/10))
-- [ ] **C14** — event-sourced *state* replay, not replay-the-code determinism; written into DESIGN.md ([#14](https://github.com/AmitSinghOM/AgentOS/issues/14))
-- [ ] **C15** — append-only log; snapshots bounded, never the source of truth ([#15](https://github.com/AmitSinghOM/AgentOS/issues/15))
+- [x] **C10** — persistence behind a port; typed serialization round-trips — closed Phase 6 ([#10](https://github.com/AmitSinghOM/AgentOS/issues/10))
+- [x] **C14** — event-sourced *state* replay, not replay-the-code determinism; `docs/REPLAY.md` — closed Phase 6 ([#14](https://github.com/AmitSinghOM/AgentOS/issues/14))
+- [x] **C15** — append-only log; snapshots bounded, never the source of truth — closed Phase 6 ([#15](https://github.com/AmitSinghOM/AgentOS/issues/15))
 
 **Demo:** start a 3-step run, `kill -9` the worker after step 2, restart → it finishes
 without repeating step 2. Show the event log. **Now a test:** `pytest tests/chaos/test_kill9_real_process.py`.
@@ -244,7 +244,44 @@ The compose job proved the *services* came up; nothing proved the *telemetry* st
 across processes, and a single test that feeds one observer `run.started` and another the
 rest would have caught it a release earlier.
 
-## Phase 6 — UI (optional)  ·  ~2 weekends
+## Phase 6 — Tools, snapshots, survey close-out  ·  ~1 weekend  ·  ✅ shipped `v0.7.0-complete` (2026-09-17)
+**Goal:** close every remaining `landscape-con` issue with an acceptance test, and ship the
+one carried-forward item that had become a real cost — bounded replay. **Met:** 15/15
+survey issues closed; replay is O(events since snapshot) with the snapshot verified against
+the chain; the change set went through a four-seat review and every accepted finding has a
+locking test.
+
+- [x] Real `tool` agent (HTTP/subprocess) in core ([#38](https://github.com/AmitSinghOM/AgentOS/pull/38)) — see Phase 5 line for the design; governed by the existing gate with no new mechanism
+- [x] **C13** — MIT + open-source compose, now an executable test (`tests/test_c13_mit_and_compose.py`) rather than a claim ([#13](https://github.com/AmitSinghOM/AgentOS/issues/13))
+- [x] **C14** — state replay, not code replay: `docs/REPLAY.md` + the random-roll crash/resume acceptance test ([#14](https://github.com/AmitSinghOM/AgentOS/issues/14))
+- [x] **C10** — every event type round-trips through every store adapter with equality; bounded reads ([#10](https://github.com/AmitSinghOM/AgentOS/issues/10))
+- [x] **C15** — `WorkflowRun` snapshots ([#15](https://github.com/AmitSinghOM/AgentOS/issues/15), [#39](https://github.com/AmitSinghOM/AgentOS/pull/39)): the engine reads a snapshot and folds only the tail; `fold_from` verifies the chain link across the boundary and the snapshot's anchor event against the log even when the tail is empty; `put_snapshot` is monotonic per run on all three adapters so a fenced-out stale worker cannot regress it; a failing snapshot write never fails a committed advance; `AGENTOS_SNAPSHOT_EVERY` (default 200, 0 disables); `fold_from == fold` at every cut point of every golden log. Snapshots are derived state — deleting them is safe; `GET /runs/{id}/integrity` never reads them
+- [x] Versioned schema migrations (`agentos/store/migrations.py`) for SQLite + Postgres; every released migration's SQL is SHA-256-pinned per dialect (editing one fails with "add migration N+1"); a pre-ledger v0.6 database adopts the ledger without losing rows
+- [x] Unused `sqlalchemy` + `redis` dependencies and the compose redis service removed (queue and lease have been SQL adapters since Phase 1); import-linter still forbids them in the core
+- [x] Four-seat review (Staff / Product / Security / CTO) + code-reviewer skill + cqa-analyzer on the snapshot PR: 10 findings, 9 fixed each with a test, 1 cosmetic declined with reason; Design score 8.96 → 8.98
+- [ ] ⏭ A8 `protocols/` function-calling round trip
+- [ ] ⏭ A11 `agentos export-run --format jsonl`
+- [ ] ⏭ A12 global pause
+- [ ] ⏭ A7 KeyStore + signed chain tail
+- [ ] ⏭ `advance()` cognitive complexity (cqa PY-MAINT-002) — a refactor PR, behaviour pinned by the golden corpus and chaos suite
+
+**Tag:** `v0.7.0-complete`. **Post:** "Snapshots That Are Never the Truth."
+
+**Carry-forward decision (2026-09-17).** Phase 6 is tagged with its goal met: the survey
+that scoped this project is fully answered, each answer an acceptance test in CI. The four
+⏭ features are unchanged from Phase 5 — none blocks a user of the two providers or the
+tool agent. New this phase: `advance()` has grown through five phases of gate → dispatch →
+verify → record plus cancel, pause, approvals and now snapshots; cqa flags its complexity
+and the review agreed. It is carried as the *next* PR rather than folded into this tag so
+the refactor is judged on its own diff against a pinned behaviour set.
+
+**What I'd do differently:** take snapshots in Phase 1 as the design said, even though
+replay was sub-millisecond then. The deferral was correct on cost, but the *interface*
+(where a snapshot sits relative to the chain, who may write it, what verifies it) is what
+the review found gaps in — and interfaces are cheaper to get right before four phases of
+callers exist.
+
+## Phase 7 — UI (optional)  ·  ~2 weekends
 **Goal:** a visual the recruiter screenshot remembers. Plays to frontend strength.
 
 - [ ] React + (Cloudscape or shadcn) app
@@ -252,7 +289,7 @@ rest would have caught it a release earlier.
 - [ ] Event-log timeline view (time-travel debugging over the log)
 - [ ] Cost + latency panel per run
 
-**Tag:** `v0.7.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
+**Tag:** `v0.8.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
 
 ---
 
