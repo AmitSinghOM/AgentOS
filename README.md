@@ -162,7 +162,8 @@ See [ROADMAP.md](./ROADMAP.md).
 | 3 · HITL + observability | Approval gates, OpenTelemetry, cost dashboard | ✅ `v0.4.0-observable` |
 | 4 · Providers + DX | OpenAI-compatible + Anthropic plugins, aliases, cassettes, 5-minute quickstart | ✅ `v0.5.0-providers` |
 | 5 · Trust boundary + polish | C12: strict control payloads, tamper-evident log, inputs as data; screenshots | ✅ `v0.6.0-trusted` |
-| 6 · UI (optional) | React run visualizer over the event log | ⚪ planned |
+| 6 · Tools, snapshots, survey close-out | `tool` agent, verified snapshots + migrations, all 15 `landscape-con` issues closed with tests | ✅ `v0.7.0-complete` |
+| 7 · UI (optional) | React run visualizer over the event log | ⚪ planned |
 
 Phases 1–3 are scoped against a survey of what the popular agent runtimes get wrong
 (LangGraph, agno, Microsoft Agent Framework, crewAI, ADK, mastra, Temporal, Hatchet…).
@@ -175,6 +176,9 @@ Each phase produces an article on a distributed-systems problem solved here:
 - Durable Execution: Resuming Workflows After a Crash
 - Retry Without Data Corruption
 - Suspended Workflows: Human Approval as a First-Class State
+- Providers Are Plugins
+- Three Doors: Where Untrusted Bytes Meet an Agent Engine
+- Snapshots That Are Never the Truth
 
 (See [`docs/blog/`](./docs/blog).)
 

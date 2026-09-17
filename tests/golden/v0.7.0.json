@@ -1,0 +1,492 @@
+{
+  "events": [
+    {
+      "agent_versions": {
+        "greeter": 1,
+        "writer": 1
+      },
+      "event_type": "run.started",
+      "hash": "7631cbc164b870d9a9f2e90323eb88ecce2128d48223ac0c13fc0b975740ec52",
+      "inputs_ref": {
+        "media_type": "application/json",
+        "sha256": "eef4862db6bef854041c8a257bb914df75d3d4c1338b26bddcb1e7c268107606",
+        "size": 18
+      },
+      "occurred_at": "2026-09-17T09:19:23.599549Z",
+      "parent_run_id": null,
+      "prev_hash": null,
+      "principal": null,
+      "request_id": "golden-v0.7.0",
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 1,
+      "workflow": "diamond",
+      "workflow_version": 1
+    },
+    {
+      "agent": "writer",
+      "agent_version": 1,
+      "attempt": 1,
+      "declared_effects": [
+        "compute"
+      ],
+      "event_type": "step.started",
+      "hash": "e3af876837bb4adb032664dd340dc7c68bfc25adabecac33c1415e08ce3b2a1a",
+      "idempotency_key": "871c6b28193a4661873b0732424992a8:a:b7ece78457ce8c571ba6e2dae2f27ea4b294f7d2d846331ba6816704970c1216",
+      "occurred_at": "2026-09-17T09:19:23.601056Z",
+      "parent_run_id": null,
+      "prev_hash": "7631cbc164b870d9a9f2e90323eb88ecce2128d48223ac0c13fc0b975740ec52",
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 2,
+      "step_id": "a"
+    },
+    {
+      "attempt": 1,
+      "cost": {
+        "amount": "0",
+        "currency": "USD",
+        "pricing_snapshot_hash": null,
+        "units": []
+      },
+      "effects": [
+        {
+          "description": "",
+          "effect_class": "compute",
+          "external_ref": null
+        }
+      ],
+      "event_type": "step.completed",
+      "hash": "1157af900f60b417609a0d047c6253c62e6938da47e99e3a21f7b6fc648f16b7",
+      "idempotency_key": "871c6b28193a4661873b0732424992a8:a:b7ece78457ce8c571ba6e2dae2f27ea4b294f7d2d846331ba6816704970c1216",
+      "occurred_at": "2026-09-17T09:19:23.601282Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "4b59167ad9045adad249b6c5a8d5d9bc246efc3c907a37a84a14a83bd1beb68b",
+        "size": 44
+      },
+      "parent_run_id": null,
+      "prev_hash": "e3af876837bb4adb032664dd340dc7c68bfc25adabecac33c1415e08ce3b2a1a",
+      "provenance": {
+        "executor": "aliased",
+        "executor_version": "golden",
+        "model_alias": "chat.fast",
+        "model_id": "model-A",
+        "prompt_hash": null
+      },
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 3,
+      "step_id": "a"
+    },
+    {
+      "agent": "greeter",
+      "agent_version": 1,
+      "attempt": 1,
+      "declared_effects": [
+        "compute"
+      ],
+      "event_type": "step.started",
+      "hash": "00da62016eae9aa14f9d47734ee4867a7b19802eb475dd22f615a9a437f66b50",
+      "idempotency_key": "871c6b28193a4661873b0732424992a8:b:c340477c9a04d0fc0bbbc7c19438477a02c687ad6a365b23c6eaafcdd9284f08",
+      "occurred_at": "2026-09-17T09:19:23.601409Z",
+      "parent_run_id": null,
+      "prev_hash": "1157af900f60b417609a0d047c6253c62e6938da47e99e3a21f7b6fc648f16b7",
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 4,
+      "step_id": "b"
+    },
+    {
+      "agent": "greeter",
+      "agent_version": 1,
+      "attempt": 1,
+      "declared_effects": [
+        "compute"
+      ],
+      "event_type": "step.started",
+      "hash": "580d6e5f868e122fbb69622231178b73063e24940136bbae436e6dd273ec353e",
+      "idempotency_key": "871c6b28193a4661873b0732424992a8:c:c340477c9a04d0fc0bbbc7c19438477a02c687ad6a365b23c6eaafcdd9284f08",
+      "occurred_at": "2026-09-17T09:19:23.601458Z",
+      "parent_run_id": null,
+      "prev_hash": "00da62016eae9aa14f9d47734ee4867a7b19802eb475dd22f615a9a437f66b50",
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 5,
+      "step_id": "c"
+    },
+    {
+      "attempt": 1,
+      "event_type": "step.progress",
+      "fraction": 0.0,
+      "hash": "4f832e27f9a566c12b3a057ba98ddd2edf67a14db92b18f3c70982c362919edd",
+      "note": "echo start",
+      "occurred_at": "2026-09-17T09:19:23.601554Z",
+      "parent_run_id": null,
+      "prev_hash": "580d6e5f868e122fbb69622231178b73063e24940136bbae436e6dd273ec353e",
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 6,
+      "step_id": "c"
+    },
+    {
+      "attempt": 1,
+      "event_type": "step.progress",
+      "fraction": 0.0,
+      "hash": "2ce05230e638a65a8a7fbf13735b73ec80a098e41fe5a96adc4fd65a4523cf62",
+      "note": "echo start",
+      "occurred_at": "2026-09-17T09:19:23.601628Z",
+      "parent_run_id": null,
+      "prev_hash": "4f832e27f9a566c12b3a057ba98ddd2edf67a14db92b18f3c70982c362919edd",
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 7,
+      "step_id": "b"
+    },
+    {
+      "attempt": 1,
+      "cost": {
+        "amount": "0",
+        "currency": "USD",
+        "pricing_snapshot_hash": null,
+        "units": []
+      },
+      "effects": [
+        {
+          "description": "echo",
+          "effect_class": "compute",
+          "external_ref": null
+        }
+      ],
+      "event_type": "step.completed",
+      "hash": "1c69f7c514fde78795ca7955837b752c1ee385df97d38c86541f13c45722132e",
+      "idempotency_key": "871c6b28193a4661873b0732424992a8:b:c340477c9a04d0fc0bbbc7c19438477a02c687ad6a365b23c6eaafcdd9284f08",
+      "occurred_at": "2026-09-17T09:19:23.601696Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "d3f31118b3f0dbfc58fc721e48feffc5e6970634ae591b3af1193d4394866e40",
+        "size": 121
+      },
+      "parent_run_id": null,
+      "prev_hash": "2ce05230e638a65a8a7fbf13735b73ec80a098e41fe5a96adc4fd65a4523cf62",
+      "provenance": {
+        "executor": "echo",
+        "executor_version": "0.3.0",
+        "model_alias": null,
+        "model_id": null,
+        "prompt_hash": null
+      },
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 8,
+      "step_id": "b"
+    },
+    {
+      "attempt": 1,
+      "cost": {
+        "amount": "0",
+        "currency": "USD",
+        "pricing_snapshot_hash": null,
+        "units": []
+      },
+      "effects": [
+        {
+          "description": "echo",
+          "effect_class": "compute",
+          "external_ref": null
+        }
+      ],
+      "event_type": "step.completed",
+      "hash": "522578e83b859be1bc016c4cd982ca9b48a54e1df86776564fee1115117022c7",
+      "idempotency_key": "871c6b28193a4661873b0732424992a8:c:c340477c9a04d0fc0bbbc7c19438477a02c687ad6a365b23c6eaafcdd9284f08",
+      "occurred_at": "2026-09-17T09:19:23.601754Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "d3f31118b3f0dbfc58fc721e48feffc5e6970634ae591b3af1193d4394866e40",
+        "size": 121
+      },
+      "parent_run_id": null,
+      "prev_hash": "1c69f7c514fde78795ca7955837b752c1ee385df97d38c86541f13c45722132e",
+      "provenance": {
+        "executor": "echo",
+        "executor_version": "0.3.0",
+        "model_alias": null,
+        "model_id": null,
+        "prompt_hash": null
+      },
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 9,
+      "step_id": "c"
+    },
+    {
+      "agent": "writer",
+      "event_type": "executor.substituted",
+      "executor": "aliased",
+      "from_model": "model-A",
+      "hash": "108da50b6aa68e74c85ad3fe50d26e653ecd408bc836abd8783fc18a3af919a5",
+      "occurred_at": "2026-09-17T09:19:23.601843Z",
+      "parent_run_id": null,
+      "prev_hash": "522578e83b859be1bc016c4cd982ca9b48a54e1df86776564fee1115117022c7",
+      "principal": {
+        "attestation": null,
+        "id": "aliased",
+        "kind": "system"
+      },
+      "reason": "executor 'aliased' now resolves agent 'writer' to 'model-B' (was 'model-A')",
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 10,
+      "step_id": "d",
+      "to_model": "model-B"
+    },
+    {
+      "agent": "writer",
+      "agent_version": 1,
+      "attempt": 1,
+      "declared_effects": [
+        "compute"
+      ],
+      "event_type": "step.started",
+      "hash": "980e8b9921d16ab638c62daee757cdba312ffc14851013e898a1b130c9335fdb",
+      "idempotency_key": "871c6b28193a4661873b0732424992a8:d:0d891d0e440eadcbc7691a2ab5b2f8006740ef52d1c01a6769c816392f4b9ddd",
+      "occurred_at": "2026-09-17T09:19:23.601877Z",
+      "parent_run_id": null,
+      "prev_hash": "108da50b6aa68e74c85ad3fe50d26e653ecd408bc836abd8783fc18a3af919a5",
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 11,
+      "step_id": "d"
+    },
+    {
+      "attempt": 1,
+      "cost": {
+        "amount": "0",
+        "currency": "USD",
+        "pricing_snapshot_hash": null,
+        "units": []
+      },
+      "effects": [
+        {
+          "description": "",
+          "effect_class": "compute",
+          "external_ref": null
+        }
+      ],
+      "event_type": "step.completed",
+      "hash": "052d6804c1953b9c48c52464c6818224df204b78a6a5bf6b26eec4c8201a1bc4",
+      "idempotency_key": "871c6b28193a4661873b0732424992a8:d:0d891d0e440eadcbc7691a2ab5b2f8006740ef52d1c01a6769c816392f4b9ddd",
+      "occurred_at": "2026-09-17T09:19:23.601937Z",
+      "output_ref": {
+        "media_type": "application/json",
+        "sha256": "28515a78644dea2f8874ea613690a16336a9dc250b0af454e8c13d9700f1cfc8",
+        "size": 44
+      },
+      "parent_run_id": null,
+      "prev_hash": "980e8b9921d16ab638c62daee757cdba312ffc14851013e898a1b130c9335fdb",
+      "provenance": {
+        "executor": "aliased",
+        "executor_version": "golden",
+        "model_alias": "chat.fast",
+        "model_id": "model-B",
+        "prompt_hash": null
+      },
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 12,
+      "step_id": "d"
+    },
+    {
+      "event_type": "run.completed",
+      "hash": "bc2ae045aa8fc781a66a0a4c450fed31eaa1a80f6de985d8a4c03582d73546e6",
+      "occurred_at": "2026-09-17T09:19:23.601974Z",
+      "parent_run_id": null,
+      "prev_hash": "052d6804c1953b9c48c52464c6818224df204b78a6a5bf6b26eec4c8201a1bc4",
+      "run_id": "871c6b28193a4661873b0732424992a8",
+      "schema_version": 1,
+      "seq": 13
+    }
+  ],
+  "expected": {
+    "agent_versions": {
+      "greeter": 1,
+      "writer": 1
+    },
+    "approvals": {},
+    "attempts": {
+      "a": 1,
+      "b": 1,
+      "c": 1,
+      "d": 1
+    },
+    "cancel_requested": false,
+    "cancelled_steps": [],
+    "cost_ceiling": null,
+    "dead_lettered": {},
+    "ended_at": "2026-09-17T09:19:23.601974Z",
+    "error": null,
+    "failed_steps": {},
+    "id": "871c6b28193a4661873b0732424992a8",
+    "inputs": {},
+    "inputs_ref": {
+      "media_type": "application/json",
+      "sha256": "eef4862db6bef854041c8a257bb914df75d3d4c1338b26bddcb1e7c268107606",
+      "size": 18
+    },
+    "integrity_verified": 13,
+    "last_hash": "bc2ae045aa8fc781a66a0a4c450fed31eaa1a80f6de985d8a4c03582d73546e6",
+    "last_seq": 13,
+    "parent_run_id": null,
+    "pause_requested": false,
+    "pending_retries": {},
+    "progress": {
+      "a": 1.0,
+      "b": 1.0,
+      "c": 1.0,
+      "d": 1.0
+    },
+    "request_id": "golden-v0.7.0",
+    "started_at": "2026-09-17T09:19:23.599549Z",
+    "status": "completed",
+    "steps": [
+      {
+        "attempt": 1,
+        "cost": {
+          "amount": "0",
+          "currency": "USD",
+          "pricing_snapshot_hash": null,
+          "units": []
+        },
+        "effects": [
+          {
+            "description": "",
+            "effect_class": "compute",
+            "external_ref": null
+          }
+        ],
+        "finished_at": "2026-09-17T09:19:23.601282Z",
+        "node_id": "a",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "4b59167ad9045adad249b6c5a8d5d9bc246efc3c907a37a84a14a83bd1beb68b",
+          "size": 44
+        },
+        "provenance": {
+          "executor": "aliased",
+          "executor_version": "golden",
+          "model_alias": "chat.fast",
+          "model_id": "model-A",
+          "prompt_hash": null
+        }
+      },
+      {
+        "attempt": 1,
+        "cost": {
+          "amount": "0",
+          "currency": "USD",
+          "pricing_snapshot_hash": null,
+          "units": []
+        },
+        "effects": [
+          {
+            "description": "echo",
+            "effect_class": "compute",
+            "external_ref": null
+          }
+        ],
+        "finished_at": "2026-09-17T09:19:23.601696Z",
+        "node_id": "b",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "d3f31118b3f0dbfc58fc721e48feffc5e6970634ae591b3af1193d4394866e40",
+          "size": 121
+        },
+        "provenance": {
+          "executor": "echo",
+          "executor_version": "0.3.0",
+          "model_alias": null,
+          "model_id": null,
+          "prompt_hash": null
+        }
+      },
+      {
+        "attempt": 1,
+        "cost": {
+          "amount": "0",
+          "currency": "USD",
+          "pricing_snapshot_hash": null,
+          "units": []
+        },
+        "effects": [
+          {
+            "description": "echo",
+            "effect_class": "compute",
+            "external_ref": null
+          }
+        ],
+        "finished_at": "2026-09-17T09:19:23.601754Z",
+        "node_id": "c",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "d3f31118b3f0dbfc58fc721e48feffc5e6970634ae591b3af1193d4394866e40",
+          "size": 121
+        },
+        "provenance": {
+          "executor": "echo",
+          "executor_version": "0.3.0",
+          "model_alias": null,
+          "model_id": null,
+          "prompt_hash": null
+        }
+      },
+      {
+        "attempt": 1,
+        "cost": {
+          "amount": "0",
+          "currency": "USD",
+          "pricing_snapshot_hash": null,
+          "units": []
+        },
+        "effects": [
+          {
+            "description": "",
+            "effect_class": "compute",
+            "external_ref": null
+          }
+        ],
+        "finished_at": "2026-09-17T09:19:23.601937Z",
+        "node_id": "d",
+        "output": {},
+        "output_ref": {
+          "media_type": "application/json",
+          "sha256": "28515a78644dea2f8874ea613690a16336a9dc250b0af454e8c13d9700f1cfc8",
+          "size": 44
+        },
+        "provenance": {
+          "executor": "aliased",
+          "executor_version": "golden",
+          "model_alias": "chat.fast",
+          "model_id": "model-B",
+          "prompt_hash": null
+        }
+      }
+    ],
+    "substitutions": [
+      {
+        "agent": "writer",
+        "at": "2026-09-17T09:19:23.601843Z",
+        "from_model": "model-A",
+        "reason": "executor 'aliased' now resolves agent 'writer' to 'model-B' (was 'model-A')",
+        "step_id": "d",
+        "to_model": "model-B"
+      }
+    ],
+    "total_cost": "0",
+    "workflow": "diamond",
+    "workflow_version": 1
+  },
+  "label": "v0.7.0"
+}

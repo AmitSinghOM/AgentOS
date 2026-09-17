@@ -75,7 +75,7 @@ engine = Engine(store=store, blobs=store, executors=executors,
                 lease=store if hasattr(store, "acquire") else None, observers=observers,
                 snapshot_every=snapshot_every_from_env())
 
-app = FastAPI(title="AgentOS", version="0.6.0")
+app = FastAPI(title="AgentOS", version="0.7.0")
 
 
 @app.exception_handler(RequestValidationError)
