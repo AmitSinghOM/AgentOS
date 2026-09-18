@@ -318,27 +318,56 @@ replay instead of code replay, and verified derived state — are exactly the on
 hard to retrofit, and are the reason to keep the core as it is rather than chase the
 feature table. Full comparison and the mentor read: `Study/AGENTOS_LANDSCAPE.md` §5.
 
-## Phase 7 — Streaming + inner harness  ·  ~1-2 weekends
+## Phase 7 — Streaming + inner harness  ·  ~1-2 weekends  ·  ✅ shipped `v0.8.0-watchable` (2026-09-18)
 **Goal:** a pilot evaluator can watch a run live from any process, and can run the agent
-SDK they already use as a step, governed by AgentOS's gate, cost meter and log.
+SDK they already use as a step, governed by AgentOS's gate, cost meter and log. **Met:**
+the stream is a consumer of the log (verified through separate API and worker processes,
+resume via `Last-Event-ID`); an OpenAI Agents SDK agent runs as one governed step and a
+`spend`-declaring step is suspended before the SDK is ever invoked.
 
-- [ ] **Run stream** `GET /runs/{id}/stream` (SSE): a *consumer of the log*, like the
+- [x] **Run stream** `GET /runs/{id}/stream` (SSE, [#44](https://github.com/AmitSinghOM/AgentOS/pull/44), `agentos/api/stream.py`): a *consumer of the log*, like the
   observers — the API polls `read_events(after_seq)` so it works from any process with no
-  in-memory subscription map (mastra #19252 / C6); `Last-Event-ID` = `seq` for resume;
-  closes on the terminal event; keep-alive comments; poll interval and max duration from
-  env. Event-level, not token-level: token deltas need an executor hook and are a ⏭ item
-- [ ] **Inner-harness executor** `agentos-provider-openai-agents` (`providers/openai-agents/`):
-  runs an OpenAI Agents SDK agent as one AgentOS step. Tools the SDK agent may call are
-  restricted to those whose effect class the AgentOS agent *declared*; tool calls and
-  usage land in provenance/cost; a step declaring `approval_required_for` classes is gated
-  before dispatch by the existing tier-2 gate (whole-step granularity). Tested against a
-  fake `Model` (the SDK's own test pattern), no network; live path via Ollama's
-  OpenAI-compatible endpoint. ⏭ mid-step suspension on the SDK's `needs_approval`
-  interruptions (requires persisting `RunState` as a blob and a resume protocol)
+  in-memory subscription map (mastra #19252 / C6); `id` = `seq`, `Last-Event-ID` / `?after=` resume;
+  closes on the terminal event (also when the resume point is already at/past it — a client
+  resuming at the terminal seq would otherwise wait out the full bound, caught in test);
+  keep-alive comments every `AGENTOS_STREAM_KEEPALIVE_SECONDS`; `AGENTOS_STREAM_POLL_SECONDS`,
+  `AGENTOS_STREAM_MAX_SECONDS` (3600) from env; `data` is byte-identical to `/events`
+  (`ensure_ascii=False`, pinned with a non-ASCII fixture). Event-level, not token-level
+- [x] **Inner-harness executor** `agentos-provider-openai-agents` ([#45](https://github.com/AmitSinghOM/AgentOS/pull/45), `providers/openai-agents/`):
+  runs an OpenAI Agents SDK agent as one AgentOS step — the SDK owns the loop, AgentOS owns
+  the gate, cost and log. Tools are operator-registered Python (`agentos.openai_agents_tools`
+  entry point), each with an effect class; the model is offered only tools whose class the
+  AgentOS agent *declared* (the rest withheld and listed in the output); tool calls and usage
+  land in provenance/cost; a step declaring `spend` is suspended before dispatch by the
+  existing tier-2 gate (proven through the core: `run.started, approval.requested,
+  run.suspended`, no `step.started`). Each step runs on its own `asyncio.run` loop and closes
+  its `AsyncOpenAI` client in `finally` (review finding: `Runner.run_sync` leaves the thread
+  loop and pool open). SDK `needs_approval` interruptions raise, never auto-approve. Tested
+  against the SDK's `ScriptedModel` (no network); live via Ollama; core forbids importing `agents`
+- [x] **Boundary echo fix** ([#46](https://github.com/AmitSinghOM/AgentOS/pull/46)): `DATA_BOUNDARY` is appended last, so a small model at
+  temperature 0 completed it as the task — `qwen2.5:0.5b` returned the boundary sentence as
+  its "poem" for 7/20 topics incl. the quickstart's default. Framed as "Note on the input
+  format: …" → 1/20; measured by `scripts/probe_boundary_echo.py`, frame pinned by
+  `tests/test_trust_boundary.py`, cassettes re-recorded live
 - [ ] ⏭ Token-level streaming via a `progress(fraction, note)`-style executor hook
+- [ ] ⏭ Mid-step suspension on the SDK's `needs_approval` interruptions (requires
+  persisting `RunState` as a blob and a resume protocol)
 - [ ] ⏭ PydanticAI inner harness (same shape as the above once it exists)
 
 **Tag:** `v0.8.0-watchable`. **Post:** "The Stream Is the Log."
+
+**Carry-forward decision (2026-09-18).** Both goal items shipped in the shape the landscape
+check asked for. Token-level streaming is deferred because it needs an executor hook that
+every provider would have to implement, and the current consumers (the quickstart's
+`curl -N`, an evaluator polling a run) are served by event-level frames. Mid-step
+suspension is deferred because the honest version needs the SDK's `RunState` persisted as
+a blob plus a resume protocol; raising on interruption is the safe default until then. The
+Phase 6 ⏭ items (A8, A11, A12, A7) are unchanged.
+
+**What I'd do differently:** run the small-model quickstart under a *topic sweep*, not one
+topic, when the C12 boundary shipped in Phase 5. The echo only shows on topics near the
+boundary's own vocabulary; "the sea" would never have caught it, "event logs" did — and it
+was the default the whole time.
 
 ## Phase 8 — UI (optional)  ·  ~2 weekends
 **Goal:** a visual the recruiter screenshot remembers. Plays to frontend strength.

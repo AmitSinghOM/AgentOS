@@ -163,7 +163,7 @@ See [ROADMAP.md](./ROADMAP.md).
 | 4 · Providers + DX | OpenAI-compatible + Anthropic plugins, aliases, cassettes, 5-minute quickstart | ✅ `v0.5.0-providers` |
 | 5 · Trust boundary + polish | C12: strict control payloads, tamper-evident log, inputs as data; screenshots | ✅ `v0.6.0-trusted` |
 | 6 · Tools, snapshots, survey close-out | `tool` agent, verified snapshots + migrations, all 15 `landscape-con` issues closed with tests | ✅ `v0.7.0-complete` |
-| 7 · Streaming + inner harness | `GET /runs/{id}/stream` (SSE over the log), OpenAI Agents SDK as a governed step | ⚪ in progress |
+| 7 · Streaming + inner harness | `GET /runs/{id}/stream` (SSE over the log), OpenAI Agents SDK as a governed step | ✅ `v0.8.0-watchable` |
 | 8 · UI (optional) | React run visualizer over the event log | ⚪ planned |
 
 Phases 1–3 are scoped against a survey of what the popular agent runtimes get wrong
@@ -180,6 +180,7 @@ Each phase produces an article on a distributed-systems problem solved here:
 - Providers Are Plugins
 - Three Doors: Where Untrusted Bytes Meet an Agent Engine
 - Snapshots That Are Never the Truth
+- The Stream Is the Log
 
 (See [`docs/blog/`](./docs/blog).)
 
