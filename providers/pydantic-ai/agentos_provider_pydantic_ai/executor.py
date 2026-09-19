@@ -40,7 +40,7 @@ from typing import Any
 
 import httpx
 import openai
-from pydantic_ai import Agent, Tool, UsageLimits
+from pydantic_ai import Agent, PromptedOutput, StructuredDict, Tool, UsageLimits
 from pydantic_ai.exceptions import (
     AgentRunError,
     ModelAPIError,
@@ -68,6 +68,7 @@ from agentos.providerkit.errors import (
 )
 from agentos.providerkit.pricing import PricingTable
 from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, strip_fences, wrap_input
+from agentos.providerkit.schema import OutputSchema
 from agentos.providerkit.tools import ToolRegistry, ToolSpec, load_registry
 
 from .config import from_env
@@ -140,18 +141,21 @@ class PydanticAIExecutor:
     def execute(self, req: StepRequest, progress: ProgressFn) -> StepResult:
         cfg = req.agent.config
         model_id, alias = self.config.resolve(cfg.get("model", "chat.default"))
+        schema = OutputSchema.from_config(cfg)          # definition error here, not mid-run
         instructions, user = self._prompt(cfg, req.inputs)
         offered, withheld = self.registry.select(cfg.get("tools", []), req.declared_effects)
         by_name = {s.name: s for s in offered}
         prompt_hash = hashlib.sha256(json.dumps(
-            {"instructions": instructions, "input": user, "tools": sorted(by_name)},
+            {"instructions": instructions, "input": user, "tools": sorted(by_name),
+             "output_schema": schema.prompt_hash_input() if schema else None},
             sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
         tools = [Tool(s.fn, name=s.name, description=s.description) for s in offered]
         max_turns = int(cfg.get("max_turns", DEFAULT_MAX_TURNS))
         progress(0.0, f"pydantic-ai run model={model_id} tools={sorted(by_name)} "
-                      f"max_turns={max_turns}")
-        result = self._run_sdk(req.agent.name, instructions, tools, cfg, user, max_turns, model_id)
+                      f"max_turns={max_turns}" + (" typed_output" if schema else ""))
+        result = self._run_sdk(req.agent.name, instructions, tools, cfg, user, max_turns,
+                               model_id, schema)
 
         if isinstance(result.output, DeferredToolRequests):
             names = sorted({c.tool_name for c in [*result.output.approvals, *result.output.calls]})
@@ -172,7 +176,7 @@ class PydanticAIExecutor:
                       f"{in_tok}+{out_tok} tokens, {cost.amount} {cost.currency}")
 
         text = result.output if isinstance(result.output, str) \
-            else json.dumps(result.output, default=str)
+            else json.dumps(result.output, default=str, ensure_ascii=False)
         output: dict[str, Any] = {
             "text": text, "model": model_id, "turns": int(usage.requests),
             "tool_calls": calls,
@@ -181,7 +185,14 @@ class PydanticAIExecutor:
         }
         if alias:
             output["alias"] = alias
-        if cfg.get("json_output"):
+        if schema is not None:
+            # PromptedOutput already parsed the reply into a dict (retrying the model on
+            # non-JSON, within max_turns); the CONTRACT is enforced here, once, by the kit.
+            value = result.output if isinstance(result.output, dict) \
+                else json.loads(strip_fences(text))
+            output["json"] = schema.validate(value)
+            output["schema_sha256"] = schema.sha256
+        elif cfg.get("json_output"):
             try:
                 output["json"] = json.loads(strip_fences(text))
             except ValueError as exc:
@@ -218,18 +229,30 @@ class PydanticAIExecutor:
         return instructions, user
 
     def _run_sdk(self, name: str, instructions: str, tools: list[Tool], cfg: dict, user: str,
-                 max_turns: int, model_id: str):
+                 max_turns: int, model_id: str, schema: OutputSchema | None = None):
         """One fresh event loop per step (`asyncio.run`): the model client is created,
         used and CLOSED inside it, so a long-lived worker thread accumulates no open
         connection pools (same discipline as the openai-agents provider, where a review
-        found the SDK's sync helper leaves the thread's loop — and its pools — open)."""
+        found the SDK's sync helper leaves the thread's loop — and its pools — open).
+
+        With an `output_schema`, the model is told the schema through `PromptedOutput`
+        (works on any chat backend, no tool calling needed) and PydanticAI parses the reply
+        into a dict, retrying the model on non-JSON within `max_turns`; PydanticAI's
+        `StructuredDict` validates only "is an object", so the executor validates the
+        contract itself afterwards."""
+        if schema is not None:
+            typed = StructuredDict(dict(schema.schema))
+            output_type: list = [PromptedOutput(typed), DeferredToolRequests]
+        else:
+            output_type = [str, DeferredToolRequests]
+
         async def _arun():
             made = self._model_factory(model_id)
             model, client = made if isinstance(made, tuple) else (made, None)
             try:
                 agent = Agent(
                     model, name=name, instructions=instructions, tools=tools,
-                    output_type=[str, DeferredToolRequests],
+                    output_type=output_type,
                     model_settings={"temperature": cfg.get("temperature", 0)},
                 )
                 return await self._run(agent, user,

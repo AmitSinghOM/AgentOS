@@ -12,6 +12,10 @@ extra (httpx).
     prompt     `{run.topic}` / `{step.field}` templates over step inputs
     config     env → ProviderConfig with a per-provider prefix
     tools      the operator tool registry every inner harness offers from (`agentos.tools`)
+    schema     typed structured output: `config.output_schema` validated once for every harness
+               (imported lazily — it needs `jsonschema`, and `agentos.agents.tool` imports
+               `providerkit.prompt` on a bare `agentos` install; a worker without the
+               providerkit extra must still start — caught by the chaos kill-9 test in CI)
 """
 from agentos.providerkit.config import ConfigError, ProviderConfig, config_from_env
 from agentos.providerkit.errors import (
@@ -42,12 +46,15 @@ __all__ = [
     "AuthenticationFailed",
     "BadResponse",
     "ConfigError",
+    "InvalidOutputSchema",
     "ModelNotFound",
+    "OutputSchema",
     "ProviderConfig",
     "ProviderError",
     "ProviderRateLimited",
     "ProviderServerError",
     "ProviderUnreachable",
+    "SchemaViolation",
     "TemplateError",
     "ToolRegistry",
     "ToolSpec",
@@ -59,3 +66,14 @@ __all__ = [
     "strip_fences",
     "wrap_input",
 ]
+
+_LAZY = {"InvalidOutputSchema", "OutputSchema", "SchemaViolation"}
+
+
+def __getattr__(name: str):
+    """`agentos.providerkit.OutputSchema` etc. resolve on first use so importing the kit
+    (which the built-in `tool` executor does for `render_prompt`) never requires `jsonschema`."""
+    if name in _LAZY:
+        from agentos.providerkit import schema as _schema
+        return getattr(_schema, name)
+    raise AttributeError(f"module 'agentos.providerkit' has no attribute {name!r}")

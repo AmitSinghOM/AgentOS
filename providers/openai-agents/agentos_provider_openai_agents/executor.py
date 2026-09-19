@@ -61,8 +61,10 @@ from agentos.providerkit.errors import (
 )
 from agentos.providerkit.pricing import PricingTable
 from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, strip_fences, wrap_input
+from agentos.providerkit.schema import OutputSchema
 
 from .config import from_env
+from .output_schema import KitOutputSchema
 from .tools import ToolRegistry, ToolSpec, load_registry
 
 NAME = "openai-agents"
@@ -133,19 +135,22 @@ class OpenAIAgentsExecutor:
     def execute(self, req: StepRequest, progress: ProgressFn) -> StepResult:
         cfg = req.agent.config
         model_id, alias = self.config.resolve(cfg.get("model", "chat.default"))
+        schema = OutputSchema.from_config(cfg)          # definition error here, not mid-run
         instructions, user = self._prompt(cfg, req.inputs)
         offered, withheld = self.registry.select(cfg.get("tools", []), req.declared_effects)
         by_name = {s.name: s for s in offered}
         prompt_hash = hashlib.sha256(json.dumps(
-            {"instructions": instructions, "input": user, "tools": sorted(by_name)},
+            {"instructions": instructions, "input": user, "tools": sorted(by_name),
+             "output_schema": schema.prompt_hash_input() if schema else None},
             sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
         tools = [function_tool(s.fn, name_override=s.name, description_override=s.description)
                  for s in offered]
         max_turns = int(cfg.get("max_turns", DEFAULT_MAX_TURNS))
         progress(0.0, f"agents-sdk run model={model_id} tools={sorted(by_name)} "
-                      f"max_turns={max_turns}")
-        result = self._run_sdk(req.agent.name, instructions, tools, cfg, user, max_turns, model_id)
+                      f"max_turns={max_turns}" + (" typed_output" if schema else ""))
+        result = self._run_sdk(req.agent.name, instructions, tools, cfg, user, max_turns,
+                               model_id, schema)
 
         if result.interruptions:
             names = sorted({i.raw_item.name for i in result.interruptions
@@ -166,7 +171,7 @@ class OpenAIAgentsExecutor:
                       f"{in_tok}+{out_tok} tokens, {cost.amount} {cost.currency}")
 
         text = result.final_output if isinstance(result.final_output, str) \
-            else json.dumps(result.final_output, default=str)
+            else json.dumps(result.final_output, default=str, ensure_ascii=False)
         output: dict[str, Any] = {
             "text": text, "model": model_id, "turns": int(usage.requests),
             "tool_calls": calls,
@@ -175,7 +180,16 @@ class OpenAIAgentsExecutor:
         }
         if alias:
             output["alias"] = alias
-        if cfg.get("json_output"):
+        if schema is not None:
+            # The SDK already ran the reply through `KitOutputSchema.validate_json` (a
+            # violation surfaced as ModelBehaviorError → BadResponse); final_output IS the
+            # validated dict. Validate once more here so the value stored is provably the
+            # one the contract accepted, whatever the run function was.
+            value = result.final_output if isinstance(result.final_output, dict) \
+                else json.loads(strip_fences(text))
+            output["json"] = schema.validate(value)
+            output["schema_sha256"] = schema.sha256
+        elif cfg.get("json_output"):
             try:
                 output["json"] = json.loads(strip_fences(text))
             except ValueError as exc:
@@ -212,17 +226,24 @@ class OpenAIAgentsExecutor:
         return instructions, user
 
     def _run_sdk(self, name: str, instructions: str, tools: list, cfg: dict, user: str,
-                 max_turns: int, model_id: str):
+                 max_turns: int, model_id: str, schema: OutputSchema | None = None):
         """One fresh event loop per step (`asyncio.run`): the model client is created,
         used and CLOSED inside it, so a long-lived worker thread accumulates no open
         connection pools (a review found `Runner.run_sync` deliberately leaves the
-        thread's loop — and anything bound to it — open after the run)."""
+        thread's loop — and anything bound to it — open after the run).
+
+        With an `output_schema`, the SDK sends it to the model as `response_format` and
+        validates the reply through `KitOutputSchema` (the kit's validator), so the
+        contract is one implementation on both harnesses."""
+        output_type = KitOutputSchema(schema) if schema is not None else None
+
         async def _arun():
             made = self._model_factory(model_id)
             model, client = made if isinstance(made, tuple) else (made, None)
             try:
                 sdk_agent = Agent(
                     name=name, instructions=instructions, model=model, tools=tools,
+                    output_type=output_type,
                     model_settings=ModelSettings(temperature=cfg.get("temperature", 0)),
                 )
                 return await self._run(sdk_agent, user, max_turns=max_turns,

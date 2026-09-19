@@ -84,6 +84,11 @@ def test_examples_are_valid_definitions():
         a = json.loads((EXAMPLES / f).read_text())
         assert a["type"] == "llm" and a["executor"] == "openai-compat"
         assert a["config"]["model"] == "chat.fast"
+    typed = json.loads((EXAMPLES / "critic_typed_agent.json").read_text())
+    assert typed["name"] == "critic" and typed["version"] == 2       # v1 stays registered
+    assert typed["config"]["output_schema"]["type"] == "object"
+    from agentos.providerkit.schema import OutputSchema
+    OutputSchema.parse(typed["config"]["output_schema"])           # a usable contract
     wf = json.loads((EXAMPLES / "haiku_workflow.json").read_text())
     assert [n["id"] for n in wf["nodes"]] == ["write", "review"]
 
@@ -152,6 +157,51 @@ def test_same_agents_run_on_the_pydantic_ai_inner_harness(monkeypatch):
     assert write["output"]["turns"] == 1 and write["output"]["tool_calls"] == []
     assert review["output"]["json"] == {"score": 4, "reason": "terse"}
     assert run["total_cost"] == "0"
+
+
+def test_typed_critic_runs_on_the_inner_harness(monkeypatch):
+    """docs/quickstart-llm.md §6b "Typed output": `examples/critic_typed_agent.json` (critic
+    v2 with an `output_schema`) through the real API and engine on the pydantic-ai harness.
+    The scripted model first returns a well-formed reply that VIOLATES the schema (score 9);
+    the kit rejects it, the step fails with the path, the node's retry policy re-runs it,
+    and the second reply satisfies the contract — `json` plus `schema_sha256` on the log."""
+    pytest.importorskip("agentos_provider_pydantic_ai")
+    from agentos_provider_pydantic_ai import executor as pai
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    critic_replies = iter(['{"score": 9, "reason": "off the scale"}',
+                           '{"score": 4, "reason": "terse"}'])
+
+    def scripted(messages, info):
+        user = str(messages[-1].parts[-1].content)
+        if "Rate this haiku" in user:
+            return ModelResponse(parts=[TextPart(next(critic_replies))])
+        return ModelResponse(parts=[TextPart("logs of events, / past and present, / time flows.")])
+
+    monkeypatch.setattr(pai.PydanticAIExecutor, "_default_model",
+                        lambda self, model_id: FunctionModel(scripted, model_name=model_id))
+    monkeypatch.setenv("AGENTOS_STORE", "memory")
+    from agentos.api import main
+    importlib.reload(main)
+    c = TestClient(main.app)
+    poet = json.loads((EXAMPLES / "poet_agent.json").read_text())
+    poet["executor"] = "pydantic-ai"
+    assert c.post("/agents", json=poet).status_code == 201
+    _post_json(c, "/agents", "critic_typed_agent.json")            # critic v2, as documented
+    wf = json.loads((EXAMPLES / "haiku_workflow.json").read_text())
+    wf["nodes"][1]["agent_version"] = 2
+    assert c.post("/workflows", json=wf).status_code == 201
+    run = c.post("/workflows/haiku/runs?sync=true", json={"inputs": {"topic": "event logs"}}).json()
+    assert run["status"] == "completed", run["error"]
+    _write, review = run["steps"]
+    assert review["output"]["json"] == {"score": 4, "reason": "terse"}
+    assert len(review["output"]["schema_sha256"]) == 64
+    assert review["attempt"] == 2                                   # the violation cost one attempt
+    records = c.get(f"/runs/{run['id']}/events").json()["data"]
+    failed = [r for r in records if r["event_type"] == "step.failed"]
+    assert len(failed) == 1
+    assert "violates output_schema at $.score" in json.dumps(failed[0])
 
 
 def test_research_example_fetch_then_poet(monkeypatch):

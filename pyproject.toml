@@ -26,7 +26,7 @@ observability = [
 ]
 # Shared toolkit for provider plugins (agentos.providerkit): cassettes, pricing, errors,
 # prompt templates. The core never imports it; the agentos-provider-* distributions do.
-providerkit = ["httpx>=0.27"]
+providerkit = ["httpx>=0.27", "jsonschema>=4.20,<5"]
 
 [tool.ruff]
 line-length = 100
@@ -70,6 +70,7 @@ forbidden_modules = [
     "openai", "anthropic", "boto3", "botocore",
     "opentelemetry", "prometheus_client",
     "httpx", "agentos_provider_openai_compat",   # providers are plugins (§2.2)
+    "jsonschema", "referencing",                  # typed output lives in the kit, not the core
     "agents", "agentos_provider_openai_agents",  # the inner harnesses are plugins too
     "pydantic_ai", "agentos_provider_pydantic_ai",
 ]

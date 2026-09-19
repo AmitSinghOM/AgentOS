@@ -1,0 +1,19 @@
+{
+  "name": "critic",
+  "version": 2,
+  "type": "llm",
+  "executor": "pydantic-ai",
+  "config": {
+    "model": "chat.fast",
+    "prompt": "Rate this haiku from 1 to 5 and say why:\n\n{write.text}",
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "score": {"type": "integer", "minimum": 1, "maximum": 5},
+        "reason": {"type": "string", "minLength": 1}
+      },
+      "required": ["score", "reason"],
+      "additionalProperties": false
+    }
+  }
+}

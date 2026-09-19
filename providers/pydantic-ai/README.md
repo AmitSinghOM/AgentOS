@@ -34,7 +34,8 @@ Zero-config default: PydanticAI's OpenAI-compatible chat model against a local O
 
 `instructions` (or `system`), `prompt` with `{dotted.inputs}`, `model` (alias or id),
 `tools` (registered names), `max_turns` (default 6; PydanticAI's `UsageLimits.request_limit`),
-`temperature`, `json_output`. Identical to the openai-agents provider's keys on purpose.
+`temperature`, `json_output`, `output_schema` (below). Identical to the openai-agents
+provider's keys on purpose.
 
 ## Where the seam is
 
@@ -70,10 +71,20 @@ offered tool names.
   mean persisting the message history as a blob and a resume protocol. Until then, gate at
   step granularity (declare the class), do not mark registry tools `requires_approval`, and
   a run that comes back deferred **raises** rather than approving on the operator's behalf.
-- **Typed structured output** (`output_type=YourModel`) — the thing PydanticAI does best,
-  but it needs a schema in agent JSON and a validation-failure policy. `json_output`
-  behaves exactly as on the other executors for now.
 - Token-level streaming into `progress()`; MCP toolsets as registry entries.
+
+## Typed output (`output_schema`)
+
+Replace `json_output: true` with a JSON Schema object under `config.output_schema` and the
+step's `json` is guaranteed to satisfy it, or the step fails naming the first violation
+(`reply violates output_schema at $.score: 9 is greater than the maximum of 5`). The
+schema reaches the model through `PromptedOutput(StructuredDict(schema))` — it works on any
+chat backend, no tool calling needed — and PydanticAI retries the model on non-JSON within
+`max_turns`. PydanticAI's `StructuredDict` validates only "is a JSON object", so the CONTRACT
+is enforced by `agentos.providerkit.schema`, the same code the openai-agents harness uses, and
+its SHA-256 lands on `step.completed` as `schema_sha256`. Draft 2020-12; root must be `type:
+object`; remote `$ref`s are refused at first use (no fetch); `format` is never enforced
+(reproducible verdicts). The schema is part of `prompt_hash`.
 
 PydanticAI's own instrumentation (Logfire / OpenTelemetry) is opt-in and is never enabled
 here; the worker's observers remain the only telemetry path.

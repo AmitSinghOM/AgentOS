@@ -364,6 +364,16 @@ resume via `Last-Event-ID`); an OpenAI Agents SDK agent runs as one governed ste
   effects on the same scripted trajectory — a workflow switches harness by changing
   `executor`. Tested against PydanticAI's `FunctionModel` (no network); live via Ollama; core
   forbids importing `pydantic_ai`
+- [x] **Typed output** `config.output_schema` on both inner harnesses: a JSON Schema object in
+  agent config (definition, never input), shown to the model by each SDK (PydanticAI
+  `PromptedOutput(StructuredDict)`, Agents SDK `response_format` via an `AgentOutputSchemaBase`
+  adapter) and ENFORCED once by `agentos.providerkit.schema` — neither SDK validates the
+  contract itself (`StructuredDict` checks only "is an object"). Valid → `output["json"]` +
+  `schema_sha256` on `step.completed`; violation → `BadResponse` naming the path, the node's
+  retry policy decides (proven through the API: violation, `step.failed`, attempt 2 satisfies).
+  Draft 2020-12, root `type: object`, remote `$ref` refused (no fetch), `format` not enforced
+  (reproducible), schema in `prompt_hash`. `jsonschema` in the `providerkit` extra only; core
+  forbidden list gains it. Example `examples/critic_typed_agent.json`
 
 **Tag:** `v0.8.0-watchable`; `v0.8.1` adds the PydanticAI harness and the shared tool registry (#48). **Post:** "The Stream Is the Log."
 
