@@ -71,7 +71,9 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
 
   // time travel: the state at `at` is the server's fold of the log prefix (?at=k); we never fold here
   useEffect(() => {
-    if (at === null) { setAtRun(null); setAtError(null); return; }
+    setAtRun(null);                 // never show another seq's state under this seq's banner
+    setAtError(null);
+    if (at === null) return;
     let alive = true;
     api.runAt<RunState>(runId, at)
       .then((r) => { if (alive) { setAtRun(r); setAtError(null); } })
@@ -133,7 +135,7 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
   if (error && !run) return <p role="alert" className="error">Could not load run: {error}</p>;
   if (!run) return <p>Loading…</p>;
 
-  const shown = at !== null && atRun ? atRun : run;      // what the graph and panel render
+  const shown = at === null ? run : atRun;      // live fold, or the SERVER's fold through `at`
 
   const pending = Object.values(run.approvals).filter((a) => a.status === "pending").length;
   const versionMismatch = def !== null && def.version !== run.workflow_version;
@@ -169,8 +171,9 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
       </header>
 
       {atError && <p role="alert" className="error">Could not load state at seq {at}: {atError}</p>}
-      {def && <Graph def={def} run={shown} />}
-      {def && <CostPanel def={def} run={shown} events={at !== null ? events.filter((e) => e.seq <= at) : events} />}
+      {def && shown && <Graph def={def} run={shown} />}
+      {def && shown && <CostPanel def={def} run={shown} events={at !== null ? events.filter((e) => e.seq <= at) : events} />}
+      {def && !shown && !atError && <p role="status" aria-label="seek state">Loading the state at seq {at}…</p>}
       <Timeline events={events} lastSeq={run.last_seq} at={at} onSeek={setAt} />
 
       <h3>Live frames</h3>

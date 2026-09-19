@@ -104,6 +104,10 @@ describe("time travel", () => {
     const { fireEvent } = await import("@testing-library/react");
     fireEvent.change(screen.getByRole("slider", { name: "time travel scrubber" }), { target: { value: "5" } });
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load state at seq 5: 422 at must be within 1..6");
+    // no state could be loaded for seq 5, so no graph is drawn — never the live state under a wrong banner
+    expect(screen.queryByRole("img", { name: /run graph/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Back to live" }));
+    await screen.findByRole("img", { name: /run graph/ });
     expect(label("b")).toBe("b: completed");
   });
 });
