@@ -40,7 +40,7 @@ from agentos.providerkit.errors import (
     server_message,
 )
 from agentos.providerkit.pricing import PricingTable
-from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, wrap_input
+from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, strip_fences, wrap_input
 
 from .config import api_version, from_env
 
@@ -145,7 +145,7 @@ class AnthropicExecutor:
             output["alias"] = alias
         if cfg.get("json_output"):
             try:
-                output["json"] = json.loads(_strip_fences(text))
+                output["json"] = json.loads(strip_fences(text))
             except ValueError as exc:
                 raise BadResponse(f"json_output requested but {served_model} returned "
                                   f"non-JSON: {text[:120]!r}") from exc
@@ -238,13 +238,3 @@ class AnthropicExecutor:
                     "https://api.anthropic.com with ANTHROPIC_API_KEY.")
         return ("Check AGENTOS_ANTHROPIC_BASE_URL (no /v1 suffix — the path is /v1/messages) "
                 "and that the server is up.")
-
-
-def _strip_fences(text: str) -> str:
-    """Small models wrap JSON in ```json fences even when told not to."""
-    t = text.strip()
-    if t.startswith("```"):
-        t = t.split("\n", 1)[1] if "\n" in t else t[3:]
-        if t.rstrip().endswith("```"):
-            t = t.rstrip()[:-3]
-    return t.strip()

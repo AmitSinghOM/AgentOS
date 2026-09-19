@@ -22,7 +22,6 @@ from agentos_provider_anthropic import (
     TemplateError,
     from_env,
 )
-from agentos_provider_anthropic.executor import _strip_fences
 
 from agentos.providerkit.cassette import CassetteMiss
 from agentos.providerkit.conformance import (
@@ -31,6 +30,7 @@ from agentos.providerkit.conformance import (
     quickstart_requests,
     request_for,
 )
+from agentos.providerkit.prompt import strip_fences as _strip_fences
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))

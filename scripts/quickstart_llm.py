@@ -36,7 +36,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--topic", default="event logs")
     p.add_argument("--sync", action="store_true", help="run in the API process (no worker)")
     p.add_argument("--executor", default="openai-compat",
-                   help="which registered executor the example agents use (openai-compat | anthropic)")
+                   help="which registered executor the example agents use "
+                        "(openai-compat | anthropic | openai-agents | pydantic-ai)")
     a = p.parse_args(argv)
 
     # 3. check what can run

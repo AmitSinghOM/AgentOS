@@ -44,7 +44,7 @@ flowchart TD
     API -->|append run.started, enqueue| PG[(PostgreSQL or SQLite<br/>event log · queue · leases · blobs)]
     PG --> W[Worker<br/>fenced lease, wave scheduler]
     W --> EXEC[Executors]
-    EXEC --> PROV[Provider plugins<br/>openai-compat · anthropic · openai-agents]
+    EXEC --> PROV[Provider plugins<br/>openai-compat · anthropic · openai-agents · pydantic-ai]
     EXEC --> TOOL[tool<br/>HTTP · subprocess]
     W -->|append events| PG
     PG -.observers derive.-> OTEL[OpenTelemetry → Jaeger]

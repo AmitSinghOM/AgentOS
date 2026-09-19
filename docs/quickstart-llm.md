@@ -147,6 +147,18 @@ agent *declared*; a step declaring `spend` or `write_external` is suspended for 
 before the SDK ever runs. `tool_calls`, `tools_withheld`, `turns` and the SDK's summed
 token usage land on `step.completed`. Details in `providers/openai-agents/README.md`.
 
+A fourth executor, `pydantic-ai`, does the same with a **PydanticAI** agent — same tool
+registry, same config keys, same output shape, so the only edit is the executor name:
+
+```bash
+pip install -e providers/pydantic-ai    # then restart the API and worker
+sed 's/"openai-compat"/"pydantic-ai"/' examples/poet_agent.json > /tmp/poet.json
+```
+
+Two inner harnesses sharing one seam is the point: the tools an operator registers once
+(`agentos.tools` entry point) are offered by either, under the same declared-effects gate.
+Details in `providers/pydantic-ai/README.md`.
+
 ## 7. A tool step before the model (optional)
 
 The built-in `tool` executor calls an HTTP API or runs a program as a step, under the same
