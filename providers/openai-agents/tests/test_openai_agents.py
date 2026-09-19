@@ -211,6 +211,47 @@ def test_describe_and_health_report_without_a_server():
     assert h["reachable"] is False and "error" in h
 
 
+# --------------------------------------------------------------- typed structured output
+CRITIQUE = {"type": "object",
+            "properties": {"score": {"type": "integer", "minimum": 1, "maximum": 5},
+                           "reason": {"type": "string"}},
+            "required": ["score", "reason"], "additionalProperties": False}
+
+
+def test_output_schema_is_sent_to_the_model_and_the_validated_reply_lands_in_json():
+    ex, model = executor([[assistant_message('{"score": 4, "reason": "terse"}')]])
+    res = ex.execute(request({"output_schema": CRITIQUE, "prompt": "Rate {run.topic}"}),
+                     noop_progress)
+    assert res.output["json"] == {"score": 4, "reason": "terse"}
+    assert len(res.output["schema_sha256"]) == 64
+    # The SDK handed the schema to the model as its output schema (what becomes response_format).
+    sent = model.calls[0].output_schema
+    assert sent is not None and sent.json_schema()["properties"]["score"]["maximum"] == 5
+    assert sent.is_strict_json_schema() is False
+    plain = executor([[assistant_message('{"score": 4, "reason": "terse"}')]])[0].execute(
+        request({"json_output": True, "prompt": "Rate {run.topic}"}), noop_progress)
+    assert plain.provenance.prompt_hash != res.provenance.prompt_hash
+
+
+def test_output_schema_violation_fails_the_step_naming_the_path():
+    """The SDK calls the kit validator on the reply; a violation is a ModelBehaviorError,
+    which the executor already maps to BadResponse — same failure, same message, as on the
+    PydanticAI harness."""
+    ex, _ = executor([[assistant_message('{"score": 9, "reason": "too high"}')]])
+    with pytest.raises(BadResponse, match=r"violates output_schema at \$\.score: 9 is greater"):
+        ex.execute(request({"output_schema": CRITIQUE}), noop_progress)
+    ex, _ = executor([[assistant_message("not json")]])
+    with pytest.raises(BadResponse, match="reply is not JSON"):
+        ex.execute(request({"output_schema": CRITIQUE}), noop_progress)
+
+
+def test_an_unusable_output_schema_is_a_definition_error_before_any_model_call():
+    ex, model = executor([[assistant_message("never")]])
+    with pytest.raises(BadResponse, match=r'output_schema must have "type": "object"'):
+        ex.execute(request({"output_schema": {"type": "string"}}), noop_progress)
+    assert model.calls == ()
+
+
 # ----------------------------------------------------------------------- through the core
 def test_a_step_declaring_an_approval_required_class_is_suspended_before_dispatch():
     """The existing tier-2 gate governs the inner harness with no new mechanism: `spend`

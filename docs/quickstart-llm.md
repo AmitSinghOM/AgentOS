@@ -159,6 +159,25 @@ Two inner harnesses sharing one seam is the point: the tools an operator registe
 (`agentos.tools` entry point) are offered by either, under the same declared-effects gate.
 Details in `providers/pydantic-ai/README.md`.
 
+### Typed output: a contract in the log
+
+On either inner harness, replace `json_output: true` with an `output_schema` (a JSON Schema
+object) and the step's `json` is guaranteed to satisfy it — or the step fails naming the first
+violation. `examples/critic_typed_agent.json` is the critic with `score` bounded to 1–5:
+
+```bash
+curl -X POST localhost:8000/agents -H 'Content-Type: application/json' -d @examples/critic_typed_agent.json
+```
+
+It registers as `critic` version 2 (agent versions are immutable, so the untyped v1 stays).
+The schema is shown to the model by the SDK (PydanticAI puts it in the instructions; the
+Agents SDK sends it as `response_format`), but neither SDK enforces it — AgentOS does, once, in
+`agentos.providerkit.schema`, so the two harnesses accept exactly the same replies. The
+schema's SHA-256 lands on `step.completed` as `schema_sha256`: a downstream step or an
+evaluator pins to the contract, not to the prose that produced it. Remote `$ref`s are refused
+(a schema can never trigger a fetch) and `format` is never enforced (reproducible verdicts).
+Tested end to end in `tests/test_quickstart_llm.py::test_typed_critic_runs_on_the_inner_harness`.
+
 ## 7. A tool step before the model (optional)
 
 The built-in `tool` executor calls an HTTP API or runs a program as a step, under the same

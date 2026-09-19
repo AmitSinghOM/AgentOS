@@ -29,7 +29,8 @@ Zero-config default: the SDK's chat-completions model against a local Ollama
 ```
 
 `instructions` (or `system`), `prompt` with `{dotted.inputs}`, `model` (alias or id),
-`tools` (registered names), `max_turns` (default 6), `temperature`, `json_output`.
+`tools` (registered names), `max_turns` (default 6), `temperature`, `json_output`,
+`output_schema` (a JSON Schema object; below).
 
 ## Where the seam is
 
@@ -59,6 +60,18 @@ inlining large outputs), `tools_offered` / `tools_withheld`, `usage`, and a `Cos
 from the SDK's summed usage through the bundled pricing table (`model_requests` as an
 extra meter). Provenance carries the model, alias and a prompt hash over instructions,
 input and offered tool names.
+
+## Typed output (`output_schema`)
+
+Replace `json_output: true` with a JSON Schema object under `config.output_schema`. The SDK
+sends it to the model as `response_format` (`strict: false` — operator schemas are rarely
+OpenAI-strict, and a local Ollama ignores strictness) and calls `validate_json` on the reply;
+that call is answered by `agentos_provider_openai_agents.output_schema.KitOutputSchema`, a thin
+adapter over `agentos.providerkit.schema`, the same validator the PydanticAI harness uses. A
+violation is a `ModelBehaviorError` → `BadResponse` naming the first failing path; a valid reply
+lands in `output["json"]` with `schema_sha256`, the contract hash a downstream step pins to.
+Remote `$ref`s are refused at first use; `format` is never enforced; the schema is part of
+`prompt_hash`.
 
 ## Not in this slice (ROADMAP ⏭)
 

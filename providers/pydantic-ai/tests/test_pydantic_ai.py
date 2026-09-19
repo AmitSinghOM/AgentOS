@@ -301,6 +301,52 @@ def test_the_default_client_targets_this_providers_config_not_openai_env(monkeyp
     assert base_url.startswith("http://127.0.0.1:9/v1") and model_name == "qwen2.5:0.5b"
 
 
+# --------------------------------------------------------------- typed structured output
+CRITIQUE = {"type": "object",
+            "properties": {"score": {"type": "integer", "minimum": 1, "maximum": 5},
+                           "reason": {"type": "string"}},
+            "required": ["score", "reason"], "additionalProperties": False}
+
+
+def test_output_schema_validated_reply_lands_in_json_with_the_schema_hash():
+    ex, model = executor([text('```json\n{"score": 4, "reason": "terse"}\n```')])
+    res = ex.execute(request({"output_schema": CRITIQUE, "prompt": "Rate {run.topic}"}),
+                     noop_progress)
+    assert res.output["json"] == {"score": 4, "reason": "terse"}
+    assert len(res.output["schema_sha256"]) == 64
+    # The model was TOLD the schema (PromptedOutput puts it in the instructions) ...
+    assert "score" in model.calls[0].instructions and '"maximum": 5' in model.calls[0].instructions
+    # ... and the schema is part of what the prompt hash covers.
+    plain = executor([text('{"score": 4, "reason": "terse"}')])[0].execute(
+        request({"json_output": True, "prompt": "Rate {run.topic}"}), noop_progress)
+    assert plain.provenance.prompt_hash != res.provenance.prompt_hash
+    assert "schema_sha256" not in plain.output
+
+
+def test_output_schema_violation_fails_the_step_naming_the_path():
+    """PydanticAI retries non-JSON itself, but a well-formed reply with the wrong shape is
+    the kit's call: the step fails with the first violation's path, never a wrong shape
+    silently accepted."""
+    ex, _ = executor([text('{"score": 9, "reason": "too high"}')])
+    with pytest.raises(BadResponse, match=r"violates output_schema at \$\.score: 9 is greater"):
+        ex.execute(request({"output_schema": CRITIQUE}), noop_progress)
+    # Non-JSON is retried by the harness within max_turns, then a valid reply is accepted.
+    ex, model = executor([text("not json at all"), text('{"score": 2, "reason": "meh"}')])
+    res = ex.execute(request({"output_schema": CRITIQUE, "max_turns": 3}), noop_progress)
+    assert res.output["json"]["score"] == 2 and res.output["turns"] == 2
+    assert len(model.calls) == 2
+
+
+def test_an_unusable_output_schema_is_a_definition_error_before_any_model_call():
+    ex, model = executor([text("never")])
+    with pytest.raises(BadResponse, match=r'output_schema must have "type": "object"'):
+        ex.execute(request({"output_schema": {"type": "string"}}), noop_progress)
+    with pytest.raises(BadResponse, match=r"remote \$ref"):
+        ex.execute(request({"output_schema": {"type": "object", "properties": {
+            "a": {"$ref": "https://example.invalid/x.json"}}}}), noop_progress)
+    assert model.calls == []                                   # the SDK never ran
+
+
 def test_describe_and_health_report_without_a_server():
     ex, _ = executor([])
     d = ex.describe()
@@ -322,7 +368,8 @@ def test_output_keys_match_the_openai_agents_inner_harness():
     from agents import Usage
     from agents.testing import ScriptedModel, assistant_message, function_call
 
-    cfg = {"tools": ["word_count", "send_mail"], "json_output": True}
+    cfg = {"tools": ["word_count", "send_mail"], "output_schema": {
+        "type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}}
     ours, _ = executor([call("word_count", {"text": "a b"}, "c1"), text('{"n": 2}')])
     mine = ours.execute(request(cfg), noop_progress)
 
@@ -337,6 +384,7 @@ def test_output_keys_match_the_openai_agents_inner_harness():
     assert set(mine.output["tool_calls"][0]) == set(sib.output["tool_calls"][0])
     assert mine.output["tools_withheld"] == sib.output["tools_withheld"] == ["send_mail"]
     assert mine.output["json"] == sib.output["json"] == {"n": 2}
+    assert mine.output["schema_sha256"] == sib.output["schema_sha256"]   # one contract hash
     # Same effect classes in the same order; the tool effects word-for-word (the first
     # effect's description legitimately names the harness that ran).
     assert [e.effect_class for e in mine.effects] == [e.effect_class for e in sib.effects]

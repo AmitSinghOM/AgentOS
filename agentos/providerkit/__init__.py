@@ -12,6 +12,7 @@ extra (httpx).
     prompt     `{run.topic}` / `{step.field}` templates over step inputs
     config     env → ProviderConfig with a per-provider prefix
     tools      the operator tool registry every inner harness offers from (`agentos.tools`)
+    schema     typed structured output: `config.output_schema` validated once for every harness
 """
 from agentos.providerkit.config import ConfigError, ProviderConfig, config_from_env
 from agentos.providerkit.errors import (
@@ -26,6 +27,7 @@ from agentos.providerkit.errors import (
     server_message,
 )
 from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, strip_fences, wrap_input
+from agentos.providerkit.schema import InvalidOutputSchema, OutputSchema, SchemaViolation
 from agentos.providerkit.tools import (
     BUILTIN_TOOLS,
     ENTRY_POINT_GROUP,
@@ -42,12 +44,15 @@ __all__ = [
     "AuthenticationFailed",
     "BadResponse",
     "ConfigError",
+    "InvalidOutputSchema",
     "ModelNotFound",
+    "OutputSchema",
     "ProviderConfig",
     "ProviderError",
     "ProviderRateLimited",
     "ProviderServerError",
     "ProviderUnreachable",
+    "SchemaViolation",
     "TemplateError",
     "ToolRegistry",
     "ToolSpec",
