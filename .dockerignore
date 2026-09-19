@@ -1,0 +1,4 @@
+# Only the built wheels reach the image build context (Dockerfile installs from dist/).
+*
+!dist/
+!dist/*.whl

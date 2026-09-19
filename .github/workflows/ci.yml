@@ -12,6 +12,8 @@ on:
       - "examples/**"
       - "docker-compose.yml"
       - "pyproject.toml"
+      - "Dockerfile"
+      - "scripts/release_smoke.py"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
 
@@ -23,6 +25,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  package:
+    # Phase 8 #10: the fresh-tree install gate. Build every distribution exactly as
+    # publish.yml does, twine-check it, install the wheels into an empty venv and run the
+    # same smoke a stranger's `pip install` would face — on every PR, not only on a tag.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build==1.2.2.post1 twine==7.0.0 packaging==26.3
+      - run: |
+          set -euo pipefail
+          python -m build --outdir dist .
+          for p in providers/*/; do python -m build --outdir dist "$p"; done
+          python -m twine check --strict dist/*
+      - run: |
+          set -euo pipefail
+          version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --quiet "$(ls dist/agentos_durable-*.whl)[providerkit]" dist/agentos_provider_*.whl
+          /tmp/smoke/bin/agentos --help > /dev/null
+          /tmp/smoke/bin/python scripts/release_smoke.py "$version"
+
   test:
     runs-on: ubuntu-latest
     strategy:

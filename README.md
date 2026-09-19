@@ -69,6 +69,16 @@ uvicorn agentos.api.main:app --reload      # API (SQLite file ./agentos.db by de
 python -m agentos.worker                   # worker, in another terminal
 ```
 
+Installing rather than cloning: the distribution is **`agentos-durable`** (the name `agentos` on
+PyPI belongs to an unrelated project whose import package is also `agentos`; do not install both).
+Every release ships wheels with Sigstore-signed provenance and a multi-arch image built from the
+same wheels — verification in [`docs/RELEASING.md`](docs/RELEASING.md).
+
+```bash
+pip install "agentos-durable[providerkit]" agentos-provider-openai-compat
+docker run --rm -p 8000:8000 ghcr.io/amitsinghom/agentos        # API; python -m agentos.worker for the worker
+```
+
 No Docker needed for the default SQLite store. For Postgres:
 `docker compose up -d`, then `AGENTOS_STORE=postgres AGENTOS_PG_DSN=postgresql://agentos:agentos@localhost/agentos`
 for both processes.

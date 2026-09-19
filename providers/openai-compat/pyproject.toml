@@ -4,14 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentos-provider-openai-compat"
-version = "0.1.0"
+version = "0.9.0"
 description = "AgentOS executor for any OpenAI-compatible chat-completions server (Ollama, vLLM, LM Studio, OpenRouter, OpenAI) over plain HTTP"
+readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "agentos[providerkit]>=0.5,<1.0",
+    "agentos-durable[providerkit]>=0.9,<1.0",
     "httpx>=0.27",
 ]
+
+[project.urls]
+Repository = "https://github.com/AmitSinghOM/AgentOS"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "fastapi>=0.110"]   # fastapi only for the in-process reference server
