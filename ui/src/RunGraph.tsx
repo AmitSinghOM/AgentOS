@@ -6,6 +6,7 @@ import { Link, Route } from "./router";
 import { SSEFrame, readSSE } from "./sse";
 import { Timeline } from "./Timeline";
 import type { EventRecord } from "./derive";
+import { eventFamily, fmtClock, fmtDateTime, shortHash } from "./fmt";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const REFETCH_DEBOUNCE_MS = 150;
@@ -149,10 +150,13 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
         </h2>
         <p className="run__meta">
           <span className={`status status--${run.status}`}>{run.status}</span>
-          {" · "}<span className={`live live--${live}`} role="status" aria-label="stream state">{live === "live" ? "live" : live}</span>
-          {" · "}{run.last_seq} events · cost {run.total_cost}
-          {run.sealed_through != null && <> · sealed through {run.sealed_through}</>}
-          {run.policy_sha256 && <> · policy {run.policy_sha256.slice(0, 12)}</>}
+          <span className={`live live--${live}`} role="status" aria-label="stream state">{live === "live" ? "live" : live}</span>
+          <span className="chip" title="workflow version this run is pinned to">v{run.workflow_version}</span>
+          <span className="chip num" title="events in the log">{run.last_seq} events</span>
+          <span className="chip num" title="run cost from the fold">cost {run.total_cost}</span>
+          {run.sealed_through != null && <span className="chip num" title="last seq covered by an integrity seal">sealed ≤ {run.sealed_through}</span>}
+          {run.policy_sha256 && <span className="chip mono" title={`operator policy sha256 ${run.policy_sha256}`}>policy {shortHash(run.policy_sha256)}</span>}
+          <span className="muted" title={run.started_at}>started {fmtDateTime(run.started_at)}</span>
         </p>
         {pending > 0 && (
           <p role="note" className="hint">
@@ -179,7 +183,12 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
       <h3>Live frames</h3>
       <ol className="ticker" aria-label="event ticker" reversed>
         {ticker.map((t) => (
-          <li key={t.seq}><code>{t.seq}</code> {t.type}{t.step ? ` (${t.step})` : ""} <span className="muted">{t.at}</span></li>
+          <li key={t.seq}>
+            <code className="seq">{t.seq}</code>{" "}
+            <span className={`dot dot--${eventFamily(t.type)}`} aria-hidden="true" />
+            <code>{t.type}</code>{t.step ? <> <span className="chip">{t.step}</span></> : null}{" "}
+            <span className="muted num" title={t.at}>{fmtClock(t.at)}</span>
+          </li>
         ))}
         {ticker.length === 0 && <li className="muted">waiting for the stream…</li>}
       </ol>
@@ -197,9 +206,12 @@ export function Graph({ def, run }: { def: WorkflowDef; run: RunState }) {
   const l = layout(def);
   const pos = new Map(l.nodes.map((n) => [n.id, n]));
   const pad = 8;
+  const views = def.nodes.map((n) => [n, nodeState(run, n)] as const);
+  const present = Array.from(new Set(views.map(([, v]) => v.status)));
   return (
-    // role="group", not "img": `img` makes children presentational, which would hide every
-    // node's "<id>: <state>" label from assistive tech — the one thing an operator asks of it.
+    <div className="graph__wrap">
+    {/* role="group", not "img": `img` makes children presentational, which would hide every
+        node's "<id>: <state>" label from assistive tech — the one thing an operator asks of it. */}
     <svg className="graph" role="group" aria-label={`workflow ${def.name} run graph`}
          viewBox={`${-pad} ${-pad} ${l.width + 2 * pad} ${l.height + 2 * pad}`}
          width={Math.min(l.width + 2 * pad, 960)} style={{ maxWidth: "100%" }}>
@@ -214,16 +226,16 @@ export function Graph({ def, run }: { def: WorkflowDef; run: RunState }) {
         const mx = (x1 + x2) / 2;
         return <path key={`${e.from}->${e.to}`} className="edge" d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} markerEnd="url(#arrow)" />;
       })}
-      {def.nodes.map((n) => {
+      {views.map(([n, v]) => {
         const p = pos.get(n.id)!;
-        const v = nodeState(run, n);
         return (
           <g key={n.id} className={`node node--${v.status}`} transform={`translate(${p.x} ${p.y})`}
              role="group" aria-label={`${n.id}: ${LABEL[v.status]}`}>
             <rect width={NODE_W} height={NODE_H} rx={8} />
-            <text x={10} y={20} className="node__id">{n.id}</text>
-            <text x={10} y={36} className="node__agent">{n.agent}{v.attempt > 1 ? ` · attempt ${v.attempt}` : ""}</text>
-            <text x={10} y={49} className="node__state">
+            <rect className="node__stripe" width={4} height={NODE_H - 12} x={0} y={6} rx={2} />
+            <text x={12} y={20} className="node__id">{n.id}</text>
+            <text x={12} y={36} className="node__agent">{n.agent}{v.attempt > 1 ? ` · attempt ${v.attempt}` : ""}</text>
+            <text x={12} y={49} className="node__state">
               {LABEL[v.status]}{v.cost && v.cost !== "0" ? ` · ${v.cost}` : ""}
               {v.status === "running" && v.progress !== null ? ` · ${Math.round(v.progress * 100)}%` : ""}
             </text>
@@ -232,5 +244,9 @@ export function Graph({ def, run }: { def: WorkflowDef; run: RunState }) {
         );
       })}
     </svg>
+    <ul className="legend" aria-label="node states in this run">
+      {present.map((s) => <li key={s}><span className={`swatch swatch--${s}`} aria-hidden="true" />{LABEL[s]}</li>)}
+    </ul>
+    </div>
   );
 }

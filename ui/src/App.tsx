@@ -12,8 +12,15 @@ export function App() {
   const apiDown = !session.loading && session.me === null && session.unreachable;
   return (
     <main className="app">
-      <header>
-        <h1>AgentOS</h1>
+      <header className="masthead">
+        <div className="brand">
+          <h1>AgentOS</h1>
+          {session.me && (
+            <span className={`chip chip--mode chip--${session.me.mode}`} title="AGENTOS_AUTH mode reported by GET /me">
+              {session.me.mode === "bearer" ? "bearer auth" : "asserted auth"}
+            </span>
+          )}
+        </div>
         <p className="tagline">Every decision and every step here is what the run's event log says — nothing more.</p>
         {session.me && (
           <nav aria-label="primary">
