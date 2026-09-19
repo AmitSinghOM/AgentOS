@@ -62,7 +62,7 @@ const label = (id: string) => screen.getByRole("group", { name: new RegExp(`^${i
 describe("time travel", () => {
   it("lists events, seeks via the server's ?at= fold, and comes back to live", async () => {
     render(<App />);
-    await screen.findByRole("img", { name: /run graph/ });
+    await screen.findByRole("group", { name: /run graph/ });
     const log = await screen.findByRole("table", { name: "event log" });
     expect(within(log).getAllByRole("row")).toHaveLength(EVENTS.length + 1);
     expect(log).toHaveTextContent("cost 0.20");
@@ -87,7 +87,7 @@ describe("time travel", () => {
 
   it("the scrubber seeks too and never folds in the browser (state comes from ?at=)", async () => {
     render(<App />);
-    await screen.findByRole("img", { name: /run graph/ });
+    await screen.findByRole("group", { name: /run graph/ });
     const slider = screen.getByRole("slider", { name: "time travel scrubber" });
     // jsdom has no drag; setting the value and firing change is what a drag ends in
     const { fireEvent } = await import("@testing-library/react");
@@ -100,14 +100,40 @@ describe("time travel", () => {
 
   it("shows the API's error for an out-of-range seek and keeps the live graph", async () => {
     render(<App />);
-    await screen.findByRole("img", { name: /run graph/ });
+    await screen.findByRole("group", { name: /run graph/ });
     const { fireEvent } = await import("@testing-library/react");
     fireEvent.change(screen.getByRole("slider", { name: "time travel scrubber" }), { target: { value: "5" } });
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load state at seq 5: 422 at must be within 1..6");
     // no state could be loaded for seq 5, so no graph is drawn — never the live state under a wrong banner
-    expect(screen.queryByRole("img", { name: /run graph/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /run graph/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Back to live" }));
-    await screen.findByRole("img", { name: /run graph/ });
+    await screen.findByRole("group", { name: /run graph/ });
+    expect(label("b")).toBe("b: completed");
+  });
+
+  it("a drag across the scrubber is ONE server seek, not one per step (A2)", async () => {
+    // Each ?at=k is an O(k) fold on the server; a drag over an n-event run must not be n of them.
+    render(<App />);
+    await screen.findByRole("group", { name: /run graph/ });
+    const slider = screen.getByRole("slider", { name: "time travel scrubber" });
+    const { fireEvent } = await import("@testing-library/react");
+    const before = urls.filter((u) => u.includes("?at=")).length;
+    for (const v of ["2", "3", "4", "3", "2", "3"]) fireEvent.change(slider, { target: { value: v } });
+    expect(slider).toHaveValue("3");                                  // the thumb follows instantly
+    await waitFor(() => expect(urls).toContain("/runs/run1?at=3"));
+    await waitFor(() => expect(label("a")).toBe("a: completed"));
+    const seeks = urls.filter((u) => u.includes("?at=")).length - before;
+    expect(seeks).toBe(1);                                            // only the resting position
+    expect(urls).not.toContain("/runs/run1?at=2");
+    expect(urls).not.toContain("/runs/run1?at=4");
+  });
+
+  it("the graph is not role=img, so every node's '<id>: <state>' label reaches assistive tech (A3)", async () => {
+    render(<App />);
+    const graph = await screen.findByRole("group", { name: /run graph/ });
+    // ARIA `img` has children-presentational semantics: with it, the per-node labels below would
+    // be hidden from a screen reader even though DOM queries (like this one) still find them.
+    expect(graph.getAttribute("role")).not.toBe("img");
     expect(label("b")).toBe("b: completed");
   });
 });

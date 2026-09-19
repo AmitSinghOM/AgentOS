@@ -1,5 +1,10 @@
+import { useEffect, useRef, useState } from "react";
 import type { EventRecord } from "./derive";
 import { salient } from "./derive";
+
+/** A drag across an n-event run must not become n server folds: the thumb's seq is shown
+ *  instantly, the seek (`GET /runs/{id}?at=k`, O(k) on the server) fires once the thumb rests. */
+export const SEEK_DEBOUNCE_MS = 150;
 
 /** The event log with a scrubber. `at` is the seq whose state the graph shows (null = live).
  *  Seeking asks the SERVER for the fold through that seq (`GET /runs/{id}?at=k`) — the
@@ -7,7 +12,24 @@ import { salient } from "./derive";
 export function Timeline({ events, lastSeq, at, onSeek }: {
   events: EventRecord[]; lastSeq: number; at: number | null; onSeek: (seq: number | null) => void;
 }) {
-  const shown = at ?? lastSeq;
+  // `pending` is the thumb position while dragging; committed to onSeek after the debounce.
+  const [pending, setPending] = useState<number | null>(null);
+  const timer = useRef<number | null>(null);
+  useEffect(() => () => { if (timer.current !== null) window.clearTimeout(timer.current); }, []);
+  useEffect(() => { setPending(null); }, [at]);   // the parent moved (seek landed / back to live)
+
+  const scrub = (seq: number) => {
+    setPending(seq);
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => { timer.current = null; onSeek(seq); }, SEEK_DEBOUNCE_MS);
+  };
+  const seekNow = (seq: number | null) => {
+    if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null; }
+    setPending(null);
+    onSeek(seq);
+  };
+
+  const shown = pending ?? at ?? lastSeq;
   return (
     <section aria-labelledby="timeline-heading" className="timeline">
       <h3 id="timeline-heading">Timeline</h3>
@@ -16,13 +38,13 @@ export function Timeline({ events, lastSeq, at, onSeek }: {
           Viewing seq{" "}
           <input type="range" min={1} max={Math.max(1, lastSeq)} value={shown}
                  aria-label="time travel scrubber" aria-valuetext={`seq ${shown} of ${lastSeq}`}
-                 onChange={(e) => onSeek(Number(e.target.value))} />
+                 onChange={(e) => scrub(Number(e.target.value))} />
           {" "}<strong>{shown}</strong> of {lastSeq}
         </label>
         {at !== null && (
           <>
             {" "}<span role="status" className="time-travel">time travel — the graph shows the run as it was right after seq {at}</span>
-            {" "}<button type="button" onClick={() => onSeek(null)}>Back to live</button>
+            {" "}<button type="button" onClick={() => seekNow(null)}>Back to live</button>
           </>
         )}
       </div>
@@ -32,7 +54,7 @@ export function Timeline({ events, lastSeq, at, onSeek }: {
           {events.map((e) => (
             <tr key={e.seq} className={e.seq === shown ? "current" : e.seq > shown ? "future" : ""}
                 aria-current={e.seq === shown ? "step" : undefined}>
-              <td><button type="button" className="seek" onClick={() => onSeek(e.seq)} aria-label={`view state after seq ${e.seq}`}>{e.seq}</button></td>
+              <td><button type="button" className="seek" onClick={() => seekNow(e.seq)} aria-label={`view state after seq ${e.seq}`}>{e.seq}</button></td>
               <td><code>{e.event_type}</code></td>
               <td>{e.step_id ?? ""}</td>
               <td>{salient(e)}</td>

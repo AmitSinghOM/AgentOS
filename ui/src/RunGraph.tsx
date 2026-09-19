@@ -198,7 +198,9 @@ export function Graph({ def, run }: { def: WorkflowDef; run: RunState }) {
   const pos = new Map(l.nodes.map((n) => [n.id, n]));
   const pad = 8;
   return (
-    <svg className="graph" role="img" aria-label={`workflow ${def.name} run graph`}
+    // role="group", not "img": `img` makes children presentational, which would hide every
+    // node's "<id>: <state>" label from assistive tech — the one thing an operator asks of it.
+    <svg className="graph" role="group" aria-label={`workflow ${def.name} run graph`}
          viewBox={`${-pad} ${-pad} ${l.width + 2 * pad} ${l.height + 2 * pad}`}
          width={Math.min(l.width + 2 * pad, 960)} style={{ maxWidth: "100%" }}>
       <defs>

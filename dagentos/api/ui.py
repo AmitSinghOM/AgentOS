@@ -22,6 +22,34 @@ from starlette.staticfiles import StaticFiles
 logger = logging.getLogger("agentos.api.ui")
 
 UI_PREFIX = "/ui"
+
+#: Sent on every response under /ui (shell, root files, assets) and on nothing else. The bundle
+#: has no inline script or style (Vite emits one module script and one stylesheet; React sets
+#: styles through the CSSOM, which CSP does not govern), so 'self' is sufficient. The page holds
+#: a bearer token in sessionStorage and renders log-derived strings — React escapes them, and
+#: this is the control that bounds a future injection: no foreign script, no exfil via
+#: connect-src, no framing of the approve button. `tests/test_ui_mount.py` asserts all three
+#: response kinds carry these and API routes do not.
+UI_HEADERS: dict[str, str] = {
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+        "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "
+        "frame-ancestors 'none'; form-action 'self'"),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+class _HardenedStaticFiles(StaticFiles):
+    """StaticFiles whose every file response carries UI_HEADERS (the mount bypasses the SPA
+    handler, so the headers must be added here too)."""
+
+    def file_response(self, *args, **kwargs):  # type: ignore[override]
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(UI_HEADERS)
+        return response
+
+
 #: Development bundle (a checkout with `ui/` built) and the packaged bundle (copied into the
 #: wheel as `dagentos/_ui` by scripts/bundle_ui.py during the release build). The env var wins,
 #: then the checkout, then the package — so a developer's fresh build is never shadowed by
@@ -64,7 +92,7 @@ def mount_ui(app: FastAPI) -> Path | None:
     index = d / "index.html"
     assets = d / "assets"
     if assets.is_dir():
-        app.mount(UI_PREFIX + "/assets", StaticFiles(directory=str(assets)), name="ui-assets")
+        app.mount(UI_PREFIX + "/assets", _HardenedStaticFiles(directory=str(assets)), name="ui-assets")
 
     @app.get(UI_PREFIX, include_in_schema=False)
     @app.get(UI_PREFIX + "/{rest:path}", include_in_schema=False)
@@ -73,8 +101,8 @@ def mount_ui(app: FastAPI) -> Path | None:
         # the app shell. Traversal cannot escape `d`: the resolved path must stay inside it.
         candidate = (d / rest).resolve() if rest else index
         if rest and candidate.is_file() and d.resolve() in candidate.parents:
-            return FileResponse(candidate)
-        return FileResponse(index, headers={"Cache-Control": "no-cache"})
+            return FileResponse(candidate, headers=UI_HEADERS)
+        return FileResponse(index, headers={"Cache-Control": "no-cache", **UI_HEADERS})
 
     logger.info("operator UI mounted at %s from %s", UI_PREFIX, d)
     return d

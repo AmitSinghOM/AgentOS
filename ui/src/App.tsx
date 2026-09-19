@@ -2,12 +2,14 @@ import { Inbox } from "./Inbox";
 import { RunGraph } from "./RunGraph";
 import { RunList } from "./RunList";
 import { Link, useRoute } from "./router";
-import { ActingAs, TokenForm, useSession } from "./Session";
+import { ActingAs, TokenForm, Unreachable, useSession } from "./Session";
 
 export function App() {
   const session = useSession();
   const [route, navigate] = useRoute();
-  const needsToken = !session.loading && session.me === null;
+  // Only a 401 means "needs a token"; a network error or 5xx is the API not answering.
+  const needsToken = !session.loading && session.me === null && !session.unreachable;
+  const apiDown = !session.loading && session.me === null && session.unreachable;
   return (
     <main className="app">
       <header>
@@ -21,6 +23,7 @@ export function App() {
         )}
       </header>
       {session.loading && <p>Connecting…</p>}
+      {apiDown && <Unreachable session={session} />}
       {needsToken && <TokenForm session={session} />}
       {session.me && (
         <>

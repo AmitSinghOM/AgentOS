@@ -20,7 +20,8 @@ function expiry(a: Approval): string {
   return min < 1 ? "expires in under a minute" : `expires in ${min} min`;
 }
 
-interface Outcome { key: string; text: string; ok: boolean }
+interface Outcome { id: number; key: string; text: string; ok: boolean }
+let outcomeSeq = 0;   // stable keys for a prepend-ordered list; index keys re-associate rows
 
 export function Inbox({ session }: { session: Session }) {
   const [items, setItems] = useState<Approval[] | null>(null);
@@ -51,12 +52,12 @@ export function Inbox({ session }: { session: Session }) {
     try {
       const principal = session.unverified ? session.actingAs ?? undefined : undefined;
       await api.decide(a, verb, reasons[key] ?? "", principal);
-      setOutcomes((o) => [{ key, ok: true,
+      setOutcomes((o) => [{ id: ++outcomeSeq, key, ok: true,
         text: `${verb === "approve" ? "Approved" : "Rejected"} ${a.step_id ?? "cost ceiling"} on run ${a.run_id.slice(0, 8)} as ${session.actingAs?.id ?? "?"}` }, ...o].slice(0, 8));
       await refresh();
     } catch (e) {
       const text = e instanceof ApiError ? `${e.status}: ${e.detail}` : String(e);
-      setOutcomes((o) => [{ key, ok: false, text: `${verb} failed — ${text}` }, ...o].slice(0, 8));
+      setOutcomes((o) => [{ id: ++outcomeSeq, key, ok: false, text: `${verb} failed — ${text}` }, ...o].slice(0, 8));
     } finally {
       setBusy(null);
     }
@@ -111,8 +112,8 @@ export function Inbox({ session }: { session: Session }) {
       </ul>
       {outcomes.length > 0 && (
         <ul className="outcomes" aria-label="recent decisions">
-          {outcomes.map((o, i) => (
-            <li key={`${o.key}-${i}`} role={o.ok ? "status" : "alert"} className={o.ok ? "ok" : "error"}>
+          {outcomes.map((o) => (
+            <li key={o.id} role={o.ok ? "status" : "alert"} className={o.ok ? "ok" : "error"}>
               {o.text}
             </li>
           ))}

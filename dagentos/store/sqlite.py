@@ -1,6 +1,6 @@
 """SQLite Store + BlobStore on the standard library.
 
-Why SQLite first (docs/DEVELOPMENT_STRUCTURE.md §7): `pip install agentos` must work with
+Why SQLite first (docs/DEVELOPMENT_STRUCTURE.md §7): `pip install dagentos` must work with
 no infrastructure. Postgres is the production adapter and passes the same contract suite.
 
 Physical guarantees this adapter relies on:
