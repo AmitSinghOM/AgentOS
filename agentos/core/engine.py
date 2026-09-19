@@ -85,6 +85,7 @@ from agentos.core.models import (
 )
 from agentos.core.policy import OperatorPolicy, apply_ceiling, executor_allowed, policy_sha256
 from agentos.core.ports import BlobStore, ConflictError, Executor, Observer, Store
+from agentos.core.seal import SEAL_AFTER, HmacKeyring, seal_for
 
 TERMINAL = frozenset({"completed", "failed", "cancelled"})
 PROGRESS_MIN_INTERVAL = 1.0   # seconds between step.progress events (rate limit)
@@ -256,6 +257,23 @@ def _notify(observers: Sequence[Observer], event: Event, run: WorkflowRun | None
                            type(event).event_type, event.seq)
 
 
+def chain_with_seals(events: Sequence[Event], expected_seq: int, prev_hash: str | None,
+                     keyring: HmacKeyring | None) -> list[Event]:
+    """`chain`, then a seal after every SEAL_AFTER event when signing is configured. The
+    seal is chained too, so its hash covers the signature (Phase 8 #3)."""
+    out: list[Event] = []
+    seq, prev = expected_seq, prev_hash
+    for ev in events:
+        stamped = chain([ev], seq, prev)[0]
+        out.append(stamped)
+        seq, prev = stamped.seq, stamped.hash
+        if keyring is not None and isinstance(ev, SEAL_AFTER):
+            seal = chain([seal_for(stamped.run_id, stamped, keyring)], seq, prev)[0]
+            out.append(seal)
+            seq, prev = seal.seq, seal.hash
+    return out
+
+
 class _Log:
     """Serialized appender for one advance() call. Concurrent steps' progress events and
     the scheduler's own writes all go through here, so `expected_seq` is always right.
@@ -266,9 +284,11 @@ class _Log:
     seq, remember the request, and retry once. Anything else is a real conflict."""
 
     def __init__(self, store: Store, run_id: str, last_seq: int, fence: int | None,
-                 observers: Sequence[Observer] = (), last_hash: str | None = None) -> None:
+                 observers: Sequence[Observer] = (), last_hash: str | None = None,
+                 keyring: HmacKeyring | None = None) -> None:
         self._store, self.run_id, self.last_seq, self._fence = store, run_id, last_seq, fence
         self._observers = observers
+        self._keyring = keyring
         self.last_hash = last_hash            # tail of the tamper-evident chain (C12)
         self._lock = threading.Lock()
         self._closed = False
@@ -281,17 +301,21 @@ class _Log:
                 return  # advance() has returned; a straggler thread's progress is dropped
             try:
                 committed = self._store.append_events(
-                    self.run_id, self.last_seq, chain([event], self.last_seq, self.last_hash),
-                    fence=self._fence)
+                    self.run_id, self.last_seq, self._batch(event), fence=self._fence)
             except ConflictError:
                 if not self._adopt_control_events():
                     raise
                 committed = self._store.append_events(
-                    self.run_id, self.last_seq, chain([event], self.last_seq, self.last_hash),
-                    fence=self._fence)
-            self.last_seq += 1
-            self.last_hash = committed[0].hash
-        _notify(self._observers, committed[0])
+                    self.run_id, self.last_seq, self._batch(event), fence=self._fence)
+            self.last_seq += len(committed)
+            self.last_hash = committed[-1].hash
+        for ev in committed:
+            _notify(self._observers, ev)
+
+    def _batch(self, event: Event) -> list[Event]:
+        """The event chained at our tail — plus, when a keyring is configured and the event
+        leaves the run idle, its seal in the SAME batch (atomic with what it seals)."""
+        return chain_with_seals([event], self.last_seq, self.last_hash, self._keyring)
 
     def poll_control(self) -> None:
         """Pick up control requests appended since our last write (no conflict needed)."""
@@ -326,7 +350,8 @@ class Engine:
                  lease: Lease | None = None,
                  observers: Sequence[Observer] = (),
                  snapshot_every: int = 200,
-                 policy: OperatorPolicy | None = None) -> None:
+                 policy: OperatorPolicy | None = None,
+                 keyring: HmacKeyring | None = None) -> None:
         """`executors` maps an AgentType value (e.g. "echo") to the adapter that runs it.
         `clock` is monotonic (durations, rate limits); `wall` is the timestamp source for
         `retry_at` so tests can pin it. `lease` lets control requests be finalized
@@ -347,6 +372,11 @@ class Engine:
         self._snapshot_every = snapshot_every
         self._policy = policy
         self._policy_sha256 = policy_sha256(policy) if policy is not None else None
+        self._keyring = keyring      # Phase 8 #3: seals idle/terminal events when set
+
+    @property
+    def keyring(self) -> HmacKeyring | None:
+        return self._keyring
 
     @property
     def policy(self) -> OperatorPolicy | None:
@@ -610,8 +640,8 @@ class Engine:
         if expected_seq > 0:
             tail = self._store.read_events(run_id, after_seq=expected_seq - 1)
             prev = tail[0].hash if tail else None
-        committed = self._store.append_events(run_id, expected_seq,
-                                              chain(events, expected_seq, prev))
+        committed = self._store.append_events(
+            run_id, expected_seq, chain_with_seals(events, expected_seq, prev, self._keyring))
         for ev in committed:
             _notify(self._observers, ev)
 
@@ -643,7 +673,7 @@ class Engine:
             if run is None or run.status.value in TERMINAL:
                 return
             log = _Log(self._store, run_id, run.last_seq, token.fence, self._observers,
-                       last_hash=run.last_hash)
+                       last_hash=run.last_hash, keyring=self._keyring)
             log.cancel_requested, log.pause_requested = run.cancel_requested, run.pause_requested
             self._apply_control(log, run.status)
         finally:
@@ -703,7 +733,7 @@ class Engine:
             return self.get_run(run_id)  # type: ignore[return-value]
 
         log = _Log(self._store, run_id, run.last_seq, fence, self._observers,
-                   last_hash=run.last_hash)
+                   last_hash=run.last_hash, keyring=self._keyring)
         log.cancel_requested, log.pause_requested = run.cancel_requested, run.pause_requested
         if run.status is RunStatus.paused and not run.cancel_requested:
             return run                       # nothing to do until run.resumed

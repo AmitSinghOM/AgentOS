@@ -241,6 +241,20 @@ class PolicyApplied(Event):
     narrowed: list[str] = []
 
 
+class ChainSealed(Event):
+    """Phase 8 #3: appended in the same batch as an idle/terminal event, carrying a
+    signature over `(run_id, sealed_seq, sealed_hash)` under a key the database host does not
+    hold (agentos.core.seal). Replay ignores it; `agentos verify` and the integrity endpoint
+    judge it. Rewriting anything before a seal needs the key; deleting seals is visible."""
+
+    event_type: ClassVar[str] = "integrity.sealed"
+    sealed_seq: int
+    sealed_hash: str
+    alg: str
+    key_id: str
+    signature: str
+
+
 CONTROL_REQUEST_TYPES = (RunCancelRequested, RunPauseRequested)
 
 
@@ -250,7 +264,7 @@ EVENT_TYPES: dict[str, type[Event]] = {
                 StepFailed, StepRetryRequested, StepCancelled, RunCompleted, RunFailed,
                 RunCancelRequested, RunCancelled, RunPauseRequested, RunPaused, RunResumed,
                 ApprovalRequested, RunSuspended, ApprovalGranted, ApprovalRejected,
-                ExecutorSubstituted, PolicyApplied)
+                ExecutorSubstituted, PolicyApplied, ChainSealed)
 }
 
 EventTypeName = Literal[
@@ -258,7 +272,7 @@ EventTypeName = Literal[
     "step.failed", "step.retry_requested", "step.cancelled", "run.completed", "run.failed",
     "run.cancel_requested", "run.cancelled", "run.pause_requested", "run.paused", "run.resumed",
     "approval.requested", "run.suspended", "approval.granted", "approval.rejected",
-    "executor.substituted", "governance.policy_applied",
+    "executor.substituted", "governance.policy_applied", "integrity.sealed",
 ]
 
 

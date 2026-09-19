@@ -12,7 +12,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs" / "FAIL_MODES.md"
 CITATION = re.compile(r"`(tests/[\w/]+\.py)::(test_\w+)`")
-DIRECTIONS = ("**closed", "**open", "**not a boundary**")
+DIRECTIONS = ("**closed", "**open", "**not a boundary**", "**reported**", "**warn**",
+              "**not detectable in-log**")
 
 
 def _rows() -> list[str]:

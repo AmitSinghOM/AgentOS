@@ -17,24 +17,11 @@ from agentos.core.engine import Engine
 from agentos.core.faults import from_env
 from agentos.core.models import AgentType
 from agentos.core.policy import policy_from_env
+from agentos.core.seal import keyring_from_env
 from agentos.observability import build_observers, store_resolver
 from agentos.plugins import discover_executors, store_pricing_snapshots
+from agentos.store.factory import store_from_env
 from agentos.worker import Worker
-
-
-def build_store():
-    kind = os.environ.get("AGENTOS_STORE", "sqlite").lower()
-    if kind == "memory":
-        raise RuntimeError("the worker cannot use AGENTOS_STORE=memory: nothing would be "
-                           "shared with the API process")
-    if kind == "sqlite":
-        from agentos.store.sqlite import SqliteStore
-        return SqliteStore(os.environ.get("AGENTOS_SQLITE_PATH", "agentos.db"))
-    if kind == "postgres":
-        from agentos.store.postgres import PostgresStore
-        return PostgresStore(os.environ["AGENTOS_PG_DSN"],
-                             schema=os.environ.get("AGENTOS_PG_SCHEMA"))
-    raise RuntimeError(f"unknown AGENTOS_STORE {kind!r} (sqlite | postgres)")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -47,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=os.environ.get("AGENTOS_LOG", "INFO"),
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-    store = build_store()
+    store = store_from_env(allow_memory=False)
     injector = from_env()
     observers, prom = build_observers(resolve=store_resolver(store))
     if prom is not None and os.environ.get("AGENTOS_WORKER_METRICS_PORT", "8001") != "0":
@@ -73,7 +60,8 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError(f"AGENTOS_SNAPSHOT_EVERY must be an integer >= 0, got {raw!r}")
     engine = Engine(store=store, blobs=store, executors=executors,
                     faults=injector, lease=store, observers=observers,
-                    snapshot_every=int(raw), policy=policy_from_env())
+                    snapshot_every=int(raw), policy=policy_from_env(),
+                    keyring=keyring_from_env())
     worker = Worker(engine, store, lease=store, queue=store, holder=args.holder,
                     lease_ttl=args.lease_ttl, faults=injector)
     if args.once:
