@@ -44,6 +44,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
+from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -97,6 +98,42 @@ class _TokenFile(BaseModel):
     principals: list[_Entry]
 
 
+def _load_json(p: Path, where: str):
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise AuthError(f"{where}: file not found") from None
+    except json.JSONDecodeError as exc:
+        raise AuthError(f"{where}: not valid JSON ({exc.msg})") from None
+
+
+def _refuse_plaintext_tokens(raw, where: str) -> None:
+    """The temptation to paste a token into the file must fail loudly, with the fix."""
+    if not isinstance(raw, dict):
+        return
+    for i, entry in enumerate(raw.get("principals") or []):
+        if isinstance(entry, dict) and "token" in entry:
+            raise AuthError(
+                f"{where}: principals[{i}] carries a plaintext 'token'. Store its hash instead: "
+                "\"sha256\": \"$(printf %s \"$TOKEN\" | sha256sum | cut -d' ' -f1)\"")
+
+
+def _parse_token_file(raw, where: str) -> _TokenFile:
+    try:
+        parsed = _TokenFile.model_validate(raw)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        loc = ".".join(str(x) for x in first["loc"]) or "<root>"
+        raise AuthError(f"{where}: {loc}: {first['msg']}") from None
+    if not parsed.principals:
+        raise AuthError(f"{where}: 'principals' is empty; bearer mode would reject every request")
+    for i, e in enumerate(parsed.principals):
+        if len(e.sha256) != 64 or any(c not in "0123456789abcdef" for c in e.sha256.lower()):
+            raise AuthError(f"{where}: principals[{i}].sha256 must be 64 hex characters "
+                            "(the SHA-256 of the token)")
+    return parsed
+
+
 class StaticTokenAuthenticator:
     """Bearer tokens resolved through an operator-owned file of SHA-256 hashes."""
 
@@ -106,32 +143,10 @@ class StaticTokenAuthenticator:
     @classmethod
     def from_file(cls, path: str | os.PathLike[str]) -> StaticTokenAuthenticator:
         p = Path(path)
-        try:
-            raw = json.loads(p.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            raise AuthError(f"AGENTOS_AUTH_TOKENS={str(p)!r}: file not found") from None
-        except json.JSONDecodeError as exc:
-            raise AuthError(f"AGENTOS_AUTH_TOKENS={str(p)!r}: not valid JSON ({exc.msg})") from None
-        if isinstance(raw, dict):
-            for i, entry in enumerate(raw.get("principals") or []):
-                if isinstance(entry, dict) and "token" in entry:
-                    raise AuthError(
-                        f"AGENTOS_AUTH_TOKENS={str(p)!r}: principals[{i}] carries a plaintext "
-                        "'token'. Store its hash instead: "
-                        "\"sha256\": \"$(printf %s \"$TOKEN\" | sha256sum | cut -d' ' -f1)\"")
-        try:
-            parsed = _TokenFile.model_validate(raw)
-        except ValidationError as exc:
-            first = exc.errors()[0]
-            loc = ".".join(str(x) for x in first["loc"]) or "<root>"
-            raise AuthError(f"AGENTOS_AUTH_TOKENS={str(p)!r}: {loc}: {first['msg']}") from None
-        if not parsed.principals:
-            raise AuthError(f"AGENTOS_AUTH_TOKENS={str(p)!r}: 'principals' is empty; "
-                            "bearer mode would reject every request")
-        for i, e in enumerate(parsed.principals):
-            if len(e.sha256) != 64 or any(c not in "0123456789abcdef" for c in e.sha256.lower()):
-                raise AuthError(f"AGENTOS_AUTH_TOKENS={str(p)!r}: principals[{i}].sha256 must "
-                                "be 64 hex characters (the SHA-256 of the token)")
+        where = f"AGENTOS_AUTH_TOKENS={str(p)!r}"
+        raw = _load_json(p, where)
+        _refuse_plaintext_tokens(raw, where)
+        parsed = _parse_token_file(raw, where)
         return cls([e.model_copy(update={"sha256": e.sha256.lower()}) for e in parsed.principals])
 
     def authenticate(self, token: str) -> Principal | None:
@@ -208,14 +223,30 @@ async def auth_middleware(request: Request, call_next, *, config: AuthConfig):
     return await call_next(request)
 
 
+def openapi_security(schema: dict, *, config: AuthConfig) -> dict:
+    """Declare the bearer requirement in the served OpenAPI document so `/docs` offers
+    Authorize and a generated client sends the header. Read-only otherwise: in asserted
+    mode the schema is returned unchanged. OPEN_PATHS are marked `security: []`."""
+    if not config.enforced:
+        return schema
+    schema.setdefault("components", {}).setdefault("securitySchemes", {})["bearerAuth"] = {
+        "type": "http", "scheme": "bearer",
+        "description": "Token from the operator's AGENTOS_AUTH_TOKENS file (agentos/api/auth.py)."}
+    schema["security"] = [{"bearerAuth": []}]
+    for path, ops in schema.get("paths", {}).items():
+        if path in OPEN_PATHS:
+            for op in ops.values():
+                if isinstance(op, dict):
+                    op["security"] = []
+    return schema
+
+
 def principal_for(request: Request, body_principal: Principal | None, *,
                   config: AuthConfig, required: bool) -> Principal | None:
     """The Principal a handler records. Bearer mode: the token's, and a body principal is
     a 422 (rejected, not ignored — the client must not believe it decided as someone
     else). Asserted mode: the body's; `required` makes its absence a 422 (approve/reject,
     A2: every decision names who made it)."""
-    from fastapi import HTTPException
-
     if config.enforced:
         if body_principal is not None:
             raise HTTPException(

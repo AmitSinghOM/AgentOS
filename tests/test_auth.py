@@ -301,3 +301,48 @@ def test_every_route_is_covered_by_the_middleware_not_a_dependency(monkeypatch, 
 def test_open_paths_are_exactly_health_and_metrics():
     assert auth_mod.OPEN_PATHS == frozenset({"/health", "/metrics"})
     assert auth_mod.DEFINITION_PATHS == frozenset({"/agents", "/workflows"})
+
+
+def test_reject_in_bearer_mode_records_the_token_principal(monkeypatch, token_file):
+    main = _app(monkeypatch, mode="bearer", tokens=token_file)
+    c = TestClient(main.app)
+    h = _bearer(HUMAN_TOKEN)
+    rid, aid = _suspended_run(main, c, h)
+    assert c.post(f"/runs/{rid}/approvals/{aid}/reject", json=HUMAN_BODY, headers=h).status_code == 422
+    r = c.post(f"/runs/{rid}/approvals/{aid}/reject", json={"reason": "no"}, headers=h)
+    assert r.status_code == 200 and r.json()["status"] == "failed"
+    events = c.get(f"/runs/{rid}/events", headers=h).json()["data"]
+    rejected = next(e for e in events if e["event_type"] == "approval.rejected")
+    assert rejected["principal"]["id"] == "amit" \
+        and rejected["principal"]["attestation"] == f"token:sha256:{_sha(HUMAN_TOKEN)[:12]}"
+
+
+def test_openapi_declares_the_bearer_scheme_only_in_bearer_mode(monkeypatch, token_file):
+    """The served contract must say the header is required, or a generated client sends
+    nothing and `/docs` has no Authorize button. Probes stay `security: []`."""
+    main = _app(monkeypatch, mode="bearer", tokens=token_file)
+    c = TestClient(main.app)
+    assert c.get("/openapi.json").status_code == 401          # the document itself is protected
+    doc = c.get("/openapi.json", headers=_bearer(AGENT_TOKEN)).json()
+    assert doc["components"]["securitySchemes"]["bearerAuth"] == {
+        "type": "http", "scheme": "bearer",
+        "description": "Token from the operator's AGENTOS_AUTH_TOKENS file (agentos/api/auth.py)."}
+    assert doc["security"] == [{"bearerAuth": []}]
+    assert doc["paths"]["/health"]["get"]["security"] == []
+    assert "security" not in doc["paths"]["/agents"]["post"]   # inherits the global requirement
+
+    main = _app(monkeypatch, mode="asserted")
+    doc = TestClient(main.app).get("/openapi.json").json()
+    assert "securitySchemes" not in doc.get("components", {}) and "security" not in doc
+
+
+@pytest.mark.parametrize("path", ["/agents/", "//agents", "/%61gents", "/agents?x=1"])
+def test_path_variants_do_not_bypass_the_definition_rule(monkeypatch, token_file, path):
+    """DEFINITION_PATHS is an exact match on the decoded path; a variant must either be
+    refused 403 or never reach the handler (redirect resolves to the exact path, or 404).
+    Either way nothing is stored."""
+    main = _app(monkeypatch, mode="bearer", tokens=token_file)
+    c = TestClient(main.app)
+    r = c.post(path, json={"name": "sneaky", "type": "echo"}, headers=_bearer(AGENT_TOKEN))
+    assert r.status_code in (403, 404), (path, r.status_code)
+    assert c.get("/agents", headers=_bearer(HUMAN_TOKEN)).json()["data"] == []

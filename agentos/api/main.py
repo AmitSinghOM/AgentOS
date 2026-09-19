@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict
 
 from agentos.agents.echo import EchoExecutor
 from agentos.agents.tool import ToolExecutor
-from agentos.api.auth import AuthConfig, auth_middleware, principal_for
+from agentos.api.auth import AuthConfig, auth_middleware, openapi_security, principal_for
 from agentos.api.stream import MEDIA_TYPE, StreamConfig, parse_after, stream_run
 from agentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
 from agentos.core.fold import FoldError
@@ -91,6 +91,18 @@ async def _authenticate(request: Request, call_next):
     """Phase 8 #1: the credential decides who the caller is; the body may not. Middleware,
     not a per-route dependency, so a route added later is protected by default."""
     return await auth_middleware(request, call_next, config=auth_config)
+
+
+def _openapi() -> dict:
+    if app.openapi_schema is None:
+        from fastapi.openapi.utils import get_openapi
+        app.openapi_schema = openapi_security(
+            get_openapi(title=app.title, version=app.version, routes=app.routes),
+            config=auth_config)
+    return app.openapi_schema
+
+
+app.openapi = _openapi  # type: ignore[method-assign]
 
 
 @app.exception_handler(RequestValidationError)
