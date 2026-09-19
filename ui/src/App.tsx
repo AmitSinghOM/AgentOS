@@ -1,21 +1,33 @@
 import { Inbox } from "./Inbox";
+import { RunGraph } from "./RunGraph";
+import { RunList } from "./RunList";
+import { Link, useRoute } from "./router";
 import { ActingAs, TokenForm, useSession } from "./Session";
 
 export function App() {
   const session = useSession();
+  const [route, navigate] = useRoute();
   const needsToken = !session.loading && session.me === null;
   return (
     <main className="app">
       <header>
         <h1>AgentOS</h1>
-        <p className="tagline">Approvals inbox — every decision here is recorded in the run's event log with who made it.</p>
+        <p className="tagline">Every decision and every step here is what the run's event log says — nothing more.</p>
+        {session.me && (
+          <nav aria-label="primary">
+            <Link to={{ page: "inbox" }} navigate={navigate} className={route.page === "inbox" ? "active" : ""}>Approvals</Link>
+            <Link to={{ page: "runs" }} navigate={navigate} className={route.page !== "inbox" ? "active" : ""}>Runs</Link>
+          </nav>
+        )}
       </header>
       {session.loading && <p>Connecting…</p>}
       {needsToken && <TokenForm session={session} />}
       {session.me && (
         <>
           <ActingAs session={session} />
-          <Inbox session={session} />
+          {route.page === "inbox" && <Inbox session={session} />}
+          {route.page === "runs" && <RunList navigate={navigate} />}
+          {route.page === "run" && <RunGraph runId={route.id} navigate={navigate} />}
         </>
       )}
     </main>

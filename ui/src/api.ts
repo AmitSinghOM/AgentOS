@@ -61,9 +61,17 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return parsed as T;
 }
 
+export interface RunSummary {
+  id: string; workflow: string; workflow_version: number; status: string; total_cost: string;
+  last_seq: number; started_at: string; pending_approvals: number;
+}
+
 export const api = {
   me: () => request<Me>("GET", "/me"),
   approvals: () => request<{ data: Approval[] }>("GET", "/approvals"),
+  runs: (limit = 50) => request<{ data: RunSummary[] }>("GET", `/runs?limit=${limit}`),
+  run: <T>(id: string) => request<T>("GET", `/runs/${encodeURIComponent(id)}`),
+  workflow: <T>(name: string) => request<T>("GET", `/workflows/${encodeURIComponent(name)}`),
   /** In bearer mode the body carries only `reason`; the API derives the principal from the
    *  token and REJECTS a body principal (422). In asserted mode the API requires one — the
    *  caller passes the principal the operator typed, and the UI labels it unverified. */

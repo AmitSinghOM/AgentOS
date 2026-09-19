@@ -34,6 +34,24 @@ Development: `cd ui && npm run dev` serves the app on `:5173` and proxies API pa
   principal, and requires one to be typed before decisions are enabled; it is then sent in the
   body because the API requires it in that mode.
 
+## The run graph (`/ui/runs/<id>`)
+
+- **Landing** (`/ui/runs`): `GET /runs` newest-first — status, cost, event count, pending
+  approvals linking to the inbox; each row links to its graph.
+- **The DAG** is the current `GET /workflows/{name}` definition, laid out by longest-path
+  layering (no graph library). If the run is pinned to another version the page says so and
+  that the run cannot advance (C3); it does not silently draw the wrong graph.
+- **Node state comes from the server's folded run**, never from folding events in the browser
+  (one derivation of state, backed by the golden corpus). Each state is one field of
+  `GET /runs/{id}`: `steps` → completed (with cost), `dead_lettered`, `failed_steps`,
+  `cancelled_steps`, a pending approval naming the step → awaiting approval, `pending_retries` →
+  retry backoff, `attempts` → running (with `progress`), otherwise pending.
+- **The stream is the trigger.** `GET /runs/{id}/stream` is read with `fetch` and a small SSE
+  parser (`ui/src/sse.ts`) so the token travels as `Authorization: Bearer` — `EventSource`
+  cannot send headers and a token in the URL is not acceptable. Every frame lands in the event
+  ticker and schedules one debounced refetch of the folded run. On the server's close the page
+  reconnects with `Last-Event-ID` unless the run is terminal.
+
 ## What it deliberately does not do
 
 - No client-side authorization. Whether an agent may approve `spend` is the engine's call.

@@ -518,8 +518,20 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
 ## Phase 9 — UI (optional)  ·  ~2 weekends
 **Goal:** a visual the recruiter screenshot remembers. Plays to frontend strength.
 
-- [ ] React + (Cloudscape or shadcn) app over `GET /runs/{id}/stream`
-- [ ] Live workflow run graph: nodes light up as steps complete
+- [x] **React app over `GET /runs/{id}/stream`** — no UI kit yet (SVG + CSS; the kit decision
+  waits for the timeline/cost panel). The stream is read with `fetch` + a ReadableStream SSE
+  parser (`ui/src/sse.ts`, unit-tested across chunk boundaries, multi-line data, id carry-over)
+  because `EventSource` cannot send `Authorization` and the token is never allowed in a URL.
+  Reconnects with `Last-Event-ID` after the server's max-duration close; stops on a terminal run.
+- [x] **Live workflow run graph** (`/ui/runs/<id>`): layered DAG (longest-path layering, no
+  graph library) from `GET /workflows/{name}`; node state derived from the SERVER's folded run —
+  the browser never folds events (one derivation of state, with the golden corpus); every stream
+  frame lands in a ticker and schedules one debounced refetch of `GET /runs/{id}`. States:
+  pending / running (+progress) / completed (+cost) / failed / dead-lettered / cancelled /
+  awaiting approval (links to the inbox) / retry backoff — each from one field of the fold.
+  States a pinned-version mismatch (C3) instead of drawing the wrong graph. Landing page
+  `GET /runs` (new, newest-first, clamped). 19 new component/unit tests + 3 API tests; live
+  through separate API and worker incl. resume after Last-Event-ID.
 - [ ] Event-log timeline view (time-travel debugging over the log)
 - [ ] Cost + latency panel per run
 - [x] **Approvals inbox (authenticated)** — Phase 9 opener, the first surface a non-author

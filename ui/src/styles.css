@@ -20,3 +20,39 @@ button { padding: 0.4rem 0.9rem; border-radius: 6px; border: 1px solid color-mix
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.danger { border-color: #b00020; color: #b00020; }
 .outcomes { list-style: none; padding: 0; margin-top: 1rem; }
+
+/* navigation */
+nav[aria-label="primary"] { display: flex; gap: 1rem; margin: 0.5rem 0 1rem; }
+nav a { text-decoration: none; padding: 0.2rem 0; border-bottom: 2px solid transparent; }
+nav a.active { border-bottom-color: currentColor; }
+.muted { opacity: 0.6; }
+
+/* run list */
+.runs { width: 100%; border-collapse: collapse; }
+.runs th, .runs td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
+.status { font-size: 0.8rem; padding: 0.1rem 0.45rem; border-radius: 4px; background: color-mix(in srgb, currentColor 12%, transparent); }
+.status--completed { color: #1a7f37; }
+.status--failed, .status--cancelled { color: #b00020; }
+.status--suspended, .status--paused { color: #9a6700; }
+.status--running { color: #0969da; }
+.live--live { color: #1a7f37; } .live--error { color: #b00020; } .live--closed, .live--connecting { opacity: 0.7; }
+
+/* graph */
+.graph { display: block; margin: 1rem 0; overflow: visible; }
+.edge { fill: none; stroke: currentColor; stroke-opacity: 0.45; stroke-width: 1.5; }
+.node rect { fill: color-mix(in srgb, currentColor 6%, transparent); stroke: color-mix(in srgb, currentColor 35%, transparent); stroke-width: 1.5; transition: fill 300ms, stroke 300ms; }
+.node text { fill: currentColor; font-size: 12px; }
+.node__id { font-weight: 600; font-size: 13px; }
+.node__agent, .node__state { opacity: 0.75; font-size: 11px; }
+.node--running rect { stroke: #0969da; fill: color-mix(in srgb, #0969da 14%, transparent); }
+.node--completed rect { stroke: #1a7f37; fill: color-mix(in srgb, #1a7f37 14%, transparent); }
+.node--failed rect, .node--dead_lettered rect { stroke: #b00020; fill: color-mix(in srgb, #b00020 12%, transparent); }
+.node--cancelled rect { stroke: #6e7781; stroke-dasharray: 4 3; }
+.node--awaiting_approval rect { stroke: #9a6700; fill: color-mix(in srgb, #c9a200 16%, transparent); }
+.node--retry_backoff rect { stroke: #9a6700; stroke-dasharray: 4 3; }
+.node--running rect { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { stroke-opacity: 0.35; } }
+
+/* ticker */
+.ticker { font-size: 0.85rem; max-height: 16rem; overflow: auto; padding-left: 1.5rem; }
+.ticker li { margin: 0.15rem 0; }
