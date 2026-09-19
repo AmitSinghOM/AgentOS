@@ -25,7 +25,17 @@ from agentos.core.models import (
     StepResult,
     WorkflowDefinition,
 )
+from agentos.core.policy import OperatorPolicy
+from agentos.core.seal import HmacKeyring
 from agentos.store.memory import MemoryStore
+
+# From v0.9.0 every golden log also carries governance.policy_applied and integrity.sealed
+# events. The keyring is a FIXTURE, not a secret: it exists so the recorded seals are
+# well-formed events the fold must keep ignoring, and so verify_seals over a golden log has a
+# key to judge them with (tests/golden/test_golden.py).
+GOLDEN_KEYRING = HmacKeyring("golden", {"golden": bytes.fromhex("11" * 32)})
+GOLDEN_POLICY = OperatorPolicy(always_approve=frozenset({EffectClass.spend}),
+                               max_run_cost="5.00")
 
 GOLDEN = Path(__file__).resolve().parents[1] / "tests" / "golden"
 
@@ -63,7 +73,8 @@ def main(label: str) -> int:
         {"id": "d", "agent": "writer", "depends_on": ["b", "c"]},
     ]))
     engine = Engine(store=store, blobs=store,
-                    executors={"echo": EchoExecutor(), "aliased": _Aliased()})
+                    executors={"echo": EchoExecutor(), "aliased": _Aliased()},
+                    policy=GOLDEN_POLICY, keyring=GOLDEN_KEYRING)
     run = engine.start_run("diamond", request_id=f"golden-{label}",
                            inputs={"topic": "golden"})
     events = [e.to_record() for e in store.read_events(run.id)]

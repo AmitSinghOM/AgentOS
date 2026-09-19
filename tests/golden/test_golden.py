@@ -88,3 +88,20 @@ def test_fold_from_any_cut_point_equals_the_full_fold(path: Path):
         snapshot = fold(events[:k])
         continued = fold_from(snapshot, events[k:]).model_dump(mode="json")
         assert continued == full, f"{path.stem}: fold_from at k={k} diverges from fold"
+
+
+@pytest.mark.parametrize("path", FILES, ids=[p.stem for p in FILES])
+def test_seals_in_golden_logs_verify_with_the_fixture_key_or_are_absent(path: Path):
+    """From v0.9.0 the corpus carries `integrity.sealed` events signed with the golden
+    FIXTURE key (scripts/record_golden.py). Older logs have none and report `unsigned`.
+    Either way a seal must never be INVALID against the recorded log."""
+    from agentos.core.integrity import verify
+    from agentos.core.seal import verify_seals
+    from scripts.record_golden import GOLDEN_KEYRING
+
+    events = [from_record(r) for r in json.loads(path.read_text())["events"]]
+    verify(events)                                          # the chain itself
+    report = verify_seals(events, GOLDEN_KEYRING)
+    assert report.state in ("unsigned", "verified"), report.as_dict()
+    if report.seals:
+        assert report.valid == report.seals and report.unsigned_tail == 0, report.as_dict()

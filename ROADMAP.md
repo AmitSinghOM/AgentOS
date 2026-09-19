@@ -434,7 +434,7 @@ core" into something a staff engineer can put behind a controlled edge for a pai
 become Phase 8. The UI moves to Phase 9 — a dashboard over an API that does not authenticate
 its callers would be a screenshot, not a product.
 
-## Phase 8 — Pilot readiness  ·  ~2-3 weekends
+## Phase 8 — Pilot readiness  ·  ~2-3 weekends  ·  ✅ shipped `v0.9.0-pilot` (2026-09-20)
 **Goal:** every guarantee AgentOS makes about *who* decided something is enforced at the
 boundary, bounded by an operator, verifiable after the fact, and installable by a stranger.
 Order follows the control-plane check: the invariant first, the checklist that scopes the
