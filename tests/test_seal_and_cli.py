@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import os
 import secrets
 
 import pytest
@@ -373,4 +372,3 @@ def test_console_script_is_declared():
     from pathlib import Path
     py = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
     assert py["project"]["scripts"] == {"agentos": "agentos.cli:main"}
-    assert os.environ.get("AGENTOS_STORE") is not None or True

@@ -168,7 +168,7 @@ def _judge(ev: ChainSealed, by_seq: dict[int, Event], keyring: HmacKeyring | Non
     """One seal: does the log still carry the sealed hash, and does the signature hold."""
     report.seals += 1
     target = by_seq.get(ev.sealed_seq)
-    if target is None or target.hash != ev.sealed_hash:
+    if target is None or target.hash != ev.sealed_hash or target.run_id != ev.run_id:
         report.problems.append(f"seal at seq {ev.seq}: event {ev.sealed_seq} does not carry "
                                f"the sealed hash")
         return
