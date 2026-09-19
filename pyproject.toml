@@ -4,7 +4,7 @@
 # import package here is still `agentos`; installing both in one environment clobbers files.
 # Renaming the import package is an open decision (docs/RELEASING.md).
 name = "agentos-durable"
-version = "0.9.0"
+version = "0.10.0"
 description = "A control plane for durable, observable, human-in-the-loop LLM agent workflows"
 readme = "README.md"
 license = { text = "MIT" }

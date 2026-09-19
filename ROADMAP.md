@@ -515,7 +515,7 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
 
 **Tag:** `v0.9.0-pilot`. **Post:** "A Human Said Yes — Prove It."
 
-## Phase 9 — UI (optional)  ·  ~2 weekends
+## Phase 9 — UI  ·  ~2 weekends  ·  ✅ shipped `v0.10.0-ui` (2026-09-20)
 **Goal:** a visual the recruiter screenshot remembers. Plays to frontend strength.
 
 - [x] **React app over `GET /runs/{id}/stream`** — no UI kit yet (SVG + CSS; the kit decision
