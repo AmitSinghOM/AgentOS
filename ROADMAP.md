@@ -546,8 +546,14 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   requires a typed principal. Decision bodies are the API's own (`reason` only in bearer mode);
   401/403/409/422 text rendered verbatim — no client-side authorization. Cost approvals show the
   proposed ceiling. 6 component tests (threat model in the file header), 7 Python mount tests,
-  CI `ui` job builds the bundle and runs the mount tests against it. Bundle is not in the wheel
-  or image yet — Phase 9 close-out, when publish.yml grows a Node step.
+  CI `ui` job builds the bundle and runs the mount tests against it.
+- [x] **Bundle in the wheel and image.** `scripts/bundle_ui.py` copies `ui/dist` to
+  `agentos/_ui` (gitignored; hatch `artifacts` ships it; refuses a partial build; writes a
+  VERSION stamp) before `python -m build` in both `publish.yml` (Node step, SHA-pinned) and the
+  CI `package` job. `ui_dir()` resolves env → checkout → package, so a developer's build is never
+  shadowed. `release_smoke.py` fails a wheel without the bundle or with a mismatched UI version;
+  the image smoke asserts `ui_dir()` resolves inside the container. Proven: an empty venv with
+  only the wheels served `/ui/runs` and its hashed asset with no checkout present.
 
 **Tag:** `v0.10.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
 

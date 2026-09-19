@@ -9,6 +9,8 @@ venv/
 .DS_Store
 dist/
 build/
+# operator UI bundle copied into the package for the wheel (scripts/bundle_ui.py)
+agentos/_ui/
 
 # local SQLite store (default AGENTOS_STORE=sqlite)
 agentos.db

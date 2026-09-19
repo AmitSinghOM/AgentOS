@@ -38,6 +38,15 @@ def main(argv: list[str]) -> int:
 
     import agentos
     import agentos.cli  # noqa: F401
+    from agentos.api.ui import PACKAGED_DIST
+    if not (PACKAGED_DIST / "index.html").is_file():
+        problems.append(f"operator UI bundle missing from the wheel ({PACKAGED_DIST}); run "
+                        "`npm run build` in ui/ and scripts/bundle_ui.py before python -m build")
+    else:
+        stamp = PACKAGED_DIST / "VERSION"
+        ui_version = stamp.read_text().strip() if stamp.is_file() else "?"
+        if ui_version != expected:
+            problems.append(f"packaged UI is {ui_version}, expected {expected}")
 
     env = dict(os.environ, AGENTOS_STORE="memory")
     env.pop("AGENTOS_POLICY", None)
@@ -56,7 +65,7 @@ def main(argv: list[str]) -> int:
     if problems:
         print("release smoke FAILED:\n  " + "\n  ".join(problems), file=sys.stderr)
         return 1
-    print(f"release smoke ok: agentos-durable {version}, executors {sorted(eps)}")
+    print(f"release smoke ok: agentos-durable {version}, executors {sorted(eps)}, ui bundled")
     return 0
 
 

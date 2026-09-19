@@ -22,7 +22,12 @@ from starlette.staticfiles import StaticFiles
 logger = logging.getLogger("agentos.api.ui")
 
 UI_PREFIX = "/ui"
+#: Development bundle (a checkout with `ui/` built) and the packaged bundle (copied into the
+#: wheel as `agentos/_ui` by scripts/bundle_ui.py during the release build). The env var wins,
+#: then the checkout, then the package — so a developer's fresh build is never shadowed by
+#: whatever version was installed.
 DEFAULT_DIST = Path(__file__).resolve().parents[2] / "ui" / "dist"
+PACKAGED_DIST = Path(__file__).resolve().parent.parent / "_ui"
 
 
 def is_ui_asset_path(method: str, path: str) -> bool:
@@ -34,8 +39,11 @@ def is_ui_asset_path(method: str, path: str) -> bool:
 
 def ui_dir() -> Path | None:
     raw = os.environ.get("AGENTOS_UI_DIR")
-    d = Path(raw) if raw else DEFAULT_DIST
-    return d if (d / "index.html").is_file() else None
+    candidates = [Path(raw)] if raw else [DEFAULT_DIST, PACKAGED_DIST]
+    for d in candidates:
+        if (d / "index.html").is_file():
+            return d
+    return None
 
 
 def mount_ui(app: FastAPI) -> Path | None:
@@ -50,7 +58,7 @@ def mount_ui(app: FastAPI) -> Path | None:
             raise HTTPException(status_code=404, detail=(
                 "the operator UI is not built. Run `npm ci && npm run build` in ui/ (or set "
                 "AGENTOS_UI_DIR to a built bundle) and restart the API."))
-        logger.info("operator UI not mounted: no bundle at %s", DEFAULT_DIST)
+        logger.info("operator UI not mounted: no bundle at %s or %s", DEFAULT_DIST, PACKAGED_DIST)
         return None
 
     index = d / "index.html"

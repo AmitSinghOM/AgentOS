@@ -55,6 +55,16 @@ jobs:
             pv=$(python -c "import tomllib,sys; print(tomllib.load(open(sys.argv[1],'rb'))['project']['version'])" "$p")
             [[ "$pv" == "$version" ]] || { echo "$p is $pv, core is $version"; exit 1; }
           done
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build the operator UI into the package
+        run: |
+          set -euo pipefail
+          (cd ui && npm ci --no-audit --no-fund && npm test && npm run build)
+          python scripts/bundle_ui.py
       - name: Build sdists and wheels
         run: |
           set -euo pipefail
@@ -142,9 +152,12 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
-      - name: Image smoke
+      - name: Image smoke (CLI runs; the UI bundle is inside the wheel)
         if: env.PUSH != 'true'
-        run: docker run --rm ${{ steps.name.outputs.image }}:${{ needs.build.outputs.version }} agentos --help
+        run: |
+          docker run --rm ${{ steps.name.outputs.image }}:${{ needs.build.outputs.version }} agentos --help
+          docker run --rm ${{ steps.name.outputs.image }}:${{ needs.build.outputs.version }} \
+            python -c "from agentos.api.ui import ui_dir; d = ui_dir(); assert d and (d / 'index.html').is_file(), d; print('ui bundle at', d)"
       - name: Attest the pushed image digest
         if: env.PUSH == 'true'
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2

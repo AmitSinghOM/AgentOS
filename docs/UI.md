@@ -77,8 +77,17 @@ Development: `cd ui && npm run dev` serves the app on `:5173` and proxies API pa
   be a dependency for nothing). One test per rule above, named for the rule.
 - `tests/test_ui_mount.py` — the mount contract, run in CI against the real built bundle.
 
+## In the wheel and the image
+
+Release builds (and the CI `package` job) run `npm run build` and `python scripts/bundle_ui.py`,
+which copies `ui/dist` into `agentos/_ui` (gitignored; included by hatch `artifacts`). An
+installed `agentos-durable` therefore serves `/ui` with no Node at runtime, and so does the
+image. `ui_dir()` resolution order: `AGENTOS_UI_DIR` → the checkout's `ui/dist` → the packaged
+`agentos/_ui`, so a developer's fresh build always wins over the installed copy.
+`scripts/release_smoke.py` fails a wheel that lacks the bundle or whose UI VERSION stamp differs
+from the package version.
+
 ## Not yet
 
-The bundle is not in the wheel or the image; that lands with the Phase 9 close-out when the
-publish workflow gains a Node step. Run graph, event timeline and cost panel are their own
-slices and will pick the UI kit.
+Event timeline (time-travel over the log) and the cost + latency panel are their own slices and
+will pick the UI kit. A CSP header for `/ui` goes with them.
