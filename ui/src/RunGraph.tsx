@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "./api";
+import { CostPanel } from "./CostPanel";
 import { NODE_H, NODE_W, NodeView, RunState, WorkflowDef, layout, nodeState } from "./graph";
 import { Link, Route } from "./router";
 import { SSEFrame, readSSE } from "./sse";
+import { Timeline } from "./Timeline";
+import type { EventRecord } from "./derive";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const REFETCH_DEBOUNCE_MS = 150;
@@ -28,6 +31,10 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
   const [error, setError] = useState<string | null>(null);
   const [ticker, setTicker] = useState<TickerItem[]>([]);
   const [live, setLive] = useState<"connecting" | "live" | "closed" | "error">("connecting");
+  const [events, setEvents] = useState<EventRecord[]>([]);
+  const [at, setAt] = useState<number | null>(null);            // time travel: null = live
+  const [atRun, setAtRun] = useState<RunState | null>(null);    // the SERVER's fold through `at`
+  const [atError, setAtError] = useState<string | null>(null);
   const debounce = useRef<number | null>(null);
   const lastId = useRef<string | null>(null);
 
@@ -36,6 +43,10 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
       const r = await api.run<RunState>(runId);
       setRun(r);
       setError(null);
+      try {
+        const page = await api.events<{ data: EventRecord[] }>(runId);
+        setEvents(page.data);
+      } catch { /* the ticker still shows frames; the timeline catches up on the next refetch */ }
       return r;
     } catch (e) {
       setError(e instanceof ApiError ? `${e.status} ${e.detail}` : String(e));
@@ -57,6 +68,18 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
     })();
     return () => { alive = false; };
   }, [refetch]);
+
+  // time travel: the state at `at` is the server's fold of the log prefix (?at=k); we never fold here
+  useEffect(() => {
+    setAtRun(null);                 // never show another seq's state under this seq's banner
+    setAtError(null);
+    if (at === null) return;
+    let alive = true;
+    api.runAt<RunState>(runId, at)
+      .then((r) => { if (alive) { setAtRun(r); setAtError(null); } })
+      .catch((e) => { if (alive) setAtError(e instanceof ApiError ? `${e.status} ${e.detail}` : String(e)); });
+    return () => { alive = false; };
+  }, [runId, at]);
 
   // the stream: every frame lands in the ticker and schedules ONE refetch of the folded run
   useEffect(() => {
@@ -112,6 +135,8 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
   if (error && !run) return <p role="alert" className="error">Could not load run: {error}</p>;
   if (!run) return <p>Loading…</p>;
 
+  const shown = at === null ? run : atRun;      // live fold, or the SERVER's fold through `at`
+
   const pending = Object.values(run.approvals).filter((a) => a.status === "pending").length;
   const versionMismatch = def !== null && def.version !== run.workflow_version;
 
@@ -145,9 +170,13 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
         {error && <p role="alert" className="error">{error}</p>}
       </header>
 
-      {def && <Graph def={def} run={run} />}
+      {atError && <p role="alert" className="error">Could not load state at seq {at}: {atError}</p>}
+      {def && shown && <Graph def={def} run={shown} />}
+      {def && shown && <CostPanel def={def} run={shown} events={at !== null ? events.filter((e) => e.seq <= at) : events} />}
+      {def && !shown && !atError && <p role="status" aria-label="seek state">Loading the state at seq {at}…</p>}
+      <Timeline events={events} lastSeq={run.last_seq} at={at} onSeek={setAt} />
 
-      <h3>Events</h3>
+      <h3>Live frames</h3>
       <ol className="ticker" aria-label="event ticker" reversed>
         {ticker.map((t) => (
           <li key={t.seq}><code>{t.seq}</code> {t.type}{t.step ? ` (${t.step})` : ""} <span className="muted">{t.at}</span></li>

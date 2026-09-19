@@ -532,8 +532,18 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   States a pinned-version mismatch (C3) instead of drawing the wrong graph. Landing page
   `GET /runs` (new, newest-first, clamped). 19 new component/unit tests + 3 API tests; live
   through separate API and worker incl. resume after Last-Event-ID.
-- [ ] Event-log timeline view (time-travel debugging over the log)
-- [ ] Cost + latency panel per run
+- [x] **Event-log timeline with time travel.** The timeline lists every event with one salient
+  field per type (who approved, the dead-letter cause, the seal's key…). Seeking — scrubber or
+  click — asks the SERVER for `GET /runs/{id}?at=k` (new): the same fold over the log prefix,
+  which the golden corpus pins as equal to the full fold at every cut point; the browser never
+  folds. The graph and the cost panel render that state under a "time travel — right after seq
+  k" banner until Back to live; the live stream keeps flowing meanwhile. `at` outside
+  `1..last_seq` → 422; a tampered prefix is refused at k (chain verified). Proven live at all
+  14 cut points of a real run; `at=last` equals the live fold.
+- [x] **Cost + latency panel per run.** Per node: attempts, first start, finish, duration, cost;
+  run cost (and raised ceiling) and wall time. Cost is the fold's; start/finish are the
+  events' timestamps, because the fold carries no start time — a display derivation, stated in
+  `docs/UI.md`, not a second source of state. Follows the time-travel seek.
 - [x] **Approvals inbox (authenticated)** — Phase 9 opener, the first surface a non-author
   operator touches. `ui/` Vite 5 + React 19 + TS, no UI kit yet (chosen against one screen it
   would be the wrong kit). Served by the API at `/ui` (`agentos/api/ui.py`): same origin so no

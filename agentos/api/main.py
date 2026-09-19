@@ -32,7 +32,7 @@ from agentos.api.auth import AuthConfig, auth_middleware, openapi_security, prin
 from agentos.api.stream import MEDIA_TYPE, StreamConfig, parse_after, stream_run
 from agentos.api.ui import mount_ui
 from agentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
-from agentos.core.fold import FoldError
+from agentos.core.fold import FoldError, fold
 from agentos.core.integrity import IntegrityError, verify
 from agentos.core.models import Agent, AgentType, BlobRef, Principal, WorkflowDefinition
 from agentos.core.policy import policy_from_env
@@ -277,7 +277,14 @@ def list_runs(limit: int = 50) -> dict:
 
 
 @app.get("/runs/{run_id}")
-def get_run(run_id: str) -> dict:
+def get_run(run_id: str, at: int | None = None) -> dict:
+    """The folded run. `?at=k` (Phase 9 time-travel) folds only the log prefix through seq k —
+    the same fold, over fewer events; `fold_from == fold` at every cut point is pinned by the
+    golden corpus. `at` must be within 1..last_seq (1 is `run.started` alone). Historical
+    folds verify the chain prefix too, so a tampered prefix is refused at k, not only at the
+    tail."""
+    if at is not None:
+        return _run_at(run_id, at)
     try:
         run = engine.get_run(run_id)
     except FoldError as exc:
@@ -287,6 +294,20 @@ def get_run(run_id: str) -> dict:
     if run is None:
         raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
     return run.model_dump()
+
+
+def _run_at(run_id: str, at: int) -> dict:
+    events = store.read_events(run_id)
+    if not events:
+        raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
+    last = events[-1].seq
+    if at < 1 or at > last:
+        raise HTTPException(status_code=422, detail=f"at must be within 1..{last} for run {run_id!r}")
+    try:
+        return fold([e for e in events if e.seq <= at]).model_dump()
+    except FoldError as exc:
+        logger.error("run %s at %s: %s", run_id, at, exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/runs/{run_id}/integrity")

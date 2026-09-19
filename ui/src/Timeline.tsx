@@ -1,0 +1,46 @@
+import type { EventRecord } from "./derive";
+import { salient } from "./derive";
+
+/** The event log with a scrubber. `at` is the seq whose state the graph shows (null = live).
+ *  Seeking asks the SERVER for the fold through that seq (`GET /runs/{id}?at=k`) — the
+ *  browser never folds. */
+export function Timeline({ events, lastSeq, at, onSeek }: {
+  events: EventRecord[]; lastSeq: number; at: number | null; onSeek: (seq: number | null) => void;
+}) {
+  const shown = at ?? lastSeq;
+  return (
+    <section aria-labelledby="timeline-heading" className="timeline">
+      <h3 id="timeline-heading">Timeline</h3>
+      <div className="timeline__controls">
+        <label>
+          Viewing seq{" "}
+          <input type="range" min={1} max={Math.max(1, lastSeq)} value={shown}
+                 aria-label="time travel scrubber" aria-valuetext={`seq ${shown} of ${lastSeq}`}
+                 onChange={(e) => onSeek(Number(e.target.value))} />
+          {" "}<strong>{shown}</strong> of {lastSeq}
+        </label>
+        {at !== null && (
+          <>
+            {" "}<span role="status" className="time-travel">time travel — the graph shows the run as it was right after seq {at}</span>
+            {" "}<button type="button" onClick={() => onSeek(null)}>Back to live</button>
+          </>
+        )}
+      </div>
+      <table className="events" aria-label="event log">
+        <thead><tr><th>seq</th><th>event</th><th>step</th><th>detail</th><th>at</th></tr></thead>
+        <tbody>
+          {events.map((e) => (
+            <tr key={e.seq} className={e.seq === shown ? "current" : e.seq > shown ? "future" : ""}
+                aria-current={e.seq === shown ? "step" : undefined}>
+              <td><button type="button" className="seek" onClick={() => onSeek(e.seq)} aria-label={`view state after seq ${e.seq}`}>{e.seq}</button></td>
+              <td><code>{e.event_type}</code></td>
+              <td>{e.step_id ?? ""}</td>
+              <td>{salient(e)}</td>
+              <td className="muted">{e.occurred_at}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
