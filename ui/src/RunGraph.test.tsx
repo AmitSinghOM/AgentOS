@@ -71,7 +71,7 @@ const nodeLabel = (id: string) => screen.getByRole("group", { name: new RegExp(`
 describe("run graph", () => {
   it("draws the DAG from the definition and lights nodes up as the folded run changes", async () => {
     render(<App />);
-    await screen.findByRole("img", { name: /workflow diamond run graph/ });
+    await screen.findByRole("group", { name: /workflow diamond run graph/ });
     expect(nodeLabel("a")).toBe("a: pending");
     const streamReq = await waitFor(() => { const s = seen.find((x) => x.url === "/runs/run1/stream"); expect(s).toBeDefined(); return s!; });
     expect(streamReq.headers.Authorization).toBe("Bearer tok");
@@ -124,7 +124,7 @@ describe("run graph", () => {
       return json(404, {});
     });
     render(<App />);
-    await screen.findByRole("img", { name: /run graph/ });
+    await screen.findByRole("group", { name: /run graph/ });
     await waitFor(() => expect(streams).toBe(1));
     state = run({ attempts: { a: 1 }, last_seq: 2 });
     stream.emit(frame(2, "step.started", "a"));
@@ -145,7 +145,7 @@ describe("run graph", () => {
     state = run({ status: "suspended", attempts: { a: 1 }, steps: [{ node_id: "a", attempt: 1, cost: { amount: "0", currency: "USD" } }],
       approvals: { ap1: { approval_id: "ap1", step_id: "b", status: "pending", kind: "effect", effect_classes: ["spend"] } } });
     render(<App />);
-    await screen.findByRole("img", { name: /run graph/ });
+    await screen.findByRole("group", { name: /run graph/ });
     expect(nodeLabel("b")).toBe("b: awaiting approval");
     const note = screen.getByRole("note");
     expect(note).toHaveTextContent("1 approval waiting");

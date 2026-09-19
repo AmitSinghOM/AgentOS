@@ -113,3 +113,23 @@ def test_me_reports_the_recorded_principal_per_mode(monkeypatch, tmp_path):
     assert body["principal"]["attestation"].startswith("token:sha256:")
     main = _app(monkeypatch, mode="asserted", tmp_path=tmp_path)
     assert TestClient(main.app).get("/me").json() == {"mode": "asserted", "principal": None}
+
+
+def test_every_ui_response_carries_the_security_headers(monkeypatch, bundle, tmp_path):
+    """A1 (package review v0.11.0): the page holds a bearer token in sessionStorage and renders
+    log-derived strings. CSP bounds any future injection (no inline script, no exfil via
+    connect-src), frame-ancestors 'none' stops framing, nosniff stops MIME confusion. The
+    bundle has no inline script/style, so 'self' is sufficient. All three response kinds — the
+    app shell, a root file, an asset — must carry them; API routes must NOT (they are JSON)."""
+    from dagentos.api.ui import UI_HEADERS
+    main = _app(monkeypatch, mode="asserted", ui_dir=bundle, tmp_path=tmp_path)
+    c = TestClient(main.app)
+    assert "default-src 'self'" in UI_HEADERS["Content-Security-Policy"]
+    assert "frame-ancestors 'none'" in UI_HEADERS["Content-Security-Policy"]
+    for path in ("/ui/", "/ui/runs/abc", "/ui/favicon.svg", "/ui/assets/app.js"):
+        r = c.get(path)
+        assert r.status_code == 200, path
+        for k, v in UI_HEADERS.items():
+            assert r.headers.get(k) == v, (path, k, r.headers.get(k))
+    r = c.get("/health")
+    assert "Content-Security-Policy" not in r.headers

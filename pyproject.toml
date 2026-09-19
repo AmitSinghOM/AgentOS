@@ -114,8 +114,8 @@ modules = ["dagentos.store", "dagentos.agents", "dagentos.observability"]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
-# The distribution is `dagentos`; the import package is `agentos`, so hatch must be
-# told what to ship. The sdist is the source of exactly what the wheel contains plus what a
+# The distribution and the import package are both `dagentos`; hatch is still told explicitly
+# what to ship. The sdist is the source of exactly what the wheel contains plus what a
 # rebuilder needs — not the compose stack, CI, tests or provider trees (published separately).
 [tool.hatch.build.targets.wheel]
 packages = ["dagentos"]

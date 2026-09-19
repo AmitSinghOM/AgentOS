@@ -5,6 +5,11 @@ export interface Session {
   me: Me | null;
   loading: boolean;
   error: string | null;
+  /** True when the last `/me` failed for a reason other than 401 (network, 5xx): the API is not
+   *  answering, so a token form would be the wrong call to action. */
+  unreachable: boolean;
+  /** Reload `/me` (Retry after an unreachable API). */
+  reload: () => Promise<void>;
   /** The principal a decision will be recorded under, or null when none is known yet. In
    *  bearer mode it is the token's; in asserted mode it is whatever the operator typed, and
    *  `unverified` is true. */
@@ -21,6 +26,7 @@ export function useSession(): Session {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [unreachable, setUnreachable] = useState(false);
   const [typedId, setTypedId] = useState<string>(
     () => window.sessionStorage.getItem(TYPED_KEY) ?? "");
 
@@ -29,14 +35,18 @@ export function useSession(): Session {
     setError(null);
     try {
       setMe(await api.me());
+      setUnreachable(false);
     } catch (e) {
       setMe(null);
       if (e instanceof ApiError && e.status === 401) {
+        setUnreachable(false);
         // A token the API rejected must not be re-sent on every reload: forget it and say why.
         const had = getToken();
         if (had) setToken(null);
         setError(had ? `token rejected: ${e.detail}` : null);
       } else {
+        // Not an auth answer: the API is down, unreachable, or broken. Say that, not "sign in".
+        setUnreachable(true);
         setError(e instanceof Error ? e.message : String(e));
       }
     } finally {
@@ -67,7 +77,20 @@ export function useSession(): Session {
     : me.mode === "bearer" ? me.principal
     : typedId.trim() ? { kind: "human", id: typedId.trim() } : null;
 
-  return { me, loading, error, actingAs, unverified, submitToken, clearToken, setTypedPrincipalId };
+  return { me, loading, error, unreachable, reload: load, actingAs, unverified,
+           submitToken, clearToken, setTypedPrincipalId };
+}
+
+export function Unreachable({ session }: { session: Session }) {
+  return (
+    <div className="unreachable">
+      <p role="alert" className="error">
+        The API is not answering: {session.error ?? "unknown error"}. Nothing here is a sign-in
+        problem — check that the API process is running and reachable at this origin.
+      </p>
+      <button type="button" onClick={() => void session.reload()}>Retry</button>
+    </div>
+  );
 }
 
 export function ActingAs({ session }: { session: Session }) {

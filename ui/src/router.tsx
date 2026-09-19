@@ -8,7 +8,15 @@ const BASE = "/ui";
 export function parseRoute(pathname: string): Route {
   const rest = pathname.startsWith(BASE) ? pathname.slice(BASE.length) : pathname;
   const parts = rest.split("/").filter(Boolean);
-  if (parts[0] === "runs" && parts[1]) return { page: "run", id: decodeURIComponent(parts[1]) };
+  if (parts[0] === "runs" && parts[1]) {
+    // A malformed id (`%E0%A4%A`) must land on the list, not throw inside a render initializer
+    // (there is no error boundary above the router; a throw here is a blank page).
+    try {
+      return { page: "run", id: decodeURIComponent(parts[1]) };
+    } catch {
+      return { page: "runs" };
+    }
+  }
   if (parts[0] === "runs") return { page: "runs" };
   return { page: "inbox" };
 }

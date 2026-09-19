@@ -198,7 +198,7 @@ acceptance test is in the suite.
 ## 7. Operability — zero-ops or it dies
 
 - `docker compose up` is the whole product. Add an **SQLite store adapter** in Phase 1 so
-  `pip install agentos && agentos serve` works with no infrastructure at all; Postgres is
+  `pip install dagentos && uvicorn dagentos.api.main:app` works with no infrastructure at all; Postgres is
   the production adapter, not the entry ticket.
 - Single binary of truth: the event log. Backup = `pg_dump` (or copy the SQLite file).
 - Health, readiness, and a `agentos doctor` command that replays the golden corpus
