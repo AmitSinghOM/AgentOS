@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import secrets
 from hashlib import sha256
 
 import pytest
@@ -114,7 +113,3 @@ def test_me_reports_the_recorded_principal_per_mode(monkeypatch, tmp_path):
     assert body["principal"]["attestation"].startswith("token:sha256:")
     main = _app(monkeypatch, mode="asserted", tmp_path=tmp_path)
     assert TestClient(main.app).get("/me").json() == {"mode": "asserted", "principal": None}
-
-
-def test_random_token_is_not_the_test_token():
-    assert secrets.token_hex(8) != TOKEN     # guards against a fixture accidentally shipping

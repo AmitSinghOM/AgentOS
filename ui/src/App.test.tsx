@@ -91,6 +91,7 @@ describe("bearer mode", () => {
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent("token rejected: unknown bearer token");
     expect(screen.queryByText(/acting as/i)).not.toBeInTheDocument();
+    expect(window.sessionStorage.getItem("agentos.token")).toBeNull();   // not re-sent on reload
   });
 
   it("shows who the log will name, lists the approval, and approves with a reason-only body", async () => {

@@ -32,7 +32,10 @@ export function useSession(): Session {
     } catch (e) {
       setMe(null);
       if (e instanceof ApiError && e.status === 401) {
-        setError(getToken() ? `token rejected: ${e.detail}` : null);
+        // A token the API rejected must not be re-sent on every reload: forget it and say why.
+        const had = getToken();
+        if (had) setToken(null);
+        setError(had ? `token rejected: ${e.detail}` : null);
       } else {
         setError(e instanceof Error ? e.message : String(e));
       }
