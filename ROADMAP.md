@@ -365,7 +365,7 @@ resume via `Last-Event-ID`); an OpenAI Agents SDK agent runs as one governed ste
   `executor`. Tested against PydanticAI's `FunctionModel` (no network); live via Ollama; core
   forbids importing `pydantic_ai`
 
-**Tag:** `v0.8.0-watchable`. **Post:** "The Stream Is the Log."
+**Tag:** `v0.8.0-watchable`; `v0.8.1` adds the PydanticAI harness and the shared tool registry (#48). **Post:** "The Stream Is the Log."
 
 **Carry-forward decision (2026-09-18).** Both goal items shipped in the shape the landscape
 check asked for. Token-level streaming is deferred because it needs an executor hook that
