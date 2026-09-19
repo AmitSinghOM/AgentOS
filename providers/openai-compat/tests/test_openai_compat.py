@@ -24,16 +24,16 @@ from agentos_provider_openai_compat import (
     from_env,
 )
 
-from agentos.core.models import Agent, AgentType, BlobRef, Budget, StepRequest
-from agentos.providerkit.cassette import CassetteMiss
-from agentos.providerkit.pricing import PricingTable
+from dagentos.core.models import Agent, AgentType, BlobRef, Budget, StepRequest
+from dagentos.providerkit.cassette import CassetteMiss
+from dagentos.providerkit.pricing import PricingTable
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "scripts"))
 import openai_reference_server
 
-from agentos.providerkit.conformance import QUICKSTART, SCENARIOS, quickstart_requests, request_for
+from dagentos.providerkit.conformance import QUICKSTART, SCENARIOS, quickstart_requests, request_for
 
 CASSETTES = HERE / "cassettes"
 

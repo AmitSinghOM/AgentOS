@@ -1,4 +1,4 @@
-"""The built-in `tool` executor (core install, no extras) imports `agentos.providerkit.prompt`,
+"""The built-in `tool` executor (core install, no extras) imports `dagentos.providerkit.prompt`,
 so importing the kit package must not drag in `jsonschema`. CI's bare-install chaos job caught
 the worker failing to start when `providerkit/__init__` re-exported `schema` eagerly; this pins
 it in the ordinary suite by running a fresh interpreter with `jsonschema` made unimportable."""
@@ -17,11 +17,11 @@ PROBE = textwrap.dedent("""
             return None
     sys.meta_path.insert(0, _Block())
 
-    import agentos.providerkit                      # must import without jsonschema
-    from agentos.providerkit import render_prompt   # what agentos.agents.tool needs
-    import agentos.agents.tool                      # the worker's composition root imports this
+    import dagentos.providerkit                      # must import without jsonschema
+    from dagentos.providerkit import render_prompt   # what dagentos.agents.tool needs
+    import dagentos.agents.tool                      # the worker's composition root imports this
     try:
-        agentos.providerkit.OutputSchema            # lazy: only NOW does it need jsonschema
+        dagentos.providerkit.OutputSchema            # lazy: only NOW does it need jsonschema
     except ImportError as exc:
         print("lazy-ok:", exc)
     else:

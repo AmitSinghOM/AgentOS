@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agentos.core.engine import ControlNotAllowed, Engine
-from agentos.core.events import (
+from dagentos.core.engine import ControlNotAllowed, Engine
+from dagentos.core.events import (
     ApprovalGranted,
     ApprovalRejected,
     ApprovalRequested,
@@ -15,7 +15,7 @@ from agentos.core.events import (
     StepDeadLettered,
     StepStarted,
 )
-from agentos.core.models import (
+from dagentos.core.models import (
     Agent,
     AgentType,
     ApprovalStatus,
@@ -30,8 +30,8 @@ from agentos.core.models import (
     StepResult,
     WorkflowDefinition,
 )
-from agentos.store.memory import MemoryStore
-from agentos.worker import Worker
+from dagentos.store.memory import MemoryStore
+from dagentos.worker import Worker
 
 HUMAN = Principal(kind=PrincipalKind.human, id="amit")
 AGENT = Principal(kind=PrincipalKind.agent, id="reviewer-bot")
@@ -255,7 +255,7 @@ def test_approval_api(monkeypatch):
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv("AGENTOS_STORE", "memory")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     main.engine._executors = {"echo": RecordingExecutor()}
     c = TestClient(main.app)

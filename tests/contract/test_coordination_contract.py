@@ -7,11 +7,11 @@ import time
 
 import pytest
 
-from agentos.core.coordination import LeaseToken
-from agentos.core.events import RunStarted, StepStarted
-from agentos.core.ports import ConflictError
-from agentos.store.memory import MemoryStore
-from agentos.store.sqlite import SqliteStore
+from dagentos.core.coordination import LeaseToken
+from dagentos.core.events import RunStarted, StepStarted
+from dagentos.core.ports import ConflictError
+from dagentos.store.memory import MemoryStore
+from dagentos.store.sqlite import SqliteStore
 
 PG_DSN = os.environ.get("AGENTOS_TEST_PG_DSN")
 ADAPTERS = ["memory", "sqlite"] + (["postgres"] if PG_DSN else [])
@@ -26,7 +26,7 @@ def coord(request, tmp_path):
         yield s
         s.close()
     else:
-        from agentos.store.postgres import PostgresStore
+        from dagentos.store.postgres import PostgresStore
         schema = f"c_{tmp_path.name.lower().replace('-', '_')}"[:60]
         s = PostgresStore(PG_DSN, schema=schema)
         try:

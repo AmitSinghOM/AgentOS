@@ -39,7 +39,7 @@ What would not survive seven years as written (all fixable now, cheaply):
 ```
 agentos/
   core/         domain + ports. Imports: stdlib (+ pydantic, tolerated until Phase 2).
-                MUST NOT import agentos.api, agentos.store, agentos.agents, agentos.providers,
+                MUST NOT import dagentos.api, dagentos.store, dagentos.agents, agentos.providers,
                 or any SDK (openai, boto3, anthropic, redis, sqlalchemy, fastapi).
   store/        persistence adapters implementing core.ports.Store   (memory, postgres, sqlite)
   agents/       step executors implementing core.ports.Executor       (echo, tool, llm bridge)
@@ -218,7 +218,7 @@ acceptance test is in the suite.
 Phase 1 gains these items (mirrored in `ROADMAP.md`):
 
 - `core/ports.py` with `Store` and `Executor`; engine takes both as arguments. **Done.**
-- `import-linter` contract: `agentos.core` imports only stdlib + pydantic. **Done, in CI.**
+- `import-linter` contract: `dagentos.core` imports only stdlib + pydantic. **Done, in CI.**
 - CI matrix `[3.11, 3.14]`. **Done.**
 - Event model with `schema_version`, `event_type`, `parent_run_id`; upcaster registry.
 - `StepRequest`/`StepResult` as in §2.1; `echo` and `tool` executors implement the port.
@@ -263,7 +263,7 @@ Phase 1 scope in `ROADMAP.md`; the rest are Phase 2–3.
 | A5 | **Long-running steps look dead.** A 2026 agentic step already runs for tens of minutes; §2.1 is request/response. A lease-based worker (C6) sees no progress and expires the lease. | False crash detection → duplicate execution attempts → the exact bug class C1 exists to prevent. | **Heartbeat + `StepProgress` (Phase 1).** Executors receive a `progress()` callback; each call renews the lease and may append a `StepProgress{fraction, note}` event (rate-limited). Lease expiry is measured from the last heartbeat, not step start. `budget.max_wall_time` still hard-caps. |
 | A6 | **Cost is token-shaped.** §2.1 `Cost` = tokens in/out + currency. Pricing already includes per-second GPU, per-request, per-image, cached-token discounts; prices change monthly. | Historic costs become unexplainable when prices move; non-token providers cannot report. | **Generic metered cost (Phase 1).** `Cost{units: tuple[Meter{name, quantity}], amount, currency, pricing_snapshot_hash}`. The pricing table used is content-addressed and stored as a blob, so "why did run #4821 cost $2.10" is answerable in 2033. |
 | A7 | **Append-only vs. the right to erasure.** Prompts contain personal data. §3 forbids deleting events; regulation requires deleting data. | Either the log is mutable (breaks §3) or the project is undeployable for real users. | **Crypto-shredding (Phase 2).** Payload blobs (A4) are encrypted with a per-run data key kept in a `KeyStore` port; erasure = destroy the key and append `RunErased{principal, reason}`. The log remains append-only and replayable to *structure*; content is gone. |
-| A8 | **Tool-protocol churn.** Function-calling formats differed per vendor; MCP (2024) and A2A (2025) are the current convergence; neither will be the last. §1 has no place for them. | Protocol code leaks into executors or, worse, the core. | **`agentos/protocols/` adapter layer (Phase 2).** Tools are described to the core by JSON Schema only. MCP, A2A, and vendor-native function calling are adapters that translate to/from that. Tool *results* are data, never prompt (C12). |
+| A8 | **Tool-protocol churn.** Function-calling formats differed per vendor; MCP (2024) and A2A (2025) are the current convergence; neither will be the last. §1 has no place for them. | Protocol code leaks into executors or, worse, the core. | **`dagentos/protocols/` adapter layer (Phase 2).** Tools are described to the core by JSON Schema only. MCP, A2A, and vendor-native function calling are adapters that translate to/from that. Tool *results* are data, never prompt (C12). |
 | A9 | **Observability speaks a private dialect.** §5/§7 emit OTel spans with whatever attribute names we pick. | 2030 tooling cannot read 2026 traces. | **OpenTelemetry GenAI semantic conventions (Phase 3).** Use `gen_ai.*` attributes for model, tokens, provider; AgentOS-specific attributes namespaced `agentos.*`. Costs and effects also exported as span events. |
 | A10 | **Provider plugins are untestable once the model is gone.** §2.2 plugins pin an SDK; their tests call a live model that will be deprecated. | Plugins rot silently; CI goes red for reasons no one can fix. | **Record/replay fixtures (Phase 1, with the first plugin).** Every provider test runs against recorded HTTP cassettes; a nightly opt-in job re-records against the live vendor. A plugin whose live job fails for 30 days is marked `deprecated` in its own README, not in core. |
 | A11 | **Evals are not the control plane's job, but its data is.** Model swaps (A3) change outputs; someone must measure that. §5 tests correctness of the *log*, not quality of the *steps*. | Temptation to grow an eval framework inside AgentOS (scope creep; opik exists). | **Export, don't evaluate (Phase 3).** `agentos export-run --format jsonl` emits every step's inputs/outputs by hash plus provenance so an external evaluator (opik, custom) can diff runs across models. AgentOS never scores; it records. |

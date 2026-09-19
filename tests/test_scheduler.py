@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agentos.core.engine import Engine, RetryNotAllowed
-from agentos.core.events import (
+from dagentos.core.engine import Engine, RetryNotAllowed
+from dagentos.core.events import (
     RunFailed,
     StepCompleted,
     StepDeadLettered,
@@ -17,7 +17,7 @@ from agentos.core.events import (
     StepRetryRequested,
     StepStarted,
 )
-from agentos.core.models import (
+from dagentos.core.models import (
     Agent,
     AgentType,
     Cost,
@@ -31,7 +31,7 @@ from agentos.core.models import (
     StepResult,
     WorkflowDefinition,
 )
-from agentos.store.memory import MemoryStore
+from dagentos.store.memory import MemoryStore
 
 
 class FlakyExecutor:
@@ -234,7 +234,7 @@ def test_retry_via_api_endpoint(monkeypatch):
     monkeypatch.setenv("AGENTOS_STORE", "memory")
     import importlib
 
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     client = TestClient(main.app)
     # Swap in a poison executor behind the API's engine.

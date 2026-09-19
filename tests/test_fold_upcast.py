@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.core import upcast as upcast_mod
-from agentos.core.events import (
+from dagentos.core import upcast as upcast_mod
+from dagentos.core.events import (
     CURRENT_SCHEMA_VERSION,
     RunCompleted,
     RunFailed,
@@ -13,8 +13,8 @@ from agentos.core.events import (
     StepStarted,
     from_record,
 )
-from agentos.core.fold import FoldError, fold
-from agentos.core.models import BlobRef, RunStatus
+from dagentos.core.fold import FoldError, fold
+from dagentos.core.models import BlobRef, RunStatus
 
 REF = BlobRef(sha256="a" * 64, size=2)
 

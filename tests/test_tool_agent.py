@@ -1,4 +1,4 @@
-"""The built-in `tool` executor (agentos/agents/tool.py): HTTP and subprocess steps under
+"""The built-in `tool` executor (dagentos/agents/tool.py): HTTP and subprocess steps under
 the same gate, meter, provenance and trust boundary as model steps."""
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ import sys
 import httpx
 import pytest
 
-from agentos.agents.echo import EchoExecutor
-from agentos.agents.tool import ToolError, ToolExecutor
-from agentos.core.engine import Engine
-from agentos.core.models import (
+from dagentos.agents.echo import EchoExecutor
+from dagentos.agents.tool import ToolError, ToolExecutor
+from dagentos.core.engine import Engine
+from dagentos.core.models import (
     Agent,
     AgentType,
     Budget,
@@ -19,8 +19,8 @@ from agentos.core.models import (
     RunStatus,
     WorkflowDefinition,
 )
-from agentos.providerkit.conformance import request_for
-from agentos.store.memory import MemoryStore
+from dagentos.providerkit.conformance import request_for
+from dagentos.store.memory import MemoryStore
 
 INJECTION = "x; rm -rf / #{run.topic}"
 
@@ -181,7 +181,7 @@ def test_tool_write_is_gated_like_any_other_write():
     _, eng = _engine(_server(seen), declared=(EffectClass.write_external,), method="POST")
     run = eng.start_run("w", inputs={"topic": "agents"})
     assert run.status is RunStatus.suspended and seen == []               # nothing sent yet
-    from agentos.core.models import Principal, PrincipalKind
+    from dagentos.core.models import Principal, PrincipalKind
     (aid,) = run.approvals
     eng.approve(run.id, aid, principal=Principal(kind=PrincipalKind.human, id="amit"))
     run = eng.advance(run.id)
@@ -205,7 +205,7 @@ def test_egress_guard_refuses_metadata_and_private_addresses_unless_opted_in(mon
     """Security review F1: an operator-trusted hostname can resolve to the cloud metadata
     service or a private network (mistake, or DNS rebinding). Link-local is never allowed;
     private/loopback needs an explicit opt-in on the agent."""
-    from agentos.agents import tool as t
+    from dagentos.agents import tool as t
 
     def fake_resolve(addr):
         def getaddrinfo(host, port, *a, **k):
@@ -234,7 +234,7 @@ def test_egress_guard_refuses_metadata_and_private_addresses_unless_opted_in(mon
 
 def test_egress_guard_runs_only_on_the_real_network(monkeypatch):
     """With an injected transport (tests, cassettes) there is no egress to guard."""
-    from agentos.agents import tool as t
+    from dagentos.agents import tool as t
     called = []
     monkeypatch.setattr(t, "_check_egress", lambda *a, **k: called.append(a))
     ToolExecutor(transport=_server([])).execute(

@@ -4,7 +4,7 @@
 #
 #   docker run --rm ghcr.io/amitsinghom/agentos agentos --help
 #   docker run --rm -p 8000:8000 -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos
-#   docker run --rm -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos python -m agentos.worker
+#   docker run --rm -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos python -m dagentos.worker
 #
 # Local build: `python -m build` (core) and each provider into ./dist first, then
 #   docker build -t agentos:local .
@@ -18,7 +18,7 @@ RUN python -m venv /opt/agentos \
  # our own packages by wheel PATH (never resolved from an index); their third-party
  # dependencies come from PyPI as usual
  && /opt/agentos/bin/pip install --no-cache-dir \
-      "$(ls ./dist/agentos_durable-*.whl)[providerkit,observability]" \
+      "$(ls ./dist/dagentos-*.whl)[providerkit,observability]" \
       ./dist/agentos_provider_openai_compat-*.whl ./dist/agentos_provider_anthropic-*.whl \
       ./dist/agentos_provider_openai_agents-*.whl ./dist/agentos_provider_pydantic_ai-*.whl \
  && /opt/agentos/bin/agentos --help > /dev/null
@@ -39,4 +39,4 @@ VOLUME ["/var/lib/agentos"]
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)" || exit 1
-CMD ["uvicorn", "agentos.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "dagentos.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

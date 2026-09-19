@@ -37,7 +37,7 @@ Zero-config default: the SDK's chat-completions model against a local Ollama
 Temporal's Agent Harness describes "a seam between the model deciding to use a capability
 and that capability actually executing". Here it is two things you already have:
 
-1. **The tool registry** (`agentos.providerkit.tools`, shared with the PydanticAI harness).
+1. **The tool registry** (`dagentos.providerkit.tools`, shared with the PydanticAI harness).
    Tools are the operator's Python functions, each carrying an `EffectClass`. Agent JSON
    names them; it never contains code. Register yours with the `agentos.tools` entry point
    (a callable returning `Iterable[ToolSpec]`) and every inner harness offers them; this
@@ -67,7 +67,7 @@ Replace `json_output: true` with a JSON Schema object under `config.output_schem
 sends it to the model as `response_format` (`strict: false` — operator schemas are rarely
 OpenAI-strict, and a local Ollama ignores strictness) and calls `validate_json` on the reply;
 that call is answered by `agentos_provider_openai_agents.output_schema.KitOutputSchema`, a thin
-adapter over `agentos.providerkit.schema`, the same validator the PydanticAI harness uses. A
+adapter over `dagentos.providerkit.schema`, the same validator the PydanticAI harness uses. A
 violation is a `ModelBehaviorError` → `BadResponse` naming the first failing path; a valid reply
 lands in `output["json"]` with `schema_sha256`, the contract hash a downstream step pins to.
 Remote `$ref`s are refused at first use; `format` is never enforced; the schema is part of

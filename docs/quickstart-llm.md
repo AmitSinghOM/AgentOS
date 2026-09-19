@@ -30,8 +30,8 @@ imports it; the API and worker find it through the `agentos.executors` entry poi
 ## 3. Check what can run
 
 ```bash
-uvicorn agentos.api.main:app --port 8000 &
-python -m agentos.worker &
+uvicorn dagentos.api.main:app --port 8000 &
+python -m dagentos.worker &
 curl -s localhost:8000/executors | python -m json.tool
 ```
 
@@ -172,7 +172,7 @@ curl -X POST localhost:8000/agents -H 'Content-Type: application/json' -d @examp
 It registers as `critic` version 2 (agent versions are immutable, so the untyped v1 stays).
 The schema is shown to the model by the SDK (PydanticAI puts it in the instructions; the
 Agents SDK sends it as `response_format`), but neither SDK enforces it — AgentOS does, once, in
-`agentos.providerkit.schema`, so the two harnesses accept exactly the same replies. The
+`dagentos.providerkit.schema`, so the two harnesses accept exactly the same replies. The
 schema's SHA-256 lands on `step.completed` as `schema_sha256`: a downstream step or an
 evaluator pins to the contract, not to the prose that produced it. Remote `$ref`s are refused
 (a schema can never trigger a fetch) and `format` is never enforced (reproducible verdicts).
@@ -201,7 +201,7 @@ tags like any other upstream output. `{"kind": "subprocess", "argv": [...]}` run
 instead; inputs arrive on stdin as JSON, never in `argv`, and a timeout kills the whole
 process group. Calling something on your own machine (`http://localhost:…`) needs
 `"allow_private_networks": true` on the agent — link-local addresses (cloud metadata) are
-never allowed. Details: `agentos/agents/tool.py`.
+never allowed. Details: `dagentos/agents/tool.py`.
 
 ## 8. See it in Jaeger and Grafana (optional)
 

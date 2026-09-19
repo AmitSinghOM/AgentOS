@@ -1,7 +1,7 @@
-"""Packaging facts that must not drift (Phase 8 #10), checked from the files themselves:
-  * the distribution is `agentos-durable` (PyPI `agentos` belongs to another project) and the
-    wheel ships the `agentos` import package
-  * core and every provider share one version, and providers depend on `agentos-durable`
+"""Packaging facts that must not drift, checked from the files themselves:
+  * distribution AND import package are both `dagentos` (PyPI `agentos` is agentos.org's and
+    `agenticos` another project's — both with the same import names; `dagentos` was free)
+  * core and every provider share one version, and providers depend on `dagentos`
   * the API reports the same version
   * every action in publish.yml is pinned by a 40-hex commit SHA (it holds id-token: write)
   * the Dockerfile pins its base by digest and runs as a non-root user
@@ -19,10 +19,10 @@ PROVIDERS = sorted((ROOT / "providers").glob("*/pyproject.toml"))
 
 
 def test_distribution_name_and_import_package():
-    assert CORE["project"]["name"] == "agentos-durable"
-    assert CORE["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["agentos"]
+    assert CORE["project"]["name"] == "dagentos"
+    assert CORE["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["dagentos"]
     assert CORE["project"]["readme"] == "README.md"
-    assert CORE["project"]["scripts"] == {"agentos": "agentos.cli:main"}
+    assert CORE["project"]["scripts"] == {"agentos": "dagentos.cli:main"}
     assert "Repository" in CORE["project"]["urls"]
 
 
@@ -32,16 +32,16 @@ def test_one_version_everywhere():
     for p in PROVIDERS:
         prov = tomllib.loads(p.read_text())["project"]
         assert prov["version"] == version, p
-        deps = [d for d in prov["dependencies"] if d.startswith("agentos")]
-        assert len(deps) == 1 and deps[0].startswith("agentos-durable[providerkit]"), (p, deps)
+        deps = [d for d in prov["dependencies"] if d.startswith("dagentos")]
+        assert len(deps) == 1 and deps[0].startswith("dagentos[providerkit]"), (p, deps)
         assert prov["readme"] == "README.md", p
-    api = (ROOT / "agentos" / "api" / "main.py").read_text()
+    api = (ROOT / "dagentos" / "api" / "main.py").read_text()
     assert f'FastAPI(title="AgentOS", version="{version}")' in api
 
 
 def test_sdist_ships_only_the_package_and_what_a_rebuilder_needs():
     include = CORE["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
-    assert "/agentos/**" in include and "/pyproject.toml" in include and "/README.md" in include
+    assert "/dagentos/**" in include and "/pyproject.toml" in include and "/README.md" in include
     for banned in ("tests", "providers", ".github", "docker-compose.yml", "deploy"):
         assert not any(banned in i for i in include), banned
 
@@ -63,7 +63,7 @@ def test_dockerfile_pins_base_by_digest_and_drops_root():
     froms = re.findall(r"^FROM (\S+)", df, re.MULTILINE)
     assert froms and all("@sha256:" in f for f in froms), froms
     assert "USER agentos" in df and "useradd" in df
-    assert "./dist/agentos_durable-*.whl" in df          # installed by path, never from an index
+    assert "./dist/dagentos-*.whl" in df          # installed by path, never from an index
     assert "--find-links" not in df and "--index-url" not in df
     ignore = [line.strip() for line in (ROOT / ".dockerignore").read_text().splitlines()
               if line.strip() and not line.startswith("#")]

@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.core import faults
-from agentos.core.events import StepCompleted
-from agentos.core.faults import Crash, CrashAt
+from dagentos.core import faults
+from dagentos.core.events import StepCompleted
+from dagentos.core.faults import Crash, CrashAt
 
 from .conftest import assert_invariants, make_worker
 

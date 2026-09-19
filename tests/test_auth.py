@@ -22,15 +22,15 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
-from agentos.api import auth as auth_mod
-from agentos.api.auth import (
+from dagentos.api import auth as auth_mod
+from dagentos.api.auth import (
     AuthConfig,
     AuthError,
     AuthMode,
     StaticTokenAuthenticator,
     token_digest,
 )
-from agentos.core.models import PrincipalKind
+from dagentos.core.models import PrincipalKind
 
 HUMAN_TOKEN = "human-secret-for-tests-only"
 AGENT_TOKEN = "agent-secret-for-tests-only"
@@ -58,7 +58,7 @@ def _app(monkeypatch, *, mode: str, tokens=None):
         monkeypatch.setenv("AGENTOS_AUTH_TOKENS", str(tokens))
     else:
         monkeypatch.delenv("AGENTOS_AUTH_TOKENS", raising=False)
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     return main
 
@@ -327,7 +327,7 @@ def test_openapi_declares_the_bearer_scheme_only_in_bearer_mode(monkeypatch, tok
     doc = c.get("/openapi.json", headers=_bearer(AGENT_TOKEN)).json()
     assert doc["components"]["securitySchemes"]["bearerAuth"] == {
         "type": "http", "scheme": "bearer",
-        "description": "Token from the operator's AGENTOS_AUTH_TOKENS file (agentos/api/auth.py)."}
+        "description": "Token from the operator's AGENTOS_AUTH_TOKENS file (dagentos/api/auth.py)."}
     assert doc["security"] == [{"bearerAuth": []}]
     assert doc["paths"]["/health"]["get"]["security"] == []
     assert "security" not in doc["paths"]["/agents"]["post"]   # inherits the global requirement

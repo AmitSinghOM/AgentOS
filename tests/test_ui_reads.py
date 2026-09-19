@@ -13,7 +13,7 @@ def _client(monkeypatch):
     monkeypatch.setenv("AGENTOS_AUTH", "asserted")
     for k in ("AGENTOS_POLICY", "AGENTOS_SIGNING_KEYS", "AGENTOS_UI_DIR"):
         monkeypatch.delenv(k, raising=False)
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     return TestClient(main.app)
 
@@ -57,7 +57,7 @@ def test_both_are_authenticated_in_bearer_mode(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTOS_AUTH_TOKENS", str(tokens))
     c = _client(monkeypatch)
     monkeypatch.setenv("AGENTOS_AUTH", "bearer")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     c = TestClient(main.app)
     assert c.get("/runs").status_code == 401 and c.get("/workflows/w").status_code == 401

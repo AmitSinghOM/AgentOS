@@ -20,12 +20,12 @@ import threading
 import pytest
 from fastapi.testclient import TestClient
 
-from agentos.agents.echo import EchoExecutor
-from agentos.api.stream import POLL_FLOOR_SECONDS, StreamConfig, parse_after, stream_run
-from agentos.core.engine import Engine
-from agentos.core.models import Agent, AgentType, WorkflowDefinition
-from agentos.store.memory import MemoryStore
-from agentos.store.sqlite import SqliteStore
+from dagentos.agents.echo import EchoExecutor
+from dagentos.api.stream import POLL_FLOOR_SECONDS, StreamConfig, parse_after, stream_run
+from dagentos.core.engine import Engine
+from dagentos.core.models import Agent, AgentType, WorkflowDefinition
+from dagentos.store.memory import MemoryStore
+from dagentos.store.sqlite import SqliteStore
 
 FAST = StreamConfig(poll_seconds=0.01, keepalive_seconds=1000, max_seconds=1000)
 
@@ -51,7 +51,7 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTOS_STORE", "sqlite")
     monkeypatch.setenv("AGENTOS_SQLITE_PATH", str(tmp_path / "agentos.db"))
     monkeypatch.setenv("AGENTOS_STREAM_POLL_SECONDS", "0.01")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     c = TestClient(main.app)
     c.post("/agents", json={"name": "g", "type": "echo", "config": {"message": "hi"}})

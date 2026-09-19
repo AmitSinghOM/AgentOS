@@ -13,8 +13,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 from opentelemetry.trace import StatusCode
 
-from agentos.core.engine import Engine
-from agentos.core.models import (
+from dagentos.core.engine import Engine
+from dagentos.core.models import (
     Agent,
     AgentType,
     Cost,
@@ -29,16 +29,16 @@ from agentos.core.models import (
     StepResult,
     WorkflowDefinition,
 )
-from agentos.observability import replay
-from agentos.observability.otel import (
+from dagentos.observability import replay
+from dagentos.observability.otel import (
     GEN_AI_REQUEST_MODEL,
     GEN_AI_SYSTEM,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
     OtelObserver,
 )
-from agentos.observability.prometheus import PrometheusObserver
-from agentos.store.memory import MemoryStore
+from dagentos.observability.prometheus import PrometheusObserver
+from dagentos.store.memory import MemoryStore
 
 
 class LlmLike:
@@ -159,8 +159,8 @@ def test_two_processes_produce_one_trace_per_run():
     """The API appends run.started; a worker appends the rest; each has its own observer
     and neither propagates context. Trace and run-span ids derive from the run id, and the
     worker's observer resolves run facts from the store, so the pieces meet in one trace."""
-    from agentos.observability import replay, store_resolver
-    from agentos.observability.otel import run_ids
+    from dagentos.observability import replay, store_resolver
+    from dagentos.observability.otel import run_ids
 
     api_exp, worker_exp = InMemorySpanExporter(), InMemorySpanExporter()
     store, eng = build()
@@ -293,7 +293,7 @@ def test_core_still_imports_no_telemetry_sdk():
     import subprocess
     import sys
     # Fresh interpreter: import the core, assert no telemetry SDK module got loaded.
-    code = ("import sys, agentos.core.engine, agentos.core.ports; "
+    code = ("import sys, dagentos.core.engine, dagentos.core.ports; "
             "bad=[m for m in sys.modules if m.startswith(('opentelemetry','prometheus_client'))]; "
             "print(len(bad))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
@@ -306,7 +306,7 @@ def test_metrics_endpoint_exposes_queue_depth(monkeypatch):
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv("AGENTOS_STORE", "memory")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     c = TestClient(main.app)
     c.post("/agents", json={"name": "a", "type": "echo"})
@@ -320,7 +320,7 @@ def test_metrics_endpoint_exposes_queue_depth(monkeypatch):
 def test_prometheus_in_the_worker_labels_by_workflow_via_the_resolver():
     """Without the resolver every worker-side metric was workflow="unknown" (the API
     appends run.started, the worker never sees it)."""
-    from agentos.observability import store_resolver
+    from dagentos.observability import store_resolver
 
     store, eng = build()
     run_id = eng.create_run("w")

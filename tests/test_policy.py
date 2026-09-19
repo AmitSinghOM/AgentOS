@@ -21,8 +21,8 @@ from decimal import Decimal
 
 import pytest
 
-from agentos.core.engine import ControlNotAllowed, Engine
-from agentos.core.models import (
+from dagentos.core.engine import ControlNotAllowed, Engine
+from dagentos.core.models import (
     Agent,
     AgentType,
     Budget,
@@ -32,7 +32,7 @@ from agentos.core.models import (
     RunStatus,
     WorkflowDefinition,
 )
-from agentos.core.policy import (
+from dagentos.core.policy import (
     OperatorPolicy,
     PolicyError,
     apply_ceiling,
@@ -41,7 +41,7 @@ from agentos.core.policy import (
     policy_from_env,
     policy_sha256,
 )
-from agentos.store.memory import MemoryStore
+from dagentos.store.memory import MemoryStore
 from tests.test_approvals import PinnedWall, RecordingExecutor
 
 FREE_SPEND = Budget(allowed_effect_classes={EffectClass.read, EffectClass.compute, EffectClass.spend},
@@ -275,7 +275,7 @@ def test_get_policy_shows_the_ceiling_and_its_hash(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTOS_STORE", "memory")
     monkeypatch.setenv("AGENTOS_AUTH", "asserted")
     monkeypatch.setenv("AGENTOS_POLICY", str(p))
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     c = TestClient(main.app)
     body = c.get("/policy").json()

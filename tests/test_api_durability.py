@@ -15,7 +15,7 @@ def app_factory(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTOS_SQLITE_PATH", str(tmp_path / "agentos.db"))
 
     def make():
-        from agentos.api import main
+        from dagentos.api import main
         importlib.reload(main)          # fresh composition root = "process restart"
         return main
 

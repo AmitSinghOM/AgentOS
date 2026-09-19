@@ -8,7 +8,7 @@ inherits.
 
 ```bash
 cd ui && npm ci && npm run build          # → ui/dist
-uvicorn agentos.api.main:app              # mounts /ui when ui/dist/index.html exists
+uvicorn dagentos.api.main:app              # mounts /ui when ui/dist/index.html exists
 open http://localhost:8000/ui/
 ```
 
@@ -80,7 +80,7 @@ the UI computes from events rather than from the fold. It follows the time-trave
 
 ## The contract the API keeps for the UI
 
-`agentos/api/ui.py` and `tests/test_ui_mount.py`:
+`dagentos/api/ui.py` and `tests/test_ui_mount.py`:
 
 - Only **GET/HEAD of static files under `/ui`** are exempt from authentication. A test enumerates
   every route under the prefix and fails if anything but the two UI handlers and the assets
@@ -98,10 +98,10 @@ the UI computes from events rather than from the fold. It follows the time-trave
 ## In the wheel and the image
 
 Release builds (and the CI `package` job) run `npm run build` and `python scripts/bundle_ui.py`,
-which copies `ui/dist` into `agentos/_ui` (gitignored; included by hatch `artifacts`). An
-installed `agentos-durable` therefore serves `/ui` with no Node at runtime, and so does the
+which copies `ui/dist` into `dagentos/_ui` (gitignored; included by hatch `artifacts`). An
+installed `dagentos` therefore serves `/ui` with no Node at runtime, and so does the
 image. `ui_dir()` resolution order: `AGENTOS_UI_DIR` → the checkout's `ui/dist` → the packaged
-`agentos/_ui`, so a developer's fresh build always wins over the installed copy.
+`dagentos/_ui`, so a developer's fresh build always wins over the installed copy.
 `scripts/release_smoke.py` fails a wheel that lacks the bundle or whose UI VERSION stamp differs
 from the package version.
 

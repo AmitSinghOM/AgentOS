@@ -1,10 +1,12 @@
 [project]
-# Distribution name. `agentos` on PyPI belongs to agentos.org (a different project whose
-# import package is ALSO `agentos`), so this package publishes as `agentos-durable`. The
-# import package here is still `agentos`; installing both in one environment clobbers files.
-# Renaming the import package is an open decision (docs/RELEASING.md).
-name = "agentos-durable"
-version = "0.10.0"
+# `dagentos` for both the distribution and the import package (`pip install dagentos` →
+# `import dagentos`). The product is still AgentOS; the env vars (AGENTOS_*), the `agentos` CLI,
+# the `agentos.executors` entry-point group and the image name keep the product name. History:
+# v0.9.0–v0.10.0 published as `agentos-durable` with import package `agentos`, because
+# `agentos` on PyPI belongs to agentos.org and `agenticos` to another project — both with the
+# same import names. `dagentos` was free on PyPI and npm on 2026-09-20 (docs/RELEASING.md).
+name = "dagentos"
+version = "0.11.0"
 description = "A control plane for durable, observable, human-in-the-loop LLM agent workflows"
 readme = "README.md"
 license = { text = "MIT" }
@@ -28,7 +30,7 @@ dependencies = [
     "pydantic>=2.6",
     "psycopg[binary]>=3.1",
     "psycopg-pool>=3.2",
-    "httpx>=0.27",            # built-in `tool` agent (agentos.agents.tool); the core never imports it
+    "httpx>=0.27",            # built-in `tool` agent (dagentos.agents.tool); the core never imports it
 ]
 
 [project.urls]
@@ -38,12 +40,12 @@ Changelog = "https://github.com/AmitSinghOM/AgentOS/releases"
 Documentation = "https://github.com/AmitSinghOM/AgentOS/blob/main/README.md"
 
 [project.scripts]
-agentos = "agentos.cli:main"
+agentos = "dagentos.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.4", "import-linter>=2.0"]
 # Observability adapters (docs/DEVELOPMENT_STRUCTURE.md §11 A9). The core never imports
-# these; agentos.observability does, and only when the extra is installed.
+# these; dagentos.observability does, and only when the extra is installed.
 observability = [
     "opentelemetry-api>=1.25",
     "opentelemetry-sdk>=1.25",
@@ -51,7 +53,7 @@ observability = [
     "opentelemetry-semantic-conventions>=0.46b0",
     "prometheus-client>=0.20",
 ]
-# Shared toolkit for provider plugins (agentos.providerkit): cassettes, pricing, errors,
+# Shared toolkit for provider plugins (dagentos.providerkit): cassettes, pricing, errors,
 # prompt templates. The core never imports it; the agentos-provider-* distributions do.
 providerkit = ["httpx>=0.27", "jsonschema>=4.20,<5"]
 
@@ -71,26 +73,26 @@ markers = [
 # Layering contract (docs/DEVELOPMENT_STRUCTURE.md §1). `lint-imports` runs in CI;
 # a PR that makes the core depend on an adapter or an SDK fails.
 [tool.importlinter]
-root_package = "agentos"
+root_package = "dagentos"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "core depends on nothing inside agentos"
+name = "core depends on nothing inside dagentos"
 type = "forbidden"
-source_modules = ["agentos.core"]
+source_modules = ["dagentos.core"]
 forbidden_modules = [
-    "agentos.api",
-    "agentos.store",
-    "agentos.agents",
-    "agentos.observability",
-    "agentos.plugins",
-    "agentos.providerkit",
+    "dagentos.api",
+    "dagentos.store",
+    "dagentos.agents",
+    "dagentos.observability",
+    "dagentos.plugins",
+    "dagentos.providerkit",
 ]
 
 [[tool.importlinter.contracts]]
 name = "core imports no framework or vendor SDK"
 type = "forbidden"
-source_modules = ["agentos.core"]
+source_modules = ["dagentos.core"]
 forbidden_modules = [
     "fastapi", "starlette", "uvicorn",
     "sqlalchemy", "psycopg", "redis",
@@ -106,24 +108,24 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "adapters do not import each other"
 type = "independence"
-modules = ["agentos.store", "agentos.agents", "agentos.observability"]
+modules = ["dagentos.store", "dagentos.agents", "dagentos.observability"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
-# The distribution is `agentos-durable`; the import package is `agentos`, so hatch must be
+# The distribution is `dagentos`; the import package is `agentos`, so hatch must be
 # told what to ship. The sdist is the source of exactly what the wheel contains plus what a
 # rebuilder needs — not the compose stack, CI, tests or provider trees (published separately).
 [tool.hatch.build.targets.wheel]
-packages = ["agentos"]
+packages = ["dagentos"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/agentos/**", "/README.md", "/LICENSE", "/pyproject.toml", "/examples/*.json"]
+include = ["/dagentos/**", "/README.md", "/LICENSE", "/pyproject.toml", "/examples/*.json"]
 exclude = ["**/__pycache__", "**/*.pyc"]
 
-# The operator UI bundle is built by Node (ui/) and copied to agentos/_ui by
+# The operator UI bundle is built by Node (ui/) and copied to dagentos/_ui by
 # scripts/bundle_ui.py before `python -m build`. It is gitignored, so hatch would drop it;
 # `artifacts` includes it anyway. A release build without it fails scripts/release_smoke.py.
 [tool.hatch.build]
-artifacts = ["agentos/_ui/**"]
+artifacts = ["dagentos/_ui/**"]

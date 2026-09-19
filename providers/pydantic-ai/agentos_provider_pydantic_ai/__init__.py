@@ -5,10 +5,10 @@ governor gates the step before dispatch and verifies reported effects after, tok
 metered as cost, and the whole trajectory lands in the hash-chained log.
 
 Second inner harness after `agentos-provider-openai-agents`; same tool registry
-(`agentos.providerkit.tools`), same config keys, same output shape. Zero-config default:
+(`dagentos.providerkit.tools`), same config keys, same output shape. Zero-config default:
 PydanticAI's OpenAI-compatible chat model against a local Ollama, no API key.
 """
-from agentos.providerkit import (
+from dagentos.providerkit import (
     AuthenticationFailed,
     BadResponse,
     ConfigError,

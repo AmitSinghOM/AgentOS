@@ -28,8 +28,8 @@ from agentos_provider_openai_agents import (
 from agents import ModelBehaviorError, Usage
 from agents.testing import ScriptedModel, assistant_message, function_call
 
-from agentos.core.engine import Engine
-from agentos.core.models import (
+from dagentos.core.engine import Engine
+from dagentos.core.models import (
     Agent,
     AgentType,
     BlobRef,
@@ -39,7 +39,7 @@ from agentos.core.models import (
     StepRequest,
     WorkflowDefinition,
 )
-from agentos.store.memory import MemoryStore
+from dagentos.store.memory import MemoryStore
 
 USAGE = Usage(requests=1, input_tokens=100, output_tokens=20, total_tokens=120)
 
@@ -273,6 +273,6 @@ def test_a_step_declaring_an_approval_required_class_is_suspended_before_dispatc
 
 
 def test_plugin_discovery_finds_the_executor():
-    from agentos.plugins import discover_executors
+    from dagentos.plugins import discover_executors
     found = discover_executors()
     assert "openai-agents" in found and found["openai-agents"].name == "openai-agents"

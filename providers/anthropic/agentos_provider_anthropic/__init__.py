@@ -4,7 +4,7 @@ Zero-config default: a local Ollama at http://127.0.0.1:11434 (it serves /v1/mes
 no API key. Point AGENTOS_ANTHROPIC_BASE_URL at https://api.anthropic.com with
 ANTHROPIC_API_KEY for Anthropic's models.
 """
-from agentos.providerkit import (
+from dagentos.providerkit import (
     AuthenticationFailed,
     BadResponse,
     ConfigError,

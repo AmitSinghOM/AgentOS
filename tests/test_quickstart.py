@@ -17,7 +17,7 @@ def app(monkeypatch):
     """A fresh composition root per test: agent versions are immutable, so tests that
     register the same (name, version) with different bodies must not share a store."""
     monkeypatch.setenv("AGENTOS_STORE", "memory")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     return main.app
 

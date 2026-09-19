@@ -39,7 +39,7 @@ provider's keys on purpose.
 
 ## Where the seam is
 
-1. **The tool registry** (`agentos.providerkit.tools`). Tools are the operator's Python
+1. **The tool registry** (`dagentos.providerkit.tools`). Tools are the operator's Python
    functions, each carrying an `EffectClass`. Agent JSON names them; it never contains
    code. Register yours with the `agentos.tools` entry point (a callable returning
    `Iterable[ToolSpec]`) and both inner harnesses offer them; two harmless built-ins
@@ -81,7 +81,7 @@ step's `json` is guaranteed to satisfy it, or the step fails naming the first vi
 schema reaches the model through `PromptedOutput(StructuredDict(schema))` — it works on any
 chat backend, no tool calling needed — and PydanticAI retries the model on non-JSON within
 `max_turns`. PydanticAI's `StructuredDict` validates only "is a JSON object", so the CONTRACT
-is enforced by `agentos.providerkit.schema`, the same code the openai-agents harness uses, and
+is enforced by `dagentos.providerkit.schema`, the same code the openai-agents harness uses, and
 its SHA-256 lands on `step.completed` as `schema_sha256`. Draft 2020-12; root must be `type:
 object`; remote `$ref`s are refused at first use (no fetch); `format` is never enforced
 (reproducible verdicts). The schema is part of `prompt_hash`.

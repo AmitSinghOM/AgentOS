@@ -8,25 +8,25 @@ commit SHA because it holds `id-token: write`.
 
 | Thing | Name | Why |
 | --- | --- | --- |
-| PyPI distribution (core) | `agentos-durable` | `agentos` on PyPI belongs to agentos.org — a different project whose **import package is also `agentos`** |
-| Import package | `agentos` | unchanged; `pip install agentos` and `pip install agentos-durable` in one environment clobber each other. Renaming the import package is an open decision, not a small one (every module, test and provider) |
-| PyPI distributions (providers) | `agentos-provider-openai-compat`, `-anthropic`, `-openai-agents`, `-pydantic-ai` | each depends on `agentos-durable[providerkit]` |
+| PyPI distribution (core) | `dagentos` | `agentos` on PyPI belongs to agentos.org and `agenticos` to another project — both with the same import names, both checked live on 2026-09-20. `dagentos` was free on PyPI and npm |
+| Import package | `dagentos` | same as the distribution since v0.11.0 (`pip install dagentos` → `import dagentos`). v0.9.0–v0.10.0 shipped as `agentos-durable` with import package `agentos`; those releases stay as published |
+| PyPI distributions (providers) | `agentos-provider-openai-compat`, `-anthropic`, `-openai-agents`, `-pydantic-ai` | each depends on `dagentos[providerkit]` |
 | Image | `ghcr.io/amitsinghom/agentos:{version,latest}` | GitHub namespace; multi-arch (amd64, arm64) |
 | Console script | `agentos` | `verify` / `doctor` / `policy explain` |
 
-Documented install path: `pip install "agentos-durable[providerkit]" agentos-provider-openai-compat`.
+Documented install path: `pip install "dagentos[providerkit]" agentos-provider-openai-compat`.
 
 ## Versions
 
 One version for the core and every provider (`publish.yml` refuses a tag whose version does
 not match `pyproject.toml`, and refuses a provider whose version differs from the core). Bump
-in: `pyproject.toml`, `providers/*/pyproject.toml`, `agentos/api/main.py` (`FastAPI(version=)`).
+in: `pyproject.toml`, `providers/*/pyproject.toml`, `dagentos/api/main.py` (`FastAPI(version=)`).
 Tag `vX.Y.Z` or `vX.Y.Z-<word>` (the word is dropped for the comparison: `v0.9.0-pilot` → `0.9.0`).
 
 ## The UI is part of the wheel
 
 `publish.yml` and the CI `package` job run `npm ci && npm test && npm run build` in `ui/` and then
-`python scripts/bundle_ui.py`, which copies the bundle to `agentos/_ui` (gitignored; hatch
+`python scripts/bundle_ui.py`, which copies the bundle to `dagentos/_ui` (gitignored; hatch
 `artifacts` includes it). `release_smoke.py` refuses a wheel without it. Building locally without
 Node produces a wheel that fails the smoke — by design; `docs/UI.md`.
 
@@ -48,7 +48,7 @@ distributions, on PyPI: *Your projects → Publishing → Add a new pending publ
 
 | Field | Value |
 | --- | --- |
-| PyPI project name | `agentos-durable` (then each `agentos-provider-*`) |
+| PyPI project name | `dagentos` (then each `agentos-provider-*`) |
 | Owner | `AmitSinghOM` |
 | Repository | `AgentOS` |
 | Workflow name | `publish.yml` |
@@ -67,13 +67,13 @@ forward with a new patch version.
 
 ```bash
 # provenance of a wheel (Sigstore-signed SLSA attestation produced by the release run)
-gh attestation verify agentos_durable-0.9.0-py3-none-any.whl --owner AmitSinghOM
+gh attestation verify dagentos-0.11.0-py3-none-any.whl --owner AmitSinghOM
 
 # provenance of the image
-gh attestation verify oci://ghcr.io/amitsinghom/agentos:0.9.0 --owner AmitSinghOM
+gh attestation verify oci://ghcr.io/amitsinghom/agentos:0.11.0 --owner AmitSinghOM
 
 # the release's SHA256SUMS matches what pip downloaded
-pip download --no-deps agentos-durable==0.9.0 -d /tmp/dl && (cd /tmp/dl && sha256sum *)
+pip download --no-deps dagentos==0.11.0 -d /tmp/dl && (cd /tmp/dl && sha256sum *)
 ```
 
 ## What the image is
@@ -81,12 +81,12 @@ pip download --no-deps agentos-durable==0.9.0 -d /tmp/dl && (cd /tmp/dl && sha25
 `python:3.12-slim` pinned by digest; a venv with the core (`[providerkit,observability]`) and all
 four providers installed **from the wheels the same run built** (by path, never from an index);
 non-root user `agentos` (uid 10001); `/var/lib/agentos` volume for the default SQLite store;
-`CMD` is the API; `python -m agentos.worker` is the worker; the `agentos` CLI is on `PATH`.
+`CMD` is the API; `python -m dagentos.worker` is the worker; the `agentos` CLI is on `PATH`.
 
 ```bash
-docker run --rm ghcr.io/amitsinghom/agentos:0.9.0 agentos --help
-docker run --rm -p 8000:8000 -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.9.0
-docker run --rm -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.9.0 python -m agentos.worker
+docker run --rm ghcr.io/amitsinghom/agentos:0.11.0 agentos --help
+docker run --rm -p 8000:8000 -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.11.0
+docker run --rm -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.11.0 python -m dagentos.worker
 ```
 
 ## Local dry run
@@ -96,7 +96,7 @@ pip install build==1.2.2.post1 twine==7.0.0 packaging==26.3
 (cd ui && npm ci && npm run build) && python scripts/bundle_ui.py
 rm -rf dist && python -m build --outdir dist . && for p in providers/*/; do python -m build --outdir dist "$p"; done
 python -m twine check --strict dist/*
-python -m venv /tmp/smoke && /tmp/smoke/bin/pip install "$(ls dist/agentos_durable-*.whl)[providerkit]" dist/agentos_provider_*.whl
+python -m venv /tmp/smoke && /tmp/smoke/bin/pip install "$(ls dist/dagentos-*.whl)[providerkit]" dist/agentos_provider_*.whl
 /tmp/smoke/bin/python scripts/release_smoke.py 0.9.0
 docker build -t agentos:local .            # needs the wheels in dist/
 ```

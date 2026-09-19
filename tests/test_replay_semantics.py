@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import random
 
-from agentos.core.engine import Engine
-from agentos.core.models import (
+from dagentos.core.engine import Engine
+from dagentos.core.models import (
     Agent,
     AgentType,
     Cost,
@@ -17,7 +17,7 @@ from agentos.core.models import (
     StepResult,
     WorkflowDefinition,
 )
-from agentos.store.memory import MemoryStore
+from dagentos.store.memory import MemoryStore
 
 
 class Dice:

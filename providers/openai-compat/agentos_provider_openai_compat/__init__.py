@@ -3,7 +3,7 @@
 Zero-config default: a local Ollama at http://127.0.0.1:11434/v1, no API key. See
 `config.py` for every environment variable and `executor.py` for the agent config keys.
 """
-from agentos.providerkit import (
+from dagentos.providerkit import (
     AuthenticationFailed,
     BadResponse,
     ConfigError,

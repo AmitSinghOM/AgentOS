@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentos-provider-anthropic"
-version = "0.10.0"
+version = "0.11.0"
 description = "AgentOS executor for the Anthropic Messages API wire format (Anthropic, and Ollama's /v1/messages) over plain HTTP"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "agentos-durable[providerkit]>=0.9,<1.0",
+    "dagentos[providerkit]>=0.11,<1.0",
     "httpx>=0.27",
 ]
 

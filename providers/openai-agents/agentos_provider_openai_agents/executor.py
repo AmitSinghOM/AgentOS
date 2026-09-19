@@ -47,10 +47,10 @@ from agents import (
 )
 from agents.items import ToolCallItem, ToolCallOutputItem
 
-from agentos.core.models import Effect, EffectClass, Meter, Provenance, StepRequest, StepResult
-from agentos.core.ports import ProgressFn
-from agentos.providerkit.config import ProviderConfig
-from agentos.providerkit.errors import (
+from dagentos.core.models import Effect, EffectClass, Meter, Provenance, StepRequest, StepResult
+from dagentos.core.ports import ProgressFn
+from dagentos.providerkit.config import ProviderConfig
+from dagentos.providerkit.errors import (
     AuthenticationFailed,
     BadResponse,
     ModelNotFound,
@@ -59,9 +59,9 @@ from agentos.providerkit.errors import (
     ProviderServerError,
     ProviderUnreachable,
 )
-from agentos.providerkit.pricing import PricingTable
-from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, strip_fences, wrap_input
-from agentos.providerkit.schema import OutputSchema
+from dagentos.providerkit.pricing import PricingTable
+from dagentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, strip_fences, wrap_input
+from dagentos.providerkit.schema import OutputSchema
 
 from .config import from_env
 from .output_schema import KitOutputSchema

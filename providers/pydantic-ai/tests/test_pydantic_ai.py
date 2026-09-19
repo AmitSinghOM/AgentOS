@@ -40,8 +40,8 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCall
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.usage import RequestUsage
 
-from agentos.core.engine import Engine
-from agentos.core.models import (
+from dagentos.core.engine import Engine
+from dagentos.core.models import (
     Agent,
     AgentType,
     BlobRef,
@@ -51,7 +51,7 @@ from agentos.core.models import (
     StepRequest,
     WorkflowDefinition,
 )
-from agentos.store.memory import MemoryStore
+from dagentos.store.memory import MemoryStore
 
 USAGE = RequestUsage(input_tokens=100, output_tokens=20)
 
@@ -412,6 +412,6 @@ def test_a_step_declaring_an_approval_required_class_is_suspended_before_dispatc
 
 
 def test_plugin_discovery_finds_the_executor():
-    from agentos.plugins import discover_executors
+    from dagentos.plugins import discover_executors
     found = discover_executors()
     assert "pydantic-ai" in found and found["pydantic-ai"].name == "pydantic-ai"

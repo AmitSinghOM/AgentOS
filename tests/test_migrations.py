@@ -14,9 +14,9 @@ import sqlite3
 
 import pytest
 
-from agentos.store import migrations
-from agentos.store.sqlite import SCHEMA as SQLITE_SCHEMA
-from agentos.store.sqlite import SqliteStore
+from dagentos.store import migrations
+from dagentos.store.sqlite import SCHEMA as SQLITE_SCHEMA
+from dagentos.store.sqlite import SqliteStore
 
 # version -> dialect -> sha256 of the SQL as RELEASED. Add a row when you add a migration.
 # Never change an existing row: that is the whole point.

@@ -8,7 +8,7 @@ import hashlib
 import pytest
 from pydantic import ValidationError
 
-from agentos.core.models import BlobRef, EffectClass, Principal, PrincipalKind
+from dagentos.core.models import BlobRef, EffectClass, Principal, PrincipalKind
 
 # Snapshot of the vocabulary as of v0.2.0 planning. Extend by appending; never edit.
 EFFECT_CLASSES_V1 = {

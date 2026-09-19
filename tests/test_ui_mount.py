@@ -17,7 +17,7 @@ from hashlib import sha256
 import pytest
 from fastapi.testclient import TestClient
 
-from agentos.api.ui import UI_PREFIX, is_ui_asset_path
+from dagentos.api.ui import UI_PREFIX, is_ui_asset_path
 
 TOKEN = "ui-test-token"
 
@@ -46,7 +46,7 @@ def _app(monkeypatch, *, mode: str, ui_dir=None, tmp_path=None):
         monkeypatch.setenv("AGENTOS_UI_DIR", str(ui_dir))
     else:
         monkeypatch.setenv("AGENTOS_UI_DIR", str(tmp_path / "absent"))
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     return main
 

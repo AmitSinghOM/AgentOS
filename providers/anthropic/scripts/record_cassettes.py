@@ -4,7 +4,7 @@
                                                 # (default: local Ollama /v1/messages)
     python scripts/record_cassettes.py          # against the in-process reference server
 
-Scenarios are shared by every provider: `agentos.providerkit.conformance`.
+Scenarios are shared by every provider: `dagentos.providerkit.conformance`.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ sys.path.insert(0, str(HERE / "tests"))
 import anthropic_reference_server
 from agentos_provider_anthropic import AnthropicExecutor, from_env
 
-from agentos.providerkit.conformance import record
+from dagentos.providerkit.conformance import record
 
 CASSETTE_DIR = HERE / "tests" / "cassettes"
 

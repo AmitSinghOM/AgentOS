@@ -1,4 +1,4 @@
-"""The tool registry, re-exported from `agentos.providerkit.tools` where it moved once a
+"""The tool registry, re-exported from `dagentos.providerkit.tools` where it moved once a
 second inner harness (PydanticAI) needed the identical seam. Nothing here is SDK-specific:
 the same `ToolSpec` is handed to the SDK's `function_tool` by the executor.
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from agentos.providerkit.tools import (
+from dagentos.providerkit.tools import (
     BUILTIN_TOOLS,
     ENTRY_POINT_GROUP,
     ToolRegistry,
@@ -20,7 +20,7 @@ from agentos.providerkit.tools import (
     utc_now,
     word_count,
 )
-from agentos.providerkit.tools import load_registry as _load_registry
+from dagentos.providerkit.tools import load_registry as _load_registry
 
 __all__ = ["BUILTIN_TOOLS", "ENTRY_POINT_GROUP", "LEGACY_ENTRY_POINT_GROUP", "ToolRegistry",
            "ToolSpec", "UnknownTool", "describe_offered", "load_registry", "utc_now",

@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.core.engine import PROGRESS_MIN_INTERVAL, Engine, LeaseLost
-from agentos.core.events import StepCompleted, StepDeadLettered, StepProgress, StepStarted
-from agentos.core.models import (
+from dagentos.core.engine import PROGRESS_MIN_INTERVAL, Engine, LeaseLost
+from dagentos.core.events import StepCompleted, StepDeadLettered, StepProgress, StepStarted
+from dagentos.core.models import (
     Agent,
     AgentType,
     Budget,
@@ -22,7 +22,7 @@ from agentos.core.models import (
     StepResult,
     WorkflowDefinition,
 )
-from agentos.store.memory import MemoryStore
+from dagentos.store.memory import MemoryStore
 
 
 class ScriptedExecutor:

@@ -15,8 +15,8 @@ from typing import Any
 
 from agents import AgentOutputSchemaBase, ModelBehaviorError
 
-from agentos.providerkit.prompt import strip_fences
-from agentos.providerkit.schema import OutputSchema, SchemaViolation
+from dagentos.providerkit.prompt import strip_fences
+from dagentos.providerkit.schema import OutputSchema, SchemaViolation
 
 
 class KitOutputSchema(AgentOutputSchemaBase):
