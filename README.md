@@ -142,7 +142,8 @@ The recorded principal on `approval.granted` is the token's (`kind`, `id`, and a
 rejected 422 rather than silently replaced, an `agent`-kind token can neither approve a
 `spend` step (403) nor register agents or define workflows (403), and every rejection is
 logged by hash prefix only. Rotate by editing the file and restarting. Tests:
-`tests/test_auth.py`; contract: `docs/TRUST_BOUNDARY.md` §1.
+`tests/test_auth.py`; contract: `docs/TRUST_BOUNDARY.md` §1. Which way every chokepoint fails,
+with the test that pins it: `docs/FAIL_MODES.md`.
 
 ### Observability
 

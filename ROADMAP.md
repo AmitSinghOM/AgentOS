@@ -456,9 +456,12 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   `tests/test_auth.py`; contract in `docs/TRUST_BOUNDARY.md` §1a. Deferred, with reasons in
   the PR: default `bearer` (v1.0), token-file permission check (policy slice), hot reload
   (restart is the rotation protocol; OIDC is the second authenticator).
-- [ ] **`docs/FAIL_MODES.md`** (#11): gate, settle, snapshot write, executor crash, store error,
-  lease loss, auth backend unreachable — fail-open or fail-closed, with the pinning test named.
-  Doubles as the scoping checklist for the policy ceiling.
+- [x] **`docs/FAIL_MODES.md`** (#11): 44 chokepoints across execution, durability, derived
+  state and the API boundary, each with a direction (closed / open / not a boundary) and the
+  test that pins it; `tests/test_fail_modes.py` fails the build if a cited test disappears, a
+  row has no direction, or a row cites the placeholder without being declared unpinned. One
+  gap surfaced and declared rather than hidden: `_fail`'s conflict branch (two settles failing
+  the run at once) has no test. Doubles as the scoping checklist for the policy ceiling.
 - [ ] **Operator policy ceiling** (#2): `agentos/policy.py`, a data file with three or four
   archetypes (allowed executors, effect-class ceiling per agent/executor, approval floors, max
   budget, allowed tool names); agent definitions can only narrow; unreachable → fail closed;
