@@ -7,6 +7,7 @@ import { SSEFrame, readSSE } from "./sse";
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const REFETCH_DEBOUNCE_MS = 150;
 const RECONNECT_MS = 1000;
+const MAX_CONSECUTIVE_ERRORS = 5;
 const TICKER_MAX = 40;
 
 export interface TickerItem { seq: number; type: string; at: string; step?: string }
@@ -65,6 +66,7 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
       if (debounce.current !== null) window.clearTimeout(debounce.current);
       debounce.current = window.setTimeout(() => { void refetch(); }, REFETCH_DEBOUNCE_MS);
     };
+    let errors = 0;
     const loop = async () => {
       while (!stopped) {
         setLive("connecting");
@@ -81,10 +83,15 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
             },
           });
           if (last) lastId.current = last;
+          errors = 0;
         } catch (e) {
           if (ctrl.signal.aborted) return;
           setLive("error");
           setError(e instanceof Error ? e.message : String(e));
+          if (++errors >= MAX_CONSECUTIVE_ERRORS) {
+            setError((prev) => `${prev ?? "stream failed"} — gave up after ${errors} attempts; reload to retry`);
+            return;
+          }
           await new Promise((r) => setTimeout(r, RECONNECT_MS * 5));
           continue;
         }

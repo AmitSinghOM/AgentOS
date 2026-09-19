@@ -106,6 +106,41 @@ describe("run graph", () => {
     expect(streams).toHaveLength(1);
   });
 
+  it("reconnects with Last-Event-ID when the server closes a non-terminal stream", async () => {
+    const second = scriptedStream();
+    let streams = 0;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      const headers = (init?.headers as Record<string, string>) ?? {};
+      seen.push({ url, headers });
+      if (url === "/me") return json(200, { mode: "bearer", principal: { kind: "human", id: "amit" } });
+      if (url === "/runs/run1") return json(200, state);
+      if (url === "/workflows/diamond") return json(200, DEF);
+      if (url === "/runs/run1/stream") {
+        streams += 1;
+        const body = streams === 1 ? stream.body : second.body;
+        return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+      }
+      return json(404, {});
+    });
+    render(<App />);
+    await screen.findByRole("img", { name: /run graph/ });
+    await waitFor(() => expect(streams).toBe(1));
+    state = run({ attempts: { a: 1 }, last_seq: 2 });
+    stream.emit(frame(2, "step.started", "a"));
+    await waitFor(() => expect(nodeLabel("a")).toBe("a: running"));
+    stream.close();                                   // max duration reached; run still running
+    await waitFor(() => expect(streams).toBe(2), { timeout: 4000 });
+    const resumed = seen.filter((s) => s.url === "/runs/run1/stream")[1];
+    expect(resumed.headers["Last-Event-ID"]).toBe("2");
+    expect(resumed.headers.Authorization).toBe("Bearer tok");
+    second.emit(frame(3, "step.completed", "a"));
+    state = run({ status: "completed", attempts: { a: 1 }, last_seq: 3, steps: [{ node_id: "a", attempt: 1, cost: { amount: "0", currency: "USD" } }] });
+    second.close();
+    await waitFor(() => expect(screen.getByRole("status", { name: "stream state" })).toHaveTextContent("closed"));
+    expect(streams).toBe(2);
+  });
+
   it("shows a pending approval on the node and links to the inbox", async () => {
     state = run({ status: "suspended", attempts: { a: 1 }, steps: [{ node_id: "a", attempt: 1, cost: { amount: "0", currency: "USD" } }],
       approvals: { ap1: { approval_id: "ap1", step_id: "b", status: "pending", kind: "effect", effect_classes: ["spend"] } } });
