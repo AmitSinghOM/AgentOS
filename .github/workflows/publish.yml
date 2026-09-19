@@ -1,0 +1,206 @@
+# Publish with provenance (Phase 8 #10). Runs on a `v*` tag, or by hand with dry_run to rehearse
+# the whole pipeline without uploading anything. Every action is pinned by commit SHA: this
+# workflow holds `id-token: write`, and a moved tag on a third-party action is exactly the
+# supply-chain hole that permission would open.
+#
+# What publishes where:
+#   build    sdist + wheel for the core and each provider; twine check; fresh-venv install smoke
+#   attest   SLSA provenance (Sigstore) for every artifact  → gh attestation verify
+#   image    ghcr.io/<owner>/agentos:{version,latest} multi-arch, built FROM THE WHEELS ABOVE,
+#            attested on the image digest
+#   pypi     Trusted Publishing (OIDC, no token in the repo) — only when the repository variable
+#            PYPI_PUBLISH is "true" (set after configuring the Trusted Publisher on PyPI; see
+#            docs/RELEASING.md). Otherwise the summary says so; nothing is silently skipped.
+#   release  attaches every artifact + SHA256SUMS to the GitHub release for the tag
+name: publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build, attest and smoke-test everything; upload nothing (no PyPI, no image push)."
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Version from pyproject (and refuse a tag that disagrees)
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF#refs/tags/v}"
+            tag="${tag%%-*}"     # v0.9.0-pilot → 0.9.0
+            [[ "$tag" == "$version" ]] || { echo "tag $GITHUB_REF_NAME does not match pyproject version $version"; exit 1; }
+          fi
+          for p in providers/*/pyproject.toml; do
+            pv=$(python -c "import tomllib,sys; print(tomllib.load(open(sys.argv[1],'rb'))['project']['version'])" "$p")
+            [[ "$pv" == "$version" ]] || { echo "$p is $pv, core is $version"; exit 1; }
+          done
+      - name: Build sdists and wheels
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet build==1.2.2.post1 twine==7.0.0 packaging==26.3
+          python -m build --outdir dist .
+          for p in providers/*/; do python -m build --outdir dist "$p"; done
+          python -m twine check --strict dist/*
+          ls -l dist
+      - name: Fresh-venv install smoke (what a stranger's `pip install` sees)
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --quiet "$(ls dist/agentos_durable-*.whl)[providerkit]" dist/agentos_provider_*.whl
+          /tmp/smoke/bin/agentos --help > /dev/null
+          /tmp/smoke/bin/python scripts/release_smoke.py "${{ steps.version.outputs.version }}"
+      - name: SHA256SUMS
+        run: (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  attest:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist
+          path: dist
+      - name: Provenance for every sdist and wheel
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+  image:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      PUSH: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist
+          path: dist
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        if: env.PUSH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/agentos
+          tags: |
+            type=raw,value=${{ needs.build.outputs.version }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+      - name: Build (and push on a tag) — amd64 + arm64, from the attested wheels
+        id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: ${{ env.PUSH == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: ${{ env.PUSH == 'true' }}
+          load: ${{ env.PUSH != 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+      - name: Image smoke
+        if: env.PUSH != 'true'
+        run: docker run --rm ghcr.io/${{ github.repository_owner }}/agentos:${{ needs.build.outputs.version }} agentos --help
+      - name: Attest the pushed image digest
+        if: env.PUSH == 'true'
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/agentos
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  pypi:
+    needs: [build, attest]
+    if: github.event_name == 'push' && vars.PYPI_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        dist: [agentos_durable, agentos_provider_openai_compat, agentos_provider_anthropic,
+               agentos_provider_openai_agents, agentos_provider_pydantic_ai]
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist
+          path: dist
+      - name: Select this distribution's files
+        run: mkdir -p upload && cp dist/${{ matrix.dist }}-* upload/ && ls -l upload
+      - name: Upload to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: upload/
+          attestations: true
+
+  pypi-not-enabled:
+    needs: build
+    if: github.event_name == 'push' && vars.PYPI_PUBLISH != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "## PyPI upload not enabled" >> "$GITHUB_STEP_SUMMARY"
+          echo "Repository variable PYPI_PUBLISH is not 'true'. Configure the Trusted Publisher for each distribution on PyPI (docs/RELEASING.md), then set the variable and re-run the workflow on this tag." >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: [build, attest, image]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist
+          path: dist
+      - name: Attach artifacts to the release for this tag
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: |
+            dist/*
+          fail_on_unmatched_files: true
+          body_path: ${{ hashFiles(format('docs/releases/{0}.md', github.ref_name)) != '' && format('docs/releases/{0}.md', github.ref_name) || '' }}
+          append_body: true

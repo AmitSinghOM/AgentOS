@@ -495,8 +495,21 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   executor allowed / each declared class runs · asks approval · REFUSED. `--json` everywhere.
   `agentos/store/factory.py` is now the one `AGENTOS_STORE*` reader for API, worker and CLI.
   ⏭ `agentos snapshot` (store + blobs export) deferred to the publishing slice.
-- [ ] **PyPI + `ghcr.io` image with provenance** (#10); `pip install agentos[providerkit]` becomes
-  the documented install path; a fresh-tree install gate in CI.
+- [x] **PyPI + `ghcr.io` image with provenance** (#10). Found first: `agentos` on PyPI is taken
+  (agentos.org, import package also `agentos`), so the distribution is **`agentos-durable`**;
+  providers depend on `agentos-durable[providerkit]`; import package unchanged (rename = open
+  decision, `docs/RELEASING.md`). `publish.yml` on `v*` tags or `workflow_dispatch(dry_run)`:
+  build sdist+wheel ×5, `twine check --strict`, fresh-venv install + `scripts/release_smoke.py`
+  (version, entry points, `agentos doctor`), SLSA provenance for every artifact
+  (`actions/attest-build-provenance`), multi-arch image built FROM THOSE WHEELS by path (never an
+  index) and attested on its digest, GitHub release with artifacts + `SHA256SUMS`, PyPI via
+  Trusted Publishing only when repository variable `PYPI_PUBLISH=true` (explicit switch; the
+  summary says so otherwise). Every action SHA-pinned (the workflow holds `id-token: write`).
+  CI gains a `package` job running the same build+smoke on every PR. Local rehearsal caught
+  three real defects before any tag: hatch could not select files for a dist whose name differs
+  from the import package; the sdist shipped the whole tree incl. a linter cache (193 files →
+  ~65); providers had no README metadata so `twine check --strict` failed. Deferred: import
+  package rename; PyPI Trusted Publisher setup (Amit's account); `agentos snapshot`.
 - [ ] ⏭ Triggers (#5), Slack approval adapter (#6), redaction (#7), sensitive paths (#9),
   sandbox (#8), `agentos snapshot` — after the items above, in that order.
 

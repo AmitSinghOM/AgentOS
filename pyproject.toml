@@ -1,9 +1,27 @@
 [project]
-name = "agentos"
-version = "0.8.1"
+# Distribution name. `agentos` on PyPI belongs to agentos.org (a different project whose
+# import package is ALSO `agentos`), so this package publishes as `agentos-durable`. The
+# import package here is still `agentos`; installing both in one environment clobbers files.
+# Renaming the import package is an open decision (docs/RELEASING.md).
+name = "agentos-durable"
+version = "0.9.0"
 description = "A control plane for durable, observable, human-in-the-loop LLM agent workflows"
+readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
+keywords = ["agents", "durable-execution", "event-sourcing", "llm", "workflow", "human-in-the-loop"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Typing :: Typed",
+]
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
@@ -12,6 +30,12 @@ dependencies = [
     "psycopg-pool>=3.2",
     "httpx>=0.27",            # built-in `tool` agent (agentos.agents.tool); the core never imports it
 ]
+
+[project.urls]
+Homepage = "https://github.com/AmitSinghOM/AgentOS"
+Repository = "https://github.com/AmitSinghOM/AgentOS"
+Changelog = "https://github.com/AmitSinghOM/AgentOS/releases"
+Documentation = "https://github.com/AmitSinghOM/AgentOS/blob/main/README.md"
 
 [project.scripts]
 agentos = "agentos.cli:main"
@@ -85,5 +109,15 @@ type = "independence"
 modules = ["agentos.store", "agentos.agents", "agentos.observability"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
+
+# The distribution is `agentos-durable`; the import package is `agentos`, so hatch must be
+# told what to ship. The sdist is the source of exactly what the wheel contains plus what a
+# rebuilder needs — not the compose stack, CI, tests or provider trees (published separately).
+[tool.hatch.build.targets.wheel]
+packages = ["agentos"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/agentos/**", "/README.md", "/LICENSE", "/pyproject.toml", "/examples/*.json"]
+exclude = ["**/__pycache__", "**/*.pyc"]
