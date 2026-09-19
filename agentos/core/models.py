@@ -355,6 +355,7 @@ class WorkflowRun(BaseModel):
     substitutions: list[Substitution] = Field(default_factory=list)  # §11 A3
     policy_sha256: str | None = None       # which operator ceiling governed this run (Phase 8 #2)
     policy_narrowed: list[str] = Field(default_factory=list)
+    sealed_through: int | None = None      # highest seq a chain seal covers (Phase 8 #3)
     started_at: datetime = Field(default_factory=_now)
     ended_at: datetime | None = None
     error: str | None = None

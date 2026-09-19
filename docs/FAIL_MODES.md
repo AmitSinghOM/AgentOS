@@ -4,10 +4,14 @@ Every place AgentOS can refuse, stop, or carry on under a fault is listed here w
 direction. **Fail-closed** means the fault stops the action and nothing unverified is
 recorded or executed. **Fail-open** means the fault is absorbed and the run continues; the
 right to fail open is earned only where the affected component is *derived* from the log
-(telemetry, snapshots, resolvers) and can be rebuilt. There is no third category: a
-chokepoint that is neither is a bug.
+(telemetry, snapshots, resolvers) and can be rebuilt. Verification tools add three honest
+outcomes that are neither: **reported** (a condition the tool names loudly but cannot call
+wrong — deleted seals, an unknown key), **warn** (unconfigured, not broken — asserted auth, no
+policy, no keyring) and **not detectable in-log** (the one gap no in-log scheme covers,
+truncation after the last seal; the tool reports the uncovered tail). A chokepoint in none
+of these is a bug.
 
-Each row names the test that pins the direction (50 rows). `tests/test_fail_modes.py` checks that
+Each row names the test that pins the direction (61 rows). `tests/test_fail_modes.py` checks that
 every cited test exists, so this table cannot quietly outlive the code. Phase 8 #11;
 the operator policy ceiling (#2) is scoped against this table.
 
@@ -56,6 +60,13 @@ the operator policy ceiling (#2) is scoped against this table.
 | Snapshot write ordering | Stale worker writes an older snapshot | **closed** | Monotonic per run; the older one is dropped | `tests/test_store_typed_and_bounded.py::test_put_snapshot_is_monotonic_per_run` |
 | Observer | An observer raises | **open** | Logged, swallowed; telemetry is derived and rebuildable | `tests/test_observability.py::test_observer_failure_never_breaks_the_engine` |
 | Log integrity on read | Hash chain broken | **closed** | Does not fold; the API returns 500 and says so | `tests/test_trust_boundary.py::test_a_tampered_log_does_not_fold_and_the_api_says_so` |
+| Seal, rewrite-and-rechain | Prefix rewritten and every hash recomputed | **closed** | The seal after the edit points at a hash the log no longer carries → `INVALID`; `agentos verify` exits 1 | `tests/test_seal_and_cli.py::test_rewrite_and_rechain_is_caught_by_the_seal` |
+| Seal, forged signature | Seal over the right hash with a wrong signature | **closed** | `INVALID`, names the seal and key | `tests/test_seal_and_cli.py::test_forged_seal_over_the_right_hash_fails_the_signature` |
+| Seal, deleted | All seals removed and the log rechained | **reported** | State `unsigned`, `unsigned_tail` = whole log; not silently fine | `tests/test_seal_and_cli.py::test_deleting_the_seals_is_visible_as_an_unsigned_tail` |
+| Seal, unknown key | Seal signed by a key this keyring does not hold | **reported** | `unverifiable`, key id listed; never treated as valid | `tests/test_seal_and_cli.py::test_unknown_key_is_reported_and_a_foreign_keyring_is_unverifiable` |
+| Seal, truncation after last seal | Events after the last seal deleted | **not detectable in-log** | `unsigned_tail` reports how many events are uncovered; an external anchor is the only fix (not built) | `tests/test_seal_and_cli.py::test_no_keyring_means_no_seals_and_identical_logs` |
+| Signing startup | `AGENTOS_SIGNING_KEYS` set but missing / short key / bad active | **closed** | Process refuses to start naming the entry | `tests/test_seal_and_cli.py::test_keyring_from_env_warns_when_unset_and_fails_closed_when_bad` |
+| Signing unset | — | **not a boundary** | Chains hash-linked but unsigned; one WARNING | `tests/test_seal_and_cli.py::test_no_keyring_means_no_seals_and_identical_logs` |
 
 ## Boundary (API)
 
@@ -90,6 +101,10 @@ answer defers to the executor's own error; a broken plugin is not the engine's f
 test in each row proves the fault is absorbed **and** that the source of truth (the event
 log) is untouched by it.
 
-## Not yet a chokepoint (Phase 8 items that will add rows)
+## Operability (`agentos doctor` / `verify`)
 
-- Signed chain tail (#3): signature missing / invalid → reported by `GET /runs/{id}/integrity`.
+| Chokepoint | Fault | Direction | What happens | Pinned by |
+| --- | --- | --- | --- | --- |
+| `agentos verify` | Any run's chain or seal fails | **closed** | Exit 1, the run named with the reason | `tests/test_seal_and_cli.py::test_verify_passes_on_a_good_store_and_fails_on_a_tampered_run` |
+| `agentos doctor` | Store unreachable | **closed** | Exit 1 on the first check; nothing else attempted | `tests/test_seal_and_cli.py::test_doctor_fails_when_the_store_is_unreachable` |
+| `agentos doctor` | Auth asserted / policy unset / keyring unset | **warn** | Reported as warnings, exit 0 — unconfigured is not broken | `tests/test_seal_and_cli.py::test_doctor_reports_configuration_and_every_run` |

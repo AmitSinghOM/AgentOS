@@ -165,6 +165,27 @@ agent names anything else; the cost and wall limits are minimums. Each run recor
 narrowing, so the log says which ceiling governed it. No `AGENTOS_POLICY` → no ceiling and a
 startup warning. Tests: `tests/test_policy.py`.
 
+### Sealed chains and the `agentos` CLI
+
+The hash chain makes edits visible; it cannot stop someone with database access from
+rewriting an idle run and recomputing every hash. With a keyring configured, every event that
+leaves a run idle is followed in the same batch by a seal — an HMAC under a key the database
+host never sees — so a rewrite needs the key and a deleted seal shows as an unsigned tail:
+
+```bash
+printf '{"active": "k1", "keys": {"k1": "%s"}}\n' "$(openssl rand -hex 32)" > signing-keys.json
+AGENTOS_SIGNING_KEYS=signing-keys.json uvicorn agentos.api.main:app      # and the worker
+
+agentos verify                      # every run: chain + seals; exit 1 on any failure
+agentos doctor                      # store, migrations, executors, auth/policy/signing, every run
+agentos policy explain hello        # what the operator ceiling does to one workflow, per node
+```
+
+`GET /runs/{id}/integrity` reports the same seal state (`unsigned | verified | unverifiable |
+INVALID`). Limits, stated plainly in `docs/TRUST_BOUNDARY.md` §2: the key is symmetric (keep it
+off the DB host), and nothing in the log can detect truncation *after* the last seal — the CLI
+reports the uncovered tail instead of pretending. Tests: `tests/test_seal_and_cli.py`.
+
 ### Observability
 
 Telemetry is derived from the event log, so it can be rebuilt from any stored run and the

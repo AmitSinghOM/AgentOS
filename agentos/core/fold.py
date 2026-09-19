@@ -14,6 +14,7 @@ from agentos.core.events import (
     ApprovalGranted,
     ApprovalRejected,
     ApprovalRequested,
+    ChainSealed,
     Event,
     ExecutorSubstituted,
     PolicyApplied,
@@ -215,6 +216,8 @@ def _apply(run: WorkflowRun, events: list[Event]) -> None:
                 to_model=ev.to_model, reason=ev.reason, at=ev.occurred_at))
         elif isinstance(ev, PolicyApplied):
             run.policy_sha256, run.policy_narrowed = ev.policy_sha256, list(ev.narrowed)
+        elif isinstance(ev, ChainSealed):
+            run.sealed_through = ev.sealed_seq   # display only; verification is agentos verify
         elif isinstance(ev, RunStarted):
             raise FoldError("run.started appears twice")
 

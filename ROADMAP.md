@@ -475,13 +475,30 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   allowlist (needs a `StepRequest` slot both harnesses honour), allowlist check at
   `POST /agents` (UX; dispatch is the invariant), hot reload / central distribution, policy
   signature (goes with #3).
-- [ ] **Signed chain tail + `agentos verify`** (#3; absorbs Phase 6 ⏭ A7): worker key signs the
-  tail per run and periodically; integrity endpoint reports signature state.
-- [ ] **`agentos doctor` / `policy explain` / `snapshot`** (#4).
+- [x] **Signed chain tail + `agentos verify`** (#3; absorbs Phase 6 ⏭ A7): `agentos/core/seal.py`.
+  `AGENTOS_SIGNING_KEYS=<keyring>` (`{"active": "k1", "keys": {"k1": "<64+ hex>"}}`, ≥32-byte
+  keys, `key_id` per seal so rotation keeps old seals verifiable). Every idle/terminal event
+  (`run.completed|failed|cancelled|suspended|paused`) is followed IN THE SAME BATCH by an
+  `integrity.sealed` event: HMAC-SHA256 over `agentos-seal-v1:{run_id}:{seq}:{hash}`; the seal
+  is itself chained. No new table, no port change, no migration — stores untouched; the fold
+  records `sealed_through` only. `verify_seals` judges signature + that the sealed event still
+  carries the hash; states `unsigned | verified | unverifiable | INVALID`; `unsigned_tail`
+  reports what no in-log scheme can cover. `GET /runs/{id}/integrity` gains `seals`. Proven:
+  rewrite-and-rechain fools the chain and is caught by the seal after the edit. Honest limits
+  in TRUST_BOUNDARY §2 (symmetric key, truncation after last seal). Ed25519 is the next signer
+  through the same seam.
+- [x] **`agentos doctor` / `policy explain`** (#4): `agentos/cli.py`, console script `agentos`
+  (`[project.scripts]`). `verify [--run|--all]` exits 1 on any chain or seal failure. `doctor`:
+  store reachable, schema at latest migration, every executor's `health()`, auth mode, policy,
+  keyring, every run folds and verifies — warnings for unconfigured, FAIL only for broken.
+  `policy explain <workflow>`: workflow budget → effective budget → each narrowing → per node
+  executor allowed / each declared class runs · asks approval · REFUSED. `--json` everywhere.
+  `agentos/store/factory.py` is now the one `AGENTOS_STORE*` reader for API, worker and CLI.
+  ⏭ `agentos snapshot` (store + blobs export) deferred to the publishing slice.
 - [ ] **PyPI + `ghcr.io` image with provenance** (#10); `pip install agentos[providerkit]` becomes
   the documented install path; a fresh-tree install gate in CI.
 - [ ] ⏭ Triggers (#5), Slack approval adapter (#6), redaction (#7), sensitive paths (#9),
-  sandbox (#8) — after the six above, in that order.
+  sandbox (#8), `agentos snapshot` — after the items above, in that order.
 
 **Tag:** `v0.9.0-pilot`. **Post:** "A Human Said Yes — Prove It."
 

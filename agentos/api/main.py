@@ -13,6 +13,7 @@ Configuration (env):
   AGENTOS_AUTH            asserted | bearer            (default: asserted — warns; see agentos.api.auth)
   AGENTOS_AUTH_TOKENS     token file (SHA-256 hashes → principals), required for bearer
   AGENTOS_POLICY          operator policy ceiling file (see agentos.core.policy); unset → warns
+  AGENTOS_SIGNING_KEYS    HMAC keyring file that seals idle/terminal events (agentos.core.seal)
 """
 from __future__ import annotations
 
@@ -35,26 +36,12 @@ from agentos.core.integrity import IntegrityError, verify
 from agentos.core.models import Agent, AgentType, BlobRef, Principal, WorkflowDefinition
 from agentos.core.policy import policy_from_env
 from agentos.core.ports import ConflictError
+from agentos.core.seal import keyring_from_env, verify_seals
 from agentos.observability import build_observers, store_resolver
 from agentos.plugins import describe, discover_executors, store_pricing_snapshots
-from agentos.store.memory import MemoryStore
-from agentos.store.sqlite import SqliteStore
+from agentos.store.factory import store_from_env
 
-
-def build_store():
-    kind = os.environ.get("AGENTOS_STORE", "sqlite").lower()
-    if kind == "memory":
-        return MemoryStore()
-    if kind == "sqlite":
-        return SqliteStore(os.environ.get("AGENTOS_SQLITE_PATH", "agentos.db"))
-    if kind == "postgres":
-        from agentos.store.postgres import PostgresStore
-        return PostgresStore(os.environ["AGENTOS_PG_DSN"],
-                             schema=os.environ.get("AGENTOS_PG_SCHEMA"))
-    raise RuntimeError(f"unknown AGENTOS_STORE {kind!r} (memory | sqlite | postgres)")
-
-
-store = build_store()
+store = store_from_env()
 observers, prometheus = build_observers(resolve=store_resolver(store))
 queue_depth = None
 if prometheus is not None and hasattr(store, "queue_depth"):
@@ -80,7 +67,8 @@ def snapshot_every_from_env() -> int:
 
 engine = Engine(store=store, blobs=store, executors=executors,
                 lease=store if hasattr(store, "acquire") else None, observers=observers,
-                snapshot_every=snapshot_every_from_env(), policy=policy_from_env())
+                snapshot_every=snapshot_every_from_env(), policy=policy_from_env(),
+                keyring=keyring_from_env())
 
 stream_config = StreamConfig.from_env()
 auth_config = AuthConfig.from_env()
@@ -261,16 +249,21 @@ def get_run(run_id: str) -> dict:
 
 @app.get("/runs/{run_id}/integrity")
 def run_integrity(run_id: str) -> dict:
-    """Verify the run's tamper-evident event chain (C12). `hashed` counts the events that
-    carry a hash (pre-v0.6.0 logs have none and verify trivially)."""
+    """Verify the run's tamper-evident event chain (C12) and its seals (Phase 8 #3).
+    `hashed` counts the events that carry a hash (pre-v0.6.0 logs have none and verify
+    trivially). `seals.state` is unsigned | verified | unverifiable | INVALID; `ok` is
+    false when either the chain or a seal fails."""
     events = store.read_events(run_id)
     if not events:
         raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
+    seals = verify_seals(events, engine.keyring).as_dict()
     try:
         hashed = verify(events)
     except IntegrityError as exc:
-        return {"run_id": run_id, "ok": False, "events": len(events), "error": str(exc)}
-    return {"run_id": run_id, "ok": True, "events": len(events), "hashed": hashed}
+        return {"run_id": run_id, "ok": False, "events": len(events), "error": str(exc),
+                "seals": seals}
+    return {"run_id": run_id, "ok": seals["state"] != "INVALID", "events": len(events),
+            "hashed": hashed, "seals": seals}
 
 
 class RetryBody(BaseModel):

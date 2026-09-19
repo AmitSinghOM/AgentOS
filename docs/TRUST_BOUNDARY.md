@@ -92,8 +92,24 @@ What this is not: it is not a signature. Someone with write access to the store 
 knowledge of the format can recompute the chain from the tampered event onward. The
 boundary it draws is against *accidental* corruption, partial writes, and any writer that
 is not the engine — including a future "import a log" feature — and it makes tampering
-detectable in the audit trail rather than silent. Signing the chain tail is a KeyStore
-concern (A7) and is out of scope here.
+detectable in the audit trail rather than silent.
+
+**Seals (Phase 8 #3, `agentos/core/seal.py`) close the recompute gap.** With
+`AGENTOS_SIGNING_KEYS` set, every event that leaves a run idle — `run.completed`, `run.failed`,
+`run.cancelled`, `run.suspended`, `run.paused` — is followed *in the same batch* by an
+`integrity.sealed` event carrying an HMAC-SHA256 over `(run_id, seq, hash)` under a key the
+database host does not hold. Rewriting anything before a seal now needs the key; deleting the
+seals shows as `unsigned_tail`. The seal is itself chained, so its hash covers the signature.
+`agentos verify` and `GET /runs/{id}/integrity` judge every seal: signature under the named
+`key_id` (rotation keeps retired keys for verification), and the event at `sealed_seq` still
+carrying `sealed_hash`. Honest limits: symmetric — whoever holds the key can forge, so keep the
+keyring off the DB host (Ed25519 is the next signer through the same seam); truncation *after*
+the last seal is undetectable by any in-log scheme and is reported, not hidden. Unset →
+unsigned, one WARNING at startup.
+
+Tests: `tests/test_seal_and_cli.py` — the rewrite-and-rechain attack is caught by the seal
+after the edit while the seal before it stays valid; a forged signature, deleted seals, an
+unknown key and a foreign keyring each have their own row.
 
 Snapshots (C15, `run_snapshots`) sit inside this boundary, not outside it. A snapshot is the
 folded state at seq N plus the hash of event N; a read folds it forward from the events after
