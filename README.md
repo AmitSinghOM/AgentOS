@@ -117,6 +117,33 @@ curl -X POST 'localhost:8000/workflows/hello/runs?sync=true'
 
 Or run the same walkthrough as a test: `pytest tests/test_quickstart.py`.
 
+### Authentication
+
+The quick start runs with `AGENTOS_AUTH=asserted` (the default): the `principal` in a
+request body is recorded as given and **nothing verifies it** — the API says so in a
+startup warning. Before anyone else can reach the API, switch to bearer mode, where the
+credential decides who the caller is and the body may not:
+
+```bash
+# one line per principal; the file holds SHA-256 hashes, never tokens
+TOKEN=$(openssl rand -hex 32)
+printf '{"principals": [{"sha256": "%s", "kind": "human", "id": "amit"}]}\n' \
+  "$(printf %s "$TOKEN" | shasum -a 256 | cut -d' ' -f1)" > tokens.json
+AGENTOS_AUTH=bearer AGENTOS_AUTH_TOKENS=tokens.json uvicorn agentos.api.main:app
+
+# every request except /health and /metrics needs the token; decisions drop the body principal
+curl -X POST localhost:8000/runs/{run_id}/approvals/{approval_id}/approve \
+     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"reason": "within budget"}'
+```
+
+The recorded principal on `approval.granted` is the token's (`kind`, `id`, and an
+`attestation` naming which credential, `token:sha256:<12 hex>`), a body `principal` is
+rejected 422 rather than silently replaced, an `agent`-kind token can neither approve a
+`spend` step (403) nor register agents or define workflows (403), and every rejection is
+logged by hash prefix only. Rotate by editing the file and restarting. Tests:
+`tests/test_auth.py`; contract: `docs/TRUST_BOUNDARY.md` §1.
+
 ### Observability
 
 Telemetry is derived from the event log, so it can be rebuilt from any stored run and the

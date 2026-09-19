@@ -440,16 +440,22 @@ boundary, bounded by an operator, verifiable after the fact, and installable by 
 Order follows the control-plane check: the invariant first, the checklist that scopes the
 ceiling second, then the ceiling, then the signature, then operability, then distribution.
 
-- [ ] **Auth → `Principal`** (#1). An `Authenticator` port at the API boundary resolves the
-  request's credential to a `Principal`; request bodies no longer *carry* a principal, they
-  *receive* one. Bearer tokens from an operator-owned file (`AGENTOS_AUTH_TOKENS`, path the
-  worker reads and no API writes; `kind` + `id` per token). Unauthenticated → 401 on every
-  mutating route; `kind=agent` token approving a `spend` step → 403 before the engine sees it.
-  Dev mode (`AGENTOS_AUTH=off`) keeps the quickstart zero-config and logs a startup warning,
-  same shape as the known-dev-secret pattern. Every auth decision that is a *rejection* is an
-  audit line; accepted calls are not (hot path). Locking tests: anonymous approve 401,
-  agent-token approve on human-only 403, the token file is never read by the API for writes,
-  the `Principal` on `approval.decided` matches the token, not the body.
+- [x] **Auth → `Principal`** (#1). `agentos/api/auth.py`: an `Authenticator` protocol
+  resolves the request's credential to a `Principal`; in bearer mode request bodies no longer
+  *carry* a principal, they *receive* one. `AGENTOS_AUTH=asserted|bearer` (default `asserted`
+  = today's behaviour, one startup WARNING that principals are unverified);
+  `AGENTOS_AUTH_TOKENS=<file>` of SHA-256 hashes → `{kind, id}` (a plaintext `token` key
+  fails startup with the fix; startup fails naming the variable when bearer has no file).
+  Middleware, not a per-route dependency, so a route added later is protected by default
+  (tested by mounting one after import). Unauthenticated → 401 + `WWW-Authenticate` on every
+  path except `/health` and `/metrics`; body `principal` in bearer mode → 422 (rejected, not
+  replaced); `agent`-kind token on `POST /agents|/workflows` → 403 before the store; the
+  engine's human-only rule still returns 403 on `spend` with nothing appended. Recorded
+  principal carries `attestation = token:sha256:<12 hex>`. Rejections logged by hash prefix,
+  never the token; accepted calls not logged. Core and worker untouched. 21 tests in
+  `tests/test_auth.py`; contract in `docs/TRUST_BOUNDARY.md` §1a. Deferred, with reasons in
+  the PR: default `bearer` (v1.0), token-file permission check (policy slice), hot reload
+  (restart is the rotation protocol; OIDC is the second authenticator).
 - [ ] **`docs/FAIL_MODES.md`** (#11): gate, settle, snapshot write, executor crash, store error,
   lease loss, auth backend unreachable — fail-open or fail-closed, with the pinning test named.
   Doubles as the scoping checklist for the policy ceiling.
