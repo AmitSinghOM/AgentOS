@@ -79,7 +79,7 @@ engine = Engine(store=store, blobs=store, executors=executors,
 
 stream_config = StreamConfig.from_env()
 
-app = FastAPI(title="AgentOS", version="0.8.0")
+app = FastAPI(title="AgentOS", version="0.8.1")
 
 
 @app.exception_handler(RequestValidationError)
