@@ -52,6 +52,24 @@ Development: `cd ui && npm run dev` serves the app on `:5173` and proxies API pa
   ticker and schedules one debounced refetch of the folded run. On the server's close the page
   reconnects with `Last-Event-ID` unless the run is terminal.
 
+## Timeline and time travel
+
+The run page lists every event (`GET /runs/{id}/events`) with the one field an operator asks
+about first — who approved and why, the dead-letter cause, the seal's key id, the policy hash.
+Drag the scrubber or click a seq to see the run **as it was right after that event**. The state
+shown is `GET /runs/{id}?at=k`: the server folds the log prefix through `k` — the same fold, over
+fewer events, the one the golden corpus pins as equal to the full fold at every cut point. The
+browser never folds. A banner names the seq; "Back to live" returns to the live fold while the
+stream keeps flowing. `at` outside `1..last_seq` is a 422; a tampered prefix is refused at `k`.
+
+## Cost and latency
+
+Per node: attempts, first start, finish, duration, cost, plus run cost (and a raised ceiling)
+and wall time from first start to last completion. Cost comes from the fold (`steps[].cost`).
+Start and finish come from event timestamps (`step.started` / `step.completed`) because the fold
+does not carry a start time — this is a display derivation, not state, and is the only thing
+the UI computes from events rather than from the fold. It follows the time-travel seek.
+
 ## What it deliberately does not do
 
 - No client-side authorization. Whether an agent may approve `spend` is the engine's call.
@@ -89,5 +107,6 @@ from the package version.
 
 ## Not yet
 
-Event timeline (time-travel over the log) and the cost + latency panel are their own slices and
-will pick the UI kit. A CSP header for `/ui` goes with them.
+A UI kit (deliberately none while the pages are tables and SVG), a CSP header for `/ui`, a
+store index behind `GET /runs` and `GET /approvals`, and versioned workflow definitions so the
+graph of an old run can be drawn from the definition it pinned.

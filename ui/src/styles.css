@@ -56,3 +56,13 @@ nav a.active { border-bottom-color: currentColor; }
 /* ticker */
 .ticker { font-size: 0.85rem; max-height: 16rem; overflow: auto; padding-left: 1.5rem; }
 .ticker li { margin: 0.15rem 0; }
+
+/* timeline + cost */
+.timeline__controls { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin: 0.5rem 0; }
+.timeline__controls input[type="range"] { width: 18rem; vertical-align: middle; }
+.time-travel { color: #9a6700; }
+.events, .cost__table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.events th, .events td, .cost__table th, .cost__table td { text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
+.events tr.current { background: color-mix(in srgb, #c9a200 18%, transparent); }
+.events tr.future { opacity: 0.45; }
+button.seek { padding: 0.1rem 0.4rem; font-family: monospace; }

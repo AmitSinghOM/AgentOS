@@ -21,6 +21,7 @@ export interface RunState {
   cancelled_steps: string[];
   approvals: Record<string, RunApproval>;
   total_cost: string;
+  cost_ceiling?: string | null;
   last_seq: number;
   started_at: string;
   policy_sha256?: string | null;
