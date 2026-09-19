@@ -114,6 +114,46 @@ def test_same_agents_run_on_the_anthropic_wire_format(monkeypatch):
     assert run["total_cost"] == "0"
 
 
+
+
+def test_same_agents_run_on_the_pydantic_ai_inner_harness(monkeypatch):
+    """The quickstart §6b claim for the second inner harness: the exact example agents,
+    with only `executor` changed, run through the real API and engine. Inner harnesses use
+    no cassettes, so the model layer is PydanticAI's own `FunctionModel` — a poem for the
+    poet, JSON (in fences, as a small model would) for the critic — swapped in at the one
+    seam the executor exposes for it."""
+    pytest.importorskip("agentos_provider_pydantic_ai")
+    from agentos_provider_pydantic_ai import executor as pai
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    def scripted(messages, info):
+        user = str(messages[-1].parts[-1].content)
+        if "Rate this haiku" in user:
+            return ModelResponse(parts=[TextPart('```json\n{"score": 4, "reason": "terse"}\n```')])
+        return ModelResponse(parts=[TextPart("logs of events, / past and present, / time flows.")])
+
+    monkeypatch.setattr(pai.PydanticAIExecutor, "_default_model",
+                        lambda self, model_id: FunctionModel(scripted, model_name=model_id))
+    monkeypatch.setenv("AGENTOS_STORE", "memory")
+    from agentos.api import main
+    importlib.reload(main)
+    c = TestClient(main.app)
+    for f in ("poet_agent.json", "critic_agent.json"):
+        a = json.loads((EXAMPLES / f).read_text())
+        a["executor"] = "pydantic-ai"
+        assert c.post("/agents", json=a).status_code == 201
+    _post_json(c, "/workflows", "haiku_workflow.json")
+    run = c.post("/workflows/haiku/runs?sync=true", json={"inputs": {"topic": "event logs"}}).json()
+    assert run["status"] == "completed", run["error"]
+    write, review = run["steps"]
+    assert write["provenance"]["executor"] == "pydantic-ai"
+    assert write["provenance"]["model_id"] == "qwen2.5:0.5b" and "events" in write["output"]["text"]
+    assert write["output"]["turns"] == 1 and write["output"]["tool_calls"] == []
+    assert review["output"]["json"] == {"score": 4, "reason": "terse"}
+    assert run["total_cost"] == "0"
+
+
 def test_research_example_fetch_then_poet(monkeypatch):
     """docs/quickstart-llm.md §7: the tool step's response is the poet's input. GitHub is
     mocked; the poet replays the openai-compat cassette recorded for this exact prompt."""

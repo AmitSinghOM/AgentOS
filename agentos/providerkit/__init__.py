@@ -11,6 +11,7 @@ extra (httpx).
     errors     the shared error vocabulary — every message says what to do
     prompt     `{run.topic}` / `{step.field}` templates over step inputs
     config     env → ProviderConfig with a per-provider prefix
+    tools      the operator tool registry every inner harness offers from (`agentos.tools`)
 """
 from agentos.providerkit.config import ConfigError, ProviderConfig, config_from_env
 from agentos.providerkit.errors import (
@@ -24,10 +25,20 @@ from agentos.providerkit.errors import (
     TemplateError,
     server_message,
 )
-from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, wrap_input
+from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, strip_fences, wrap_input
+from agentos.providerkit.tools import (
+    BUILTIN_TOOLS,
+    ENTRY_POINT_GROUP,
+    ToolRegistry,
+    ToolSpec,
+    UnknownTool,
+    load_registry,
+)
 
 __all__ = [
+    "BUILTIN_TOOLS",
     "DATA_BOUNDARY",
+    "ENTRY_POINT_GROUP",
     "AuthenticationFailed",
     "BadResponse",
     "ConfigError",
@@ -38,8 +49,13 @@ __all__ = [
     "ProviderServerError",
     "ProviderUnreachable",
     "TemplateError",
+    "ToolRegistry",
+    "ToolSpec",
+    "UnknownTool",
     "config_from_env",
+    "load_registry",
     "render_prompt",
     "server_message",
+    "strip_fences",
     "wrap_input",
 ]

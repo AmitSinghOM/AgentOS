@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentos-provider-pydantic-ai"
+version = "0.1.0"
+description = "AgentOS executor that runs a PydanticAI agent as one governed step (inner harness)"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "agentos[providerkit]>=0.8,<1.0",
+    "pydantic-ai-slim[openai]>=2.46,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.entry-points."agentos.executors"]
+pydantic-ai = "agentos_provider_pydantic_ai:load"
+
+[tool.setuptools]
+packages = ["agentos_provider_pydantic_ai"]
+
+[tool.setuptools.package-data]
+agentos_provider_pydantic_ai = ["pricing.json"]

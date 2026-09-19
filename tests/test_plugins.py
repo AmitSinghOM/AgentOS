@@ -151,6 +151,11 @@ def test_installed_providers_are_discovered_through_their_entry_points():
         assert by_name["anthropic"]["describe"]["wire_format"] == "anthropic-messages"
     if "openai-agents" in found:                             # inner harness, same seam
         assert by_name["openai-agents"]["describe"]["wire_format"] == "openai-agents-sdk"
+    if "pydantic-ai" in found:                               # second inner harness, same seam
+        assert by_name["pydantic-ai"]["describe"]["wire_format"] == "pydantic-ai"
+        if "openai-agents" in found:                         # one registry serves both
+            assert by_name["pydantic-ai"]["describe"]["tools"] == \
+                by_name["openai-agents"]["describe"]["tools"]
 
 
 def test_pricing_snapshot_is_stored_as_a_blob():

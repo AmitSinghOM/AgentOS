@@ -336,7 +336,7 @@ resume via `Last-Event-ID`); an OpenAI Agents SDK agent runs as one governed ste
 - [x] **Inner-harness executor** `agentos-provider-openai-agents` ([#45](https://github.com/AmitSinghOM/AgentOS/pull/45), `providers/openai-agents/`):
   runs an OpenAI Agents SDK agent as one AgentOS step — the SDK owns the loop, AgentOS owns
   the gate, cost and log. Tools are operator-registered Python (`agentos.openai_agents_tools`
-  entry point), each with an effect class; the model is offered only tools whose class the
+  entry point at the time; now the shared `agentos.tools` group, see the PydanticAI item below), each with an effect class; the model is offered only tools whose class the
   AgentOS agent *declared* (the rest withheld and listed in the output); tool calls and usage
   land in provenance/cost; a step declaring `spend` is suspended before dispatch by the
   existing tier-2 gate (proven through the core: `run.started, approval.requested,
@@ -352,7 +352,18 @@ resume via `Last-Event-ID`); an OpenAI Agents SDK agent runs as one governed ste
 - [ ] ⏭ Token-level streaming via a `progress(fraction, note)`-style executor hook
 - [ ] ⏭ Mid-step suspension on the SDK's `needs_approval` interruptions (requires
   persisting `RunState` as a blob and a resume protocol)
-- [ ] ⏭ PydanticAI inner harness (same shape as the above once it exists)
+- [x] **PydanticAI inner harness** `agentos-provider-pydantic-ai` (`providers/pydantic-ai/`):
+  same shape as the above — one `Agent.run` per step on its own loop, `max_turns` via
+  `UsageLimits(request_limit)`, `DeferredToolRequests` (approval / external execution) RAISES
+  rather than auto-resolving, errors mapped by `ModelHTTPError.status_code`, client built
+  from this provider's config only (never `OPENAI_BASE_URL`, tested). The second harness
+  forced the right refactor: the tool registry moved to `agentos.providerkit.tools` with the
+  SDK-neutral `agentos.tools` entry-point group (openai-agents still loads its old
+  `agentos.openai_agents_tools` group as an alias for one release), `strip_fences` moved to
+  `providerkit.prompt`, and a test pins that both harnesses emit the SAME output keys and
+  effects on the same scripted trajectory — a workflow switches harness by changing
+  `executor`. Tested against PydanticAI's `FunctionModel` (no network); live via Ollama; core
+  forbids importing `pydantic_ai`
 
 **Tag:** `v0.8.0-watchable`. **Post:** "The Stream Is the Log."
 
