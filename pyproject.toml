@@ -121,3 +121,9 @@ packages = ["agentos"]
 [tool.hatch.build.targets.sdist]
 include = ["/agentos/**", "/README.md", "/LICENSE", "/pyproject.toml", "/examples/*.json"]
 exclude = ["**/__pycache__", "**/*.pyc"]
+
+# The operator UI bundle is built by Node (ui/) and copied to agentos/_ui by
+# scripts/bundle_ui.py before `python -m build`. It is gitignored, so hatch would drop it;
+# `artifacts` includes it anyway. A release build without it fails scripts/release_smoke.py.
+[tool.hatch.build]
+artifacts = ["agentos/_ui/**"]

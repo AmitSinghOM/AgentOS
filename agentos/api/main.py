@@ -194,6 +194,16 @@ def get_agent(name: str, version: int | None = None) -> dict:
     return {"agent": agent, "versions": store.list_agent_versions(name)}
 
 
+@app.get("/workflows/{name}")
+def get_workflow(name: str) -> WorkflowDefinition:
+    """The CURRENT definition. Runs pin `workflow_version`; a run whose pinned version differs
+    from this one cannot advance (C3) — the UI says so rather than drawing the wrong graph."""
+    wf = store.get_workflow(name)
+    if wf is None:
+        raise HTTPException(status_code=404, detail=f"unknown workflow {name!r}")
+    return wf
+
+
 @app.post("/workflows", status_code=201)
 def define_workflow(wf: WorkflowDefinition) -> WorkflowDefinition:
     try:
@@ -243,6 +253,27 @@ def start_run(name: str, response: Response, sync: bool = False,
     run = engine.get_run(run_id)
     assert run is not None
     return run.model_dump()
+
+
+@app.get("/runs")
+def list_runs(limit: int = 50) -> dict:
+    """Newest-first summary of runs for the operator UI's landing page. Folds each run
+    (unhydrated, snapshot-assisted); like `/approvals`, a store index arrives with the
+    operator surface. `limit` is clamped to 1..500."""
+    limit = max(1, min(limit, 500))
+    out = []
+    for run_id in store.list_run_ids():
+        run = engine.get_run(run_id, hydrate=False)
+        if run is None:
+            continue
+        out.append({"id": run.id, "workflow": run.workflow,
+                    "workflow_version": run.workflow_version, "status": run.status.value,
+                    "total_cost": run.total_cost, "last_seq": run.last_seq,
+                    "started_at": run.started_at.isoformat(),
+                    "pending_approvals": sum(1 for a in run.approvals.values()
+                                             if a.status.value == "pending")})
+    out.sort(key=lambda r: r["started_at"], reverse=True)
+    return {"data": out[:limit]}
 
 
 @app.get("/runs/{run_id}")

@@ -36,6 +36,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build the operator UI into the package
+        run: |
+          set -euo pipefail
+          (cd ui && npm ci --no-audit --no-fund && npm run build)
+          python scripts/bundle_ui.py
       - run: pip install build==1.2.2.post1 twine==7.0.0 packaging==26.3
       - run: |
           set -euo pipefail

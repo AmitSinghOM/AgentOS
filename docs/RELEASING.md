@@ -23,6 +23,13 @@ not match `pyproject.toml`, and refuses a provider whose version differs from th
 in: `pyproject.toml`, `providers/*/pyproject.toml`, `agentos/api/main.py` (`FastAPI(version=)`).
 Tag `vX.Y.Z` or `vX.Y.Z-<word>` (the word is dropped for the comparison: `v0.9.0-pilot` → `0.9.0`).
 
+## The UI is part of the wheel
+
+`publish.yml` and the CI `package` job run `npm ci && npm test && npm run build` in `ui/` and then
+`python scripts/bundle_ui.py`, which copies the bundle to `agentos/_ui` (gitignored; hatch
+`artifacts` includes it). `release_smoke.py` refuses a wheel without it. Building locally without
+Node produces a wheel that fails the smoke — by design; `docs/UI.md`.
+
 ## Cut a release
 
 1. Merge the close-out PR (version bump, `docs/releases/vX.Y.Z-<word>.md`, golden log, ROADMAP).
@@ -86,6 +93,7 @@ docker run --rm -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsing
 
 ```bash
 pip install build==1.2.2.post1 twine==7.0.0 packaging==26.3
+(cd ui && npm ci && npm run build) && python scripts/bundle_ui.py
 rm -rf dist && python -m build --outdir dist . && for p in providers/*/; do python -m build --outdir dist "$p"; done
 python -m twine check --strict dist/*
 python -m venv /tmp/smoke && /tmp/smoke/bin/pip install "$(ls dist/agentos_durable-*.whl)[providerkit]" dist/agentos_provider_*.whl
