@@ -311,7 +311,7 @@ handler for agents"; AgentOS competes in exactly one of them.
 for a pilot, and both are cheap relative to what is built: there is no way to *watch* a run
 (every production runtime streams), and there is no way to bring the agent loop you already
 use (Temporal's harness wraps the OpenAI Agents SDK / PydanticAI / Gemini; AgentOS asks you
-to model steps as its DAG). The optional UI moves to Phase 8; Phase 7 closes these two.
+to model steps as its DAG). The optional UI moved to Phase 8 (and, after the 2026-09-19 control-plane check, to Phase 9); Phase 7 closes these two.
 
 The three properties no competitor has — declared-then-do with typed principals, state
 replay instead of code replay, and verified derived state — are exactly the ones that are
@@ -390,15 +390,93 @@ topic, when the C12 boundary shipped in Phase 5. The echo only shows on topics n
 boundary's own vocabulary; "the sea" would never have caught it, "event logs" did — and it
 was the default the whole time.
 
-## Phase 8 — UI (optional)  ·  ~2 weekends
+## Control-plane check — 2026-09-19 (KiroCrew, after `v0.8.1`)
+
+The 2026-09-17 check compared AgentOS to other *durable-execution* engines. This one asked a
+different question: is an **agent control panel** (KiroCrew — Apache-2.0, one Gateway per
+host owning sessions, memory, cron/heartbeat/webhook triggers, approvals, messaging
+channels, a dashboard, an operator policy *ceiling* the agent cannot loosen, and an
+HMAC-chained security event log with `verify`) the same product, and if not, what does it
+have that a FAANG engineer would refuse a pilot without?
+
+**Answer.** Different layer. KiroCrew is the cockpit for interactive and scheduled agent
+sessions (layer 1.5 in the 2026-09-17 framing); AgentOS is the flight recorder and governor
+underneath declared workflows (layer 3). KiroCrew has task runs with checkpoints but no event
+log, no declared effects and no replay contract; AgentOS has runs but no sessions, memory,
+triggers, channels or UI. They compose rather than compete — KiroCrew could be the surface
+that shows AgentOS approvals; AgentOS could be the durable backend under its task runs.
+
+**What AgentOS absorbs, ranked by "a pilot would be refused without it".** Full table with
+costs and the honest reverse direction (what KiroCrew could take from AgentOS: declared-then-do
+effects, state replay, cost as a governed quantity) in `Study/AGENTOS_LANDSCAPE.md` §8.
+
+| # | Mechanism KiroCrew has | AgentOS today | Absorb as |
+| --- | --- | --- | --- |
+| ★1 | Authenticated callers; every decision bound to a principal | `Principal` exists in the model but **nothing authenticates the caller** — any client can POST an approval as `kind=human` | Auth port at the API boundary → `Principal`; the human-only rule for `spend`/`write_external` becomes *enforced*, not asserted |
+| ★2 | Operator ceiling (`security_policy.json`, tightest-wins, fail-closed when unreachable) | Agents declare their own effects; budget comes from the run request; no document bounds *all* agents | Operator-owned policy file the worker reads and no API writes; agent definitions can only narrow; `governance.decision` events |
+| ★3 | HMAC-chained audit log + `verify` | Per-run hash chain, tamper-*evident* but **unsigned** — DB access can rewrite a run and recompute | Sign the chain tail; `GET /runs/{id}/integrity` reports signature state; `agentos verify` CLI (promotes the Phase 6 ⏭ A7) |
+| ★4 | `doctor` / `status` / `policy explain` / `snapshot` | `GET /executors` health block + README runbook | `agentos doctor` (store, migrations, executors, golden fold, chain), `agentos policy explain <agent>`, `agentos snapshot` |
+| 5 | Cron / heartbeat / authenticated webhooks | Runs start only via `POST /workflows/{name}/runs` | `trigger` adapter package outside core: cron → `start_run` (idempotency key = slot), webhook → `start_run` |
+| 6 | Slack/Discord/Telegram approval buttons | `POST /runs/{id}/approve` only | Notifier port fed from the SSE stream; one Slack adapter proves the shape (needs #1) |
+| 7 | Credential redaction before any surface; env scrub for spawned processes | No redaction pass on step output / error text | Redaction pass before append; env scrub list for the `subprocess` tool |
+| 8 | OS sandbox around the agent subprocess | `tool` subprocess runs with worker privileges | Optional bubblewrap / `sandbox-exec` wrapper behind a policy ordinal; document the default honestly |
+| 9 | Deny-rules + sensitive-path keystone | Operator-fixed argv (stronger for *what* runs), nothing for *where* it writes | Sensitive-path check on subprocess cwd/args and HTTP-derived paths |
+| 10 | SHA-256-verified installer, SLSA provenance, multi-arch image, `min_version` pin | Tags + GitHub releases only | PyPI publish with attestations + `ghcr.io` image; `pip install agentos[providerkit]` as the documented path |
+| 11 | Every deny audited; per-chokepoint fail-open/closed *documented* | Gate outcomes are events, but no written table | `docs/FAIL_MODES.md`: each chokepoint, which way it fails, the test that pins it. Zero code |
+| 12 | Dashboard | Phase UI planned | Unchanged: run visualizer over the stream + approvals inbox |
+| 13 | Telemetry that admits what it sends | None | **Skip.** "Nothing leaves" is the differentiator |
+
+Not absorbed (different product): persistent memory/lessons, messaging channels as first-class
+surfaces, Apps, multi-harness ACP backend selection, desktop app.
+
+**What this changes in the plan.** Items 1, 2, 3 and 10 are what turn "well-designed durable
+core" into something a staff engineer can put behind a controlled edge for a paid pilot; they
+become Phase 8. The UI moves to Phase 9 — a dashboard over an API that does not authenticate
+its callers would be a screenshot, not a product.
+
+## Phase 8 — Pilot readiness  ·  ~2-3 weekends
+**Goal:** every guarantee AgentOS makes about *who* decided something is enforced at the
+boundary, bounded by an operator, verifiable after the fact, and installable by a stranger.
+Order follows the control-plane check: the invariant first, the checklist that scopes the
+ceiling second, then the ceiling, then the signature, then operability, then distribution.
+
+- [ ] **Auth → `Principal`** (#1). An `Authenticator` port at the API boundary resolves the
+  request's credential to a `Principal`; request bodies no longer *carry* a principal, they
+  *receive* one. Bearer tokens from an operator-owned file (`AGENTOS_AUTH_TOKENS`, path the
+  worker reads and no API writes; `kind` + `id` per token). Unauthenticated → 401 on every
+  mutating route; `kind=agent` token approving a `spend` step → 403 before the engine sees it.
+  Dev mode (`AGENTOS_AUTH=off`) keeps the quickstart zero-config and logs a startup warning,
+  same shape as the known-dev-secret pattern. Every auth decision that is a *rejection* is an
+  audit line; accepted calls are not (hot path). Locking tests: anonymous approve 401,
+  agent-token approve on human-only 403, the token file is never read by the API for writes,
+  the `Principal` on `approval.decided` matches the token, not the body.
+- [ ] **`docs/FAIL_MODES.md`** (#11): gate, settle, snapshot write, executor crash, store error,
+  lease loss, auth backend unreachable — fail-open or fail-closed, with the pinning test named.
+  Doubles as the scoping checklist for the policy ceiling.
+- [ ] **Operator policy ceiling** (#2): `agentos/policy.py`, a data file with three or four
+  archetypes (allowed executors, effect-class ceiling per agent/executor, approval floors, max
+  budget, allowed tool names); agent definitions can only narrow; unreachable → fail closed;
+  `governance.decision` events on every deny.
+- [ ] **Signed chain tail + `agentos verify`** (#3; absorbs Phase 6 ⏭ A7): worker key signs the
+  tail per run and periodically; integrity endpoint reports signature state.
+- [ ] **`agentos doctor` / `policy explain` / `snapshot`** (#4).
+- [ ] **PyPI + `ghcr.io` image with provenance** (#10); `pip install agentos[providerkit]` becomes
+  the documented install path; a fresh-tree install gate in CI.
+- [ ] ⏭ Triggers (#5), Slack approval adapter (#6), redaction (#7), sensitive paths (#9),
+  sandbox (#8) — after the six above, in that order.
+
+**Tag:** `v0.9.0-pilot`. **Post:** "A Human Said Yes — Prove It."
+
+## Phase 9 — UI (optional)  ·  ~2 weekends
 **Goal:** a visual the recruiter screenshot remembers. Plays to frontend strength.
 
 - [ ] React + (Cloudscape or shadcn) app over `GET /runs/{id}/stream`
 - [ ] Live workflow run graph: nodes light up as steps complete
 - [ ] Event-log timeline view (time-travel debugging over the log)
 - [ ] Cost + latency panel per run
+- [ ] Approvals inbox (authenticated, Phase 8)
 
-**Tag:** `v0.9.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
+**Tag:** `v0.10.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
 
 ---
 
