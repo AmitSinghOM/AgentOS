@@ -16,6 +16,7 @@ from agentos.core.events import (
     ApprovalRequested,
     Event,
     ExecutorSubstituted,
+    PolicyApplied,
     RunCancelled,
     RunCancelRequested,
     RunCompleted,
@@ -212,6 +213,8 @@ def _apply(run: WorkflowRun, events: list[Event]) -> None:
             run.substitutions.append(Substitution(
                 step_id=ev.step_id, agent=ev.agent, from_model=ev.from_model,
                 to_model=ev.to_model, reason=ev.reason, at=ev.occurred_at))
+        elif isinstance(ev, PolicyApplied):
+            run.policy_sha256, run.policy_narrowed = ev.policy_sha256, list(ev.narrowed)
         elif isinstance(ev, RunStarted):
             raise FoldError("run.started appears twice")
 

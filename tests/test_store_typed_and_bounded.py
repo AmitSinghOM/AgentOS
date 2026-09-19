@@ -130,6 +130,9 @@ def every_event_type(run_id: str) -> list[Event]:
         E.RunFailed(run_id=run_id, error="x", step_id="s9",
                     occurred_at=at + timedelta(seconds=18)),
         E.RunCompleted(run_id=run_id, occurred_at=at + timedelta(seconds=19)),
+        E.PolicyApplied(run_id=run_id, policy_sha256="ab" * 32,
+                        narrowed=["spend: allowed → approval_required (always_approve)"],
+                        occurred_at=at + timedelta(seconds=20)),
     ]
     assert {type(e).event_type for e in evs} == set(EVENT_TYPES), \
         set(EVENT_TYPES) - {type(e).event_type for e in evs}

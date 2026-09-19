@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "allowed_executors": ["echo", "tool", "openai-compat", "anthropic", "openai-agents", "pydantic-ai"],
+  "effect_ceiling": ["read", "compute", "spend", "write_external", "send_message"],
+  "always_approve": ["spend", "write_external"],
+  "agent_approval_allowed": false,
+  "max_step_cost": "0.50",
+  "max_run_cost": "5.00",
+  "max_step_wall_seconds": 600
+}

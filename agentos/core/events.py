@@ -230,6 +230,17 @@ class ExecutorSubstituted(Event):
     principal: Principal | None = None    # system unless an operator forced it
 
 
+class PolicyApplied(Event):
+    """Phase 8 #2: appended right after `run.started` when an operator policy is configured.
+    Records WHICH ceiling governed the run (`policy_sha256`) and every way it narrowed the
+    workflow's own budget (`narrowed`, possibly empty). Replay never consults the policy —
+    gate outcomes are already events — so this is the audit line, not an input to the fold."""
+
+    event_type: ClassVar[str] = "governance.policy_applied"
+    policy_sha256: str
+    narrowed: list[str] = []
+
+
 CONTROL_REQUEST_TYPES = (RunCancelRequested, RunPauseRequested)
 
 
@@ -239,7 +250,7 @@ EVENT_TYPES: dict[str, type[Event]] = {
                 StepFailed, StepRetryRequested, StepCancelled, RunCompleted, RunFailed,
                 RunCancelRequested, RunCancelled, RunPauseRequested, RunPaused, RunResumed,
                 ApprovalRequested, RunSuspended, ApprovalGranted, ApprovalRejected,
-                ExecutorSubstituted)
+                ExecutorSubstituted, PolicyApplied)
 }
 
 EventTypeName = Literal[
@@ -247,7 +258,7 @@ EventTypeName = Literal[
     "step.failed", "step.retry_requested", "step.cancelled", "run.completed", "run.failed",
     "run.cancel_requested", "run.cancelled", "run.pause_requested", "run.paused", "run.resumed",
     "approval.requested", "run.suspended", "approval.granted", "approval.rejected",
-    "executor.substituted",
+    "executor.substituted", "governance.policy_applied",
 ]
 
 

@@ -12,6 +12,7 @@ Configuration (env):
   AGENTOS_STREAM_*        SSE poll / keep-alive / max seconds (see agentos.api.stream)
   AGENTOS_AUTH            asserted | bearer            (default: asserted — warns; see agentos.api.auth)
   AGENTOS_AUTH_TOKENS     token file (SHA-256 hashes → principals), required for bearer
+  AGENTOS_POLICY          operator policy ceiling file (see agentos.core.policy); unset → warns
 """
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ from agentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
 from agentos.core.fold import FoldError
 from agentos.core.integrity import IntegrityError, verify
 from agentos.core.models import Agent, AgentType, BlobRef, Principal, WorkflowDefinition
+from agentos.core.policy import policy_from_env
 from agentos.core.ports import ConflictError
 from agentos.observability import build_observers, store_resolver
 from agentos.plugins import describe, discover_executors, store_pricing_snapshots
@@ -78,7 +80,7 @@ def snapshot_every_from_env() -> int:
 
 engine = Engine(store=store, blobs=store, executors=executors,
                 lease=store if hasattr(store, "acquire") else None, observers=observers,
-                snapshot_every=snapshot_every_from_env())
+                snapshot_every=snapshot_every_from_env(), policy=policy_from_env())
 
 stream_config = StreamConfig.from_env()
 auth_config = AuthConfig.from_env()
@@ -129,6 +131,21 @@ def list_executors() -> list[dict]:
     `describe()` (models, aliases, pricing snapshot) and `health()` (is its model server
     reachable, does it have the model). The first thing to check when a step fails."""
     return describe(executors)
+
+
+@app.get("/policy")
+def get_policy() -> dict:
+    """The operator ceiling every workflow budget is intersected with (Phase 8 #2), and
+    its sha256 — the value `governance.policy_applied` records on each run. Nulls when no
+    policy is configured (every workflow's own budget is then the only limit)."""
+    if engine.policy is None:
+        return {"sha256": None, "policy": None,
+                "note": "AGENTOS_POLICY unset: no operator ceiling"}
+    doc = engine.policy.model_dump(mode="json")
+    for key in ("allowed_executors", "effect_ceiling", "always_approve"):
+        if doc[key] is not None:
+            doc[key] = sorted(doc[key])
+    return {"sha256": engine.policy_digest, "policy": doc}
 
 
 @app.get("/blobs/{sha256}")

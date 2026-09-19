@@ -145,6 +145,26 @@ logged by hash prefix only. Rotate by editing the file and restarting. Tests:
 `tests/test_auth.py`; contract: `docs/TRUST_BOUNDARY.md` §1. Which way every chokepoint fails,
 with the test that pins it: `docs/FAIL_MODES.md`.
 
+### Operator policy ceiling
+
+Every limit the gate enforces comes from the workflow's `budget` — written by whoever defines
+the workflow. The operator's rules live in one file that every workflow budget is intersected
+with before the gate sees it. Tightest wins; a policy can only narrow:
+
+```bash
+AGENTOS_POLICY=examples/operator_policy.json uvicorn agentos.api.main:app   # and the worker
+curl localhost:8000/policy          # the ceiling and its sha256
+```
+
+`effect_ceiling` is the set of effect classes any step may ever run (outside it → refused
+before dispatch, whatever the workflow says); `always_approve` forces a decision even where a
+workflow allows a class freely; `agent_approval_allowed: false` revokes `allow_agent_approval`
+everywhere, including on the approve path; `allowed_executors` fails a run at dispatch if an
+agent names anything else; the cost and wall limits are minimums. Each run records
+`governance.policy_applied` right after `run.started` with the policy's sha256 and every
+narrowing, so the log says which ceiling governed it. No `AGENTOS_POLICY` → no ceiling and a
+startup warning. Tests: `tests/test_policy.py`.
+
 ### Observability
 
 Telemetry is derived from the event log, so it can be rebuilt from any stored run and the
