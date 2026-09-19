@@ -462,10 +462,19 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   row has no direction, or a row cites the placeholder without being declared unpinned. One
   gap surfaced and declared rather than hidden: `_fail`'s conflict branch (two settles failing
   the run at once) has no test. Doubles as the scoping checklist for the policy ceiling.
-- [ ] **Operator policy ceiling** (#2): `agentos/policy.py`, a data file with three or four
-  archetypes (allowed executors, effect-class ceiling per agent/executor, approval floors, max
-  budget, allowed tool names); agent definitions can only narrow; unreachable → fail closed;
-  `governance.decision` events on every deny.
+- [x] **Operator policy ceiling** (#2): `agentos/core/policy.py`. `AGENTOS_POLICY=<file>`
+  (`allowed_executors`, `effect_ceiling`, `always_approve`, `agent_approval_allowed`,
+  `max_step_cost`, `max_run_cost`, `max_step_wall_seconds`; `extra=forbid`). Every workflow
+  budget is intersected with it by `apply_ceiling` before the gate, the settle checks AND the
+  approve path see a `Budget` — tightest wins, a policy can only narrow; the gate itself is
+  unchanged. Executors outside the allowlist fail the run at dispatch in the log.
+  `governance.policy_applied` follows `run.started` with the policy sha256 and every
+  narrowing; the folded run carries `policy_sha256`; replay never consults the policy.
+  `GET /policy` shows the ceiling and its hash. Unset → warns; set and bad → startup refuses.
+  16 tests in `tests/test_policy.py`; six FAIL_MODES rows. Deferred with reasons: tool-name
+  allowlist (needs a `StepRequest` slot both harnesses honour), allowlist check at
+  `POST /agents` (UX; dispatch is the invariant), hot reload / central distribution, policy
+  signature (goes with #3).
 - [ ] **Signed chain tail + `agentos verify`** (#3; absorbs Phase 6 ⏭ A7): worker key signs the
   tail per run and periodically; integrity endpoint reports signature state.
 - [ ] **`agentos doctor` / `policy explain` / `snapshot`** (#4).

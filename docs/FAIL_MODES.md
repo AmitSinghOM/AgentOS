@@ -7,7 +7,7 @@ right to fail open is earned only where the affected component is *derived* from
 (telemetry, snapshots, resolvers) and can be rebuilt. There is no third category: a
 chokepoint that is neither is a bug.
 
-Each row names the test that pins the direction. `tests/test_fail_modes.py` checks that
+Each row names the test that pins the direction (49 rows). `tests/test_fail_modes.py` checks that
 every cited test exists, so this table cannot quietly outlive the code. Phase 8 #11;
 the operator policy ceiling (#2) is scoped against this table.
 
@@ -69,6 +69,11 @@ the operator policy ceiling (#2) is scoped against this table.
 | Authentication (asserted mode) | — | **not a boundary** | Body principal recorded unverified; one WARNING at startup | `tests/test_auth.py::test_default_mode_is_asserted_and_warns_once` |
 | Authorization | Non-human approves `spend` / `write_external` | **closed** | 403 from the engine; nothing appended | `tests/test_approvals.py::test_spend_requires_human_unless_workflow_allows_agent_approval` |
 | Authorization | `agent`-kind token registers an agent / defines a workflow | **closed** | 403 before the store | `tests/test_auth.py::test_agent_token_cannot_register_agents_or_define_workflows` |
+| Operator policy, gate | Workflow allows a class outside `effect_ceiling` | **closed** | Refused before dispatch; `governance.policy_applied` records the narrowing | `tests/test_policy.py::test_free_spend_outside_the_ceiling_is_refused_before_dispatch_and_audited` |
+| Operator policy, approve path | Workflow sets `allow_agent_approval`, policy forbids it | **closed** | Agent's approve is refused; the check reads the effective budget, not the workflow's | `tests/test_policy.py::test_policy_revokes_agent_approval_on_the_approve_path` |
+| Operator policy, dispatch | Agent names an executor outside `allowed_executors` | **closed** | `run.failed` naming the policy; executor never called | `tests/test_policy.py::test_executor_outside_the_allowlist_fails_the_run_at_dispatch_without_calling_it` |
+| Operator policy, startup | `AGENTOS_POLICY` set but missing / malformed | **closed** | Process refuses to start naming the variable and entry | `tests/test_policy.py::test_load_policy_errors_name_the_variable_and_entry` |
+| Operator policy, unset | — | **not a boundary** | No ceiling; one WARNING at startup | `tests/test_policy.py::test_policy_from_env_warns_when_unset_and_loads_when_set` |
 | Approval expiry | Nobody decides within the window | **closed** | Rejected by `system` on sweep; run fails | `tests/test_approvals.py::test_expired_approval_is_rejected_by_system_on_sweep` |
 | Approval on wrong state | Decide an approval that is not pending | **closed** | 409 | `tests/test_approvals.py::test_decisions_on_wrong_state_are_refused` |
 | Stream | Client never disconnects | **closed, bounded** | Connection closes at `AGENTOS_STREAM_MAX_SECONDS`; resume with `Last-Event-ID` | `tests/test_stream.py::test_stream_is_bounded_by_max_seconds_and_sends_keepalives_while_idle` |
@@ -86,6 +91,4 @@ log) is untouched by it.
 
 ## Not yet a chokepoint (Phase 8 items that will add rows)
 
-- Operator policy ceiling (#2): policy file unreachable → **closed** (the worker refuses to
-  advance rather than run unbounded); decisions as `governance.decision` events.
 - Signed chain tail (#3): signature missing / invalid → reported by `GET /runs/{id}/integrity`.

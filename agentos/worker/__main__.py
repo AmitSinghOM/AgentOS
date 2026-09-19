@@ -16,6 +16,7 @@ from agentos.agents.tool import ToolExecutor
 from agentos.core.engine import Engine
 from agentos.core.faults import from_env
 from agentos.core.models import AgentType
+from agentos.core.policy import policy_from_env
 from agentos.observability import build_observers, store_resolver
 from agentos.plugins import discover_executors, store_pricing_snapshots
 from agentos.worker import Worker
@@ -72,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError(f"AGENTOS_SNAPSHOT_EVERY must be an integer >= 0, got {raw!r}")
     engine = Engine(store=store, blobs=store, executors=executors,
                     faults=injector, lease=store, observers=observers,
-                    snapshot_every=int(raw))
+                    snapshot_every=int(raw), policy=policy_from_env())
     worker = Worker(engine, store, lease=store, queue=store, holder=args.holder,
                     lease_ttl=args.lease_ttl, faults=injector)
     if args.once:

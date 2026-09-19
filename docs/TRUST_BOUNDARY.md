@@ -52,6 +52,22 @@ configuration says what it does.
 
 Tests: `tests/test_auth.py` — one per line of the threat model in its module docstring.
 
+### 1b. The operator bounds every workflow
+
+After §1a, only a `human` or `system` principal can define a workflow — but a workflow's
+`budget` is still what the gate enforces, and its author could allow `spend` freely or let
+agents approve it. `AGENTOS_POLICY` (`agentos/core/policy.py`) is the operator's ceiling:
+every workflow budget is intersected with it before the gate, the settle checks or the
+approve path see a `Budget`. Tightest wins; a policy can only narrow. The gate itself is
+unchanged — it is correct against the budget it is given, the way the engine was correct
+against the principal it was given. Executors outside `allowed_executors` fail the run at
+dispatch, in the log. `governance.policy_applied` follows `run.started` with the policy's
+sha256 and each narrowing, so a reader knows which ceiling governed a run without the file;
+replay never consults the policy, because gate outcomes are already events. A set but
+unreadable policy refuses to start the process.
+
+Tests: `tests/test_policy.py` — one per way a workflow author might exceed the ceiling.
+
 ## 2. Replayed events are tamper-evident
 
 The event log is the source of truth and everything is derived from it, so an event that

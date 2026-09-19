@@ -44,6 +44,7 @@ from agentos.core.events import (
     ApprovalRequested,
     Event,
     ExecutorSubstituted,
+    PolicyApplied,
     RunCancelled,
     RunCancelRequested,
     RunCompleted,
@@ -82,6 +83,7 @@ from agentos.core.models import (
     WorkflowNode,
     WorkflowRun,
 )
+from agentos.core.policy import OperatorPolicy, apply_ceiling, executor_allowed, policy_sha256
 from agentos.core.ports import BlobStore, ConflictError, Executor, Observer, Store
 
 TERMINAL = frozenset({"completed", "failed", "cancelled"})
@@ -323,14 +325,17 @@ class Engine:
                  wall: Callable[[], datetime] = lambda: datetime.now(UTC),
                  lease: Lease | None = None,
                  observers: Sequence[Observer] = (),
-                 snapshot_every: int = 200) -> None:
+                 snapshot_every: int = 200,
+                 policy: OperatorPolicy | None = None) -> None:
         """`executors` maps an AgentType value (e.g. "echo") to the adapter that runs it.
         `clock` is monotonic (durations, rate limits); `wall` is the timestamp source for
         `retry_at` so tests can pin it. `lease` lets control requests be finalized
         immediately when no worker holds the run (idle/paused runs). `observers` receive
         every committed event (telemetry adapters). `snapshot_every` bounds replay cost
         (C15): once a run's log has grown that many events past its last snapshot, the
-        folded state is stored and later reads fold only the tail; 0 disables."""
+        folded state is stored and later reads fold only the tail; 0 disables. `policy`
+        is the operator ceiling (Phase 8 #2): every workflow budget is intersected with it
+        before the gate sees it, and dispatch refuses executors outside its allowlist."""
         self._store = store
         self._blobs = blobs
         self._executors = executors
@@ -340,6 +345,21 @@ class Engine:
         self._lease = lease
         self._observers = tuple(observers)
         self._snapshot_every = snapshot_every
+        self._policy = policy
+        self._policy_sha256 = policy_sha256(policy) if policy is not None else None
+
+    @property
+    def policy(self) -> OperatorPolicy | None:
+        return self._policy
+
+    @property
+    def policy_digest(self) -> str | None:
+        return self._policy_sha256
+
+    def effective_budget(self, wf: WorkflowDefinition | None) -> Budget:
+        """The workflow's budget narrowed by the operator ceiling — the ONLY budget the
+        gate, the settle checks and the approve path ever see."""
+        return apply_ceiling(wf.budget if wf is not None else Budget(), self._policy)[0]
 
     # ----------------------------------------------------------------- queries
     def get_run(self, run_id: str, *, hydrate: bool = True) -> WorkflowRun | None:
@@ -444,11 +464,16 @@ class Engine:
                 agent = self._store.get_agent(node.agent)
                 pins[node.agent] = agent.version if agent is not None else 0
         inputs_ref = self._blobs.put(_canonical(inputs)) if inputs else None
-        self._emit(run_id, 0, [RunStarted(
+        events: list[Event] = [RunStarted(
             run_id=run_id, workflow=wf.name, workflow_version=wf.version,
             request_id=request_id, principal=principal, agent_versions=pins,
             inputs_ref=inputs_ref,
-        )])
+        )]
+        if self._policy is not None:
+            _, narrowed = apply_ceiling(wf.budget, self._policy)
+            events.append(PolicyApplied(run_id=run_id, policy_sha256=self._policy_sha256 or "",
+                                        narrowed=narrowed))
+        self._emit(run_id, 0, events)
         return run_id
 
     def request_retry(self, run_id: str, step_id: str, *, principal: Principal | None = None,
@@ -595,8 +620,7 @@ class Engine:
         return run, approval
 
     def _budget_for(self, run: WorkflowRun) -> Budget:
-        wf = self._store.get_workflow(run.workflow)
-        return wf.budget if wf is not None else Budget()
+        return self.effective_budget(self._store.get_workflow(run.workflow))
 
     def _finalize_if_idle(self, run_id: str) -> None:
         """Take the lease briefly; if we get it, nobody is executing, so apply the pending
@@ -746,7 +770,7 @@ class Engine:
         for sub in run.substitutions:
             models[sub.agent] = sub.to_model
         return _WaveContext(
-            run=run, wf=wf, budget=wf.budget, heartbeat=heartbeat,
+            run=run, wf=wf, budget=self.effective_budget(wf), heartbeat=heartbeat,
             node_count=len({n.id for n in wf.nodes}),
             done={s.node_id for s in run.steps}, outputs=outputs, run_inputs=run_inputs,
             models=models, attempts=dict(run.attempts), pending=dict(run.pending_retries),
@@ -961,6 +985,11 @@ class Engine:
                     if agent.executor else "")
             raise _Unrecoverable(f"agent {agent.name!r} needs executor {exec_name!r} but only "
                                  f"[{have}] are registered{hint}", step_id=node.id)
+        if not executor_allowed(self._policy, exec_name):
+            allowed = ", ".join(sorted(self._policy.allowed_executors or ()))  # type: ignore[union-attr]
+            raise _Unrecoverable(f"agent {agent.name!r} needs executor {exec_name!r}, which the "
+                                 f"operator policy does not allow (allowed_executors: "
+                                 f"[{allowed}])", step_id=node.id)
         return agent, executor
 
     def _record_substitution(self, log: _Log, ctx: _WaveContext, req: StepRequest,

@@ -171,8 +171,9 @@ def test_anonymous_caller_is_401_everywhere_except_probes(monkeypatch, token_fil
             assert r.status_code == 401, (method, path, r.status_code)
             assert r.headers["www-authenticate"] == "Bearer"
             assert r.json() == {"detail": "missing bearer token"}
-    assert all("missing bearer token" in r.getMessage() for r in caplog.records)
-    assert not any("Basic" in r.getMessage() for r in caplog.records)
+    auth_records = [r for r in caplog.records if r.name == "agentos.api.auth"]
+    assert auth_records and all("missing bearer token" in r.getMessage() for r in auth_records)
+    assert not any("Basic" in r.getMessage() for r in auth_records)
 
     # a token with the wrong scheme is anonymous too
     assert c.get("/agents", headers={"Authorization": f"Basic {HUMAN_TOKEN}"}).status_code == 401
