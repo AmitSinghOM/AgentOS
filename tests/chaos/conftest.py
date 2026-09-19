@@ -8,13 +8,13 @@ from collections import Counter
 
 import pytest
 
-from agentos.agents.echo import EchoExecutor
-from agentos.core.engine import Engine
-from agentos.core.events import StepCompleted, StepStarted
-from agentos.core.fold import fold
-from agentos.core.models import Agent, AgentType, WorkflowDefinition
-from agentos.store.sqlite import SqliteStore
-from agentos.worker import Worker
+from dagentos.agents.echo import EchoExecutor
+from dagentos.core.engine import Engine
+from dagentos.core.events import StepCompleted, StepStarted
+from dagentos.core.fold import fold
+from dagentos.core.models import Agent, AgentType, WorkflowDefinition
+from dagentos.store.sqlite import SqliteStore
+from dagentos.worker import Worker
 
 THREE_STEP = WorkflowDefinition(name="three", version=1, nodes=[
     {"id": "s1", "agent": "g"},
@@ -84,5 +84,5 @@ def assert_invariants(store, run_id: str) -> None:
         assert store.acquire(run_id, "probe", 0.01) is None, "RUNNING run with no lease holder"
     # 5. fold from scratch equals fold of a JSON round trip (snapshot-equivalence stand-in
     #    until snapshots exist)
-    from agentos.core.events import from_record
+    from dagentos.core.events import from_record
     assert fold(from_record(e.to_record()) for e in events) == run

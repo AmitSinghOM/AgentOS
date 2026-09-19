@@ -2,9 +2,9 @@
 pin on every attempt, so redeploying an agent never changes a running workflow."""
 from __future__ import annotations
 
-from agentos.core.engine import Engine
-from agentos.core.events import RunStarted, StepStarted
-from agentos.core.models import (
+from dagentos.core.engine import Engine
+from dagentos.core.events import RunStarted, StepStarted
+from dagentos.core.models import (
     Agent,
     AgentType,
     Cost,
@@ -15,7 +15,7 @@ from agentos.core.models import (
     StepResult,
     WorkflowDefinition,
 )
-from agentos.store.memory import MemoryStore
+from dagentos.store.memory import MemoryStore
 
 
 class ConfigEcho:
@@ -93,7 +93,7 @@ def test_agent_api_versions(monkeypatch):
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv("AGENTOS_STORE", "memory")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     c = TestClient(main.app)
     body = {"name": "g", "version": 1, "type": "echo", "config": {"msg": "one"}}

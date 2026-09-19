@@ -28,11 +28,11 @@ from typing import Any
 
 import httpx
 
-from agentos.core.models import Cost, Effect, EffectClass, Provenance, StepRequest, StepResult
-from agentos.core.ports import ProgressFn
-from agentos.providerkit.cassette import Cassette, CassetteTransport
-from agentos.providerkit.config import ProviderConfig
-from agentos.providerkit.errors import (
+from dagentos.core.models import Cost, Effect, EffectClass, Provenance, StepRequest, StepResult
+from dagentos.core.ports import ProgressFn
+from dagentos.providerkit.cassette import Cassette, CassetteTransport
+from dagentos.providerkit.config import ProviderConfig
+from dagentos.providerkit.errors import (
     AuthenticationFailed,
     BadResponse,
     ModelNotFound,
@@ -41,8 +41,8 @@ from agentos.providerkit.errors import (
     ProviderUnreachable,
     server_message,
 )
-from agentos.providerkit.pricing import PricingTable
-from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, wrap_input
+from dagentos.providerkit.pricing import PricingTable
+from dagentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, wrap_input
 
 from .config import from_env
 

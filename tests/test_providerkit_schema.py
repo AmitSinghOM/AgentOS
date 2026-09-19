@@ -1,4 +1,4 @@
-"""agentos.providerkit.schema — the typed-output contract, tested once for every harness:
+"""dagentos.providerkit.schema — the typed-output contract, tested once for every harness:
 a valid reply passes and the hash is stable; the first violation is named by path; an
 unusable schema (non-object root, remote $ref, invalid draft) is a definition error at first
 use; `format` is never enforced (reproducibility); local refs still resolve with no registry."""
@@ -8,7 +8,7 @@ import re
 
 import pytest
 
-from agentos.providerkit.schema import InvalidOutputSchema, OutputSchema, SchemaViolation
+from dagentos.providerkit.schema import InvalidOutputSchema, OutputSchema, SchemaViolation
 
 CRITIQUE = {
     "type": "object",

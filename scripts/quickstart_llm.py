@@ -27,7 +27,7 @@ def call(api: str, method: str, path: str, body: dict | None = None) -> tuple[in
         return e.code, json.loads(e.read() or b"{}")
     except error.URLError as e:
         sys.exit(f"cannot reach {api}: {e.reason}. Start it with "
-                 f"`uvicorn agentos.api.main:app --port 8000`.")
+                 f"`uvicorn dagentos.api.main:app --port 8000`.")
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -65,18 +65,20 @@ Ollama + the `openai-compat` provider, five minutes, a poet and a critic on your
 ```bash
 cp .env.example .env
 pip install -e ".[dev]"
-uvicorn agentos.api.main:app --reload      # API (SQLite file ./agentos.db by default)
-python -m agentos.worker                   # worker, in another terminal
+uvicorn dagentos.api.main:app --reload      # API (SQLite file ./agentos.db by default)
+python -m dagentos.worker                   # worker, in another terminal
 ```
 
-Installing rather than cloning: the distribution is **`agentos-durable`** (the name `agentos` on
-PyPI belongs to an unrelated project whose import package is also `agentos`; do not install both).
+Installing rather than cloning: distribution and import package are both **`dagentos`**
+(`pip install dagentos` → `import dagentos`). The product is AgentOS; the name `agentos` on PyPI
+belongs to an unrelated project, so the package carries a `d` for durable. The `AGENTOS_*`
+environment variables and the `agentos` CLI keep the product name.
 Every release ships wheels with Sigstore-signed provenance and a multi-arch image built from the
 same wheels — verification in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ```bash
-pip install "agentos-durable[providerkit]" agentos-provider-openai-compat
-docker run --rm -p 8000:8000 ghcr.io/amitsinghom/agentos        # API; python -m agentos.worker for the worker
+pip install "dagentos[providerkit]" agentos-provider-openai-compat
+docker run --rm -p 8000:8000 ghcr.io/amitsinghom/agentos        # API; python -m dagentos.worker for the worker
 ```
 
 No Docker needed for the default SQLite store. For Postgres:
@@ -139,7 +141,7 @@ credential decides who the caller is and the body may not:
 TOKEN=$(openssl rand -hex 32)
 printf '{"principals": [{"sha256": "%s", "kind": "human", "id": "amit"}]}\n' \
   "$(printf %s "$TOKEN" | shasum -a 256 | cut -d' ' -f1)" > tokens.json
-AGENTOS_AUTH=bearer AGENTOS_AUTH_TOKENS=tokens.json uvicorn agentos.api.main:app
+AGENTOS_AUTH=bearer AGENTOS_AUTH_TOKENS=tokens.json uvicorn dagentos.api.main:app
 
 # every request except /health and /metrics needs the token; decisions drop the body principal
 curl -X POST localhost:8000/runs/{run_id}/approvals/{approval_id}/approve \
@@ -162,7 +164,7 @@ the workflow. The operator's rules live in one file that every workflow budget i
 with before the gate sees it. Tightest wins; a policy can only narrow:
 
 ```bash
-AGENTOS_POLICY=examples/operator_policy.json uvicorn agentos.api.main:app   # and the worker
+AGENTOS_POLICY=examples/operator_policy.json uvicorn dagentos.api.main:app   # and the worker
 curl localhost:8000/policy          # the ceiling and its sha256
 ```
 
@@ -192,7 +194,7 @@ host never sees — so a rewrite needs the key and a deleted seal shows as an un
 
 ```bash
 printf '{"active": "k1", "keys": {"k1": "%s"}}\n' "$(openssl rand -hex 32)" > signing-keys.json
-AGENTOS_SIGNING_KEYS=signing-keys.json uvicorn agentos.api.main:app      # and the worker
+AGENTOS_SIGNING_KEYS=signing-keys.json uvicorn dagentos.api.main:app      # and the worker
 
 agentos verify                      # every run: chain + seals; exit 1 on any failure
 agentos doctor                      # store, migrations, executors, auth/policy/signing, every run
@@ -213,7 +215,7 @@ core imports no telemetry SDK.
 pip install -e ".[observability]"
 docker compose up -d jaeger prometheus grafana
 AGENTOS_OTEL_EXPORTER=otlp OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
-  uvicorn agentos.api.main:app          # and the worker, with the same two variables
+  uvicorn dagentos.api.main:app          # and the worker, with the same two variables
 ```
 
 - Traces: [Jaeger](http://localhost:16686) — one span per run, one per step attempt, with
@@ -251,7 +253,7 @@ See [ROADMAP.md](./ROADMAP.md).
 | 5 · Trust boundary + polish | C12: strict control payloads, tamper-evident log, inputs as data; screenshots | ✅ `v0.6.0-trusted` |
 | 6 · Tools, snapshots, survey close-out | `tool` agent, verified snapshots + migrations, all 15 `landscape-con` issues closed with tests | ✅ `v0.7.0-complete` |
 | 7 · Streaming + inner harness | `GET /runs/{id}/stream` (SSE over the log), OpenAI Agents SDK and PydanticAI as governed steps | ✅ `v0.8.0-watchable`, `v0.8.1` |
-| 8 · Pilot readiness | Authenticated `Principal`, operator policy ceiling, sealed chains + `agentos verify` / `doctor` / `policy explain`, FAIL_MODES, publishing with provenance as `agentos-durable` | ✅ `v0.9.0-pilot` |
+| 8 · Pilot readiness | Authenticated `Principal`, operator policy ceiling, sealed chains + `agentos verify` / `doctor` / `policy explain`, FAIL_MODES, publishing with provenance as `agentos-durable` (renamed `dagentos` in v0.11.0) | ✅ `v0.9.0-pilot` |
 | 9 · UI | Approvals inbox, live run graph over the stream, timeline with time travel, cost + latency — served at `/ui`, in the wheel and image | ✅ `v0.10.0-ui` |
 
 Phases 1–3 are scoped against a survey of what the popular agent runtimes get wrong

@@ -59,8 +59,8 @@ forward — see the dated decision at the end of this phase.
     - [x] A5 `progress(fraction, note)` renews the lease on every call and appends `step.progress` at most once per second; lease loss mid-step raises `LeaseLost` before any write (proven over Toxiproxy alongside the fence)
     - [~] A6 metered `Cost{units: [Meter], amount (decimal string), currency, pricing_snapshot_hash}`; per-step and rolling run ceilings enforced; dead-lettered cost still counted. Pricing table as a blob: with the first provider plugin
     - [ ] ⏭ A10 provider plugins tested against recorded cassettes; live re-record is a nightly opt-in job
-- [x] Worker process consuming a run queue, decoupled from the API (`agentos/worker/`; queue is a `Queue` port with SQLite/Postgres/Memory adapters — Redis is now an optional adapter, not a requirement: see ADR note below)
-- [x] Real tool agent (HTTP/subprocess) in core — landed Phase 6 (`agentos/agents/tool.py`); LLM executors live in provider plugins
+- [x] Worker process consuming a run queue, decoupled from the API (`dagentos/worker/`; queue is a `Queue` port with SQLite/Postgres/Memory adapters — Redis is now an optional adapter, not a requirement: see ADR note below)
+- [x] Real tool agent (HTTP/subprocess) in core — landed Phase 6 (`dagentos/agents/tool.py`); LLM executors live in provider plugins
 - [x] Idempotency keys on step execution (`run_id:step_id:sha256(inputs)`); completed steps replayed from the log, never re-executed
 - [x] Per-run lease with **fencing tokens** (`Lease` port; a stale holder cannot append) — SQLite/Postgres/Memory adapters, one contract suite
 - [x] State snapshots to bound replay cost — landed in Phase 6 (`v0.7.0`), log stays the source of truth
@@ -151,8 +151,8 @@ the dated decision.
 
 - [x] Approval as a run state: the governor's tier-2 gate (`Budget.approval_required_for`, default write_external/spend/send_message/execute_code) appends `approval.requested` + `run.suspended` BEFORE dispatch — no `step.started`, no attempt consumed; lease released, run leaves the queue, sweep skips it. Approvals live in the log (`WorkflowRun.approvals`), not a side table
 - [x] `POST /runs/{id}/approvals/{aid}/approve|reject` (+ `GET /approvals` inbox, `GET /runs/{id}/approvals`): approve → `approval.granted`, running once no gate is pending, re-enqueued; reject → dead-letter naming the decider + run failed; `…/steps/{step}/retry` reopens and re-asks. `Budget.approval_timeout_seconds` → rejected by the `system` principal on the worker's sweep
-- [x] OpenTelemetry spans per run/step → Jaeger (docker compose) — `agentos/observability/otel.py` derives spans FROM THE LOG (`Observer` port; core imports no SDK); timestamps from `occurred_at`; `gen_ai.*` attributes pinned and checked against the installed semconv; replaying a log rebuilds identical spans (tested)
-- [x] Prometheus metrics: run latency, throughput, error rate, retries, dead-letters, cost, meters, approvals, suspended gauge — all from events (`agentos/observability/prometheus.py`, `GET /metrics`); queue depth via a scrape-time `QueueDepthCollector` over `Store.queue_depth()` (contract-tested on all adapters)
+- [x] OpenTelemetry spans per run/step → Jaeger (docker compose) — `dagentos/observability/otel.py` derives spans FROM THE LOG (`Observer` port; core imports no SDK); timestamps from `occurred_at`; `gen_ai.*` attributes pinned and checked against the installed semconv; replaying a log rebuilds identical spans (tested)
+- [x] Prometheus metrics: run latency, throughput, error rate, retries, dead-letters, cost, meters, approvals, suspended gauge — all from events (`dagentos/observability/prometheus.py`, `GET /metrics`); queue depth via a scrape-time `QueueDepthCollector` over `Store.queue_depth()` (contract-tested on all adapters)
 - [x] Token + cost accounting per step, rolled up per run (`step.completed.cost`, `WorkflowRun.total_cost`); Grafana dashboard provisioned (`deploy/grafana/dashboards/agentos-runs.json`: runs/min, error rate, awaiting approval, cost, latency p50/95/99, step outcomes, retries & dead-letters, tokens by agent, approval wait, cost/min)
 - [x] Grafana + Jaeger + Prometheus added to compose with provisioning; compose CI job checks all three are up; screenshots in README landed in Phase 5 (2026-09-14) once a real provider existed
 - [x] **Cost-ceiling suspension** (DESIGN §8 budget guardrails, A6): exceeding `max_run_cost` records the tripping step, then suspends with a `kind=cost` approval whose grant raises the effective ceiling to `total + max_run_cost` (`run.cost_ceiling`, in the log); human-only unless `allow_agent_approval`; rejection fails the run (money already spent, nothing to reopen); trips again at the raised ceiling
@@ -190,7 +190,7 @@ two providers, two wire formats, zero core changes between them; quickstart exec
 test and run live for both.
 
 - [x] **First provider plugin** `agentos-provider-openai-compat` (`providers/openai-compat/`, its own distribution, MIT): any OpenAI-compatible chat-completions server over plain `httpx` — Ollama zero-config default, vLLM, LM Studio, OpenRouter, OpenAI. No vendor SDK: the wire format is the contract
-- [x] **Entry-point discovery** (`agentos.executors` group) in the composition roots (`agentos/plugins.py`); a broken plugin is skipped with a warning naming it, never fatal; `Agent.executor` routes by name; a missing executor fails the run with the install hint. `GET /executors` shows each plugin's `describe()` + `health()` (server reachable? aliases available?)
+- [x] **Entry-point discovery** (`agentos.executors` group) in the composition roots (`dagentos/plugins.py`); a broken plugin is skipped with a warning naming it, never fatal; `Agent.executor` routes by name; a missing executor fails the run with the install hint. `GET /executors` shows each plugin's `describe()` + `health()` (server reachable? aliases available?)
 - [x] **A3 capability aliases + `executor.substituted`**: `chat.fast` → concrete id via the plugin's `resolve(req)`; a changed resolution mid-run is recorded before the next step, with principal `system:<executor>`; completed steps never re-run
 - [x] **A6 closed**: metered `Cost` from real token usage; Decimal amounts; pricing table content-addressed, stored in the BlobStore at startup, fetchable at `GET /blobs/{sha256}`; local open-weight families priced 0, unpriced models marked `priced=false`
 - [x] **A10 cassettes**: dependency-free JSON record/replay transport; committed cassettes recorded from a live Ollama (`source` in each file); nightly opt-in `provider-live` job installs Ollama on a runner, re-records, re-runs the replay tests, uploads the artifact
@@ -199,7 +199,7 @@ test and run live for both.
 - [x] README screenshots (Jaeger span with `gen_ai.*`, Grafana) — done in Phase 5
 - [ ] ⏭ C12 executor-input trust boundary: tool results are data, never prompt (`agentos/protocols/`, A8)
 - [ ] ⏭ A11 `agentos export-run --format jsonl`
-- [x] **Second provider** `agentos-provider-anthropic` (Anthropic Messages wire format; Ollama's `/v1/messages` as the free default) — proved the seam: different request shape, auth header, error envelope (529), no `response_format`; zero changes to the core or the first provider. Shared pieces extracted to `agentos.providerkit` (cassettes, pricing, errors, templates, env config, conformance scenarios); the OpenAI provider refactored onto it
+- [x] **Second provider** `agentos-provider-anthropic` (Anthropic Messages wire format; Ollama's `/v1/messages` as the free default) — proved the seam: different request shape, auth header, error envelope (529), no `response_format`; zero changes to the core or the first provider. Shared pieces extracted to `dagentos.providerkit` (cassettes, pricing, errors, templates, env config, conformance scenarios); the OpenAI provider refactored onto it
 - [x] Real `tool` agent (HTTP/subprocess) in core — landed after Phase 5 (v0.7.0 slice)
 
 **Tag:** `v0.5.0-providers`. **Post:** "Providers Are Plugins: Surviving Model Churn With Aliases, Cassettes and a Pricing Hash."
@@ -227,7 +227,7 @@ from a real two-process run, which also exposed and fixed cross-process observab
 - [x] **C12 trust boundary** ([#12](https://github.com/AmitSinghOM/AgentOS/issues/12), `docs/TRUST_BOUNDARY.md`): control payloads are `principal` + `reason` and nothing else (`extra="forbid"`, 422 + logged, no event, no step); every appended event carries `prev_hash`/`hash` computed in the core, `fold()` verifies the chain (edit/insert/remove → `FoldError`, `GET /runs/{id}` 500, `GET /runs/{id}/integrity`), pre-v0.6.0 logs fold as before; model inputs delimited as `<input name=…>` with `DATA_BOUNDARY` in every system prompt (both providers); structural test that a step output cannot choose the next step, executor or effect class
 - [x] README screenshots: Jaeger span with `gen_ai.*`, Grafana dashboard, from a real two-process run (`docs/images/`). Taking them exposed and fixed a real defect: the worker's observers never saw `run.started`, so Prometheus labelled everything `workflow="unknown"` and Jaeger got orphan step spans. Now: trace/run-span ids derive from the run id, observers resolve run facts from the store, run-level happenings are child spans, and the worker serves `/metrics` on `:8001`
 
-- [x] Real `tool` agent (HTTP/subprocess) in core (`agentos/agents/tool.py`, v0.7.0 slice): operator-fixed url/argv, inputs only as query/json values or stdin JSON, `${ENV}` secrets redacted, effects by method/kind so the existing gate governs it, 1 MiB cap, egress guard (link-local never; private opt-in), process-group kill on timeout; results flow through `wrap_input`. Reviewed by the code-reviewer + security-reviewer pipeline (WARNING → fixed). ⏭ `protocols/` function-calling round trip (A8) still open
+- [x] Real `tool` agent (HTTP/subprocess) in core (`dagentos/agents/tool.py`, v0.7.0 slice): operator-fixed url/argv, inputs only as query/json values or stdin JSON, `${ENV}` secrets redacted, effects by method/kind so the existing gate governs it, 1 MiB cap, egress guard (link-local never; private opt-in), process-group kill on timeout; results flow through `wrap_input`. Reviewed by the code-reviewer + security-reviewer pipeline (WARNING → fixed). ⏭ `protocols/` function-calling round trip (A8) still open
 - [ ] ⏭ A11 `agentos export-run --format jsonl`
 - [ ] ⏭ A12 global pause
 
@@ -256,7 +256,7 @@ locking test.
 - [x] **C14** — state replay, not code replay: `docs/REPLAY.md` + the random-roll crash/resume acceptance test ([#14](https://github.com/AmitSinghOM/AgentOS/issues/14))
 - [x] **C10** — every event type round-trips through every store adapter with equality; bounded reads ([#10](https://github.com/AmitSinghOM/AgentOS/issues/10))
 - [x] **C15** — `WorkflowRun` snapshots ([#15](https://github.com/AmitSinghOM/AgentOS/issues/15), [#39](https://github.com/AmitSinghOM/AgentOS/pull/39)): the engine reads a snapshot and folds only the tail; `fold_from` verifies the chain link across the boundary and the snapshot's anchor event against the log even when the tail is empty; `put_snapshot` is monotonic per run on all three adapters so a fenced-out stale worker cannot regress it; a failing snapshot write never fails a committed advance; `AGENTOS_SNAPSHOT_EVERY` (default 200, 0 disables); `fold_from == fold` at every cut point of every golden log. Snapshots are derived state — deleting them is safe; `GET /runs/{id}/integrity` never reads them
-- [x] Versioned schema migrations (`agentos/store/migrations.py`) for SQLite + Postgres; every released migration's SQL is SHA-256-pinned per dialect (editing one fails with "add migration N+1"); a pre-ledger v0.6 database adopts the ledger without losing rows
+- [x] Versioned schema migrations (`dagentos/store/migrations.py`) for SQLite + Postgres; every released migration's SQL is SHA-256-pinned per dialect (editing one fails with "add migration N+1"); a pre-ledger v0.6 database adopts the ledger without losing rows
 - [x] Unused `sqlalchemy` + `redis` dependencies and the compose redis service removed (queue and lease have been SQL adapters since Phase 1); import-linter still forbids them in the core
 - [x] Four-seat review (Staff / Product / Security / CTO) + code-reviewer skill + cqa-analyzer on the snapshot PR: 10 findings, 9 fixed each with a test, 1 cosmetic declined with reason; Design score 8.96 → 8.98
 - [ ] ⏭ A8 `protocols/` function-calling round trip
@@ -325,7 +325,7 @@ the stream is a consumer of the log (verified through separate API and worker pr
 resume via `Last-Event-ID`); an OpenAI Agents SDK agent runs as one governed step and a
 `spend`-declaring step is suspended before the SDK is ever invoked.
 
-- [x] **Run stream** `GET /runs/{id}/stream` (SSE, [#44](https://github.com/AmitSinghOM/AgentOS/pull/44), `agentos/api/stream.py`): a *consumer of the log*, like the
+- [x] **Run stream** `GET /runs/{id}/stream` (SSE, [#44](https://github.com/AmitSinghOM/AgentOS/pull/44), `dagentos/api/stream.py`): a *consumer of the log*, like the
   observers — the API polls `read_events(after_seq)` so it works from any process with no
   in-memory subscription map (mastra #19252 / C6); `id` = `seq`, `Last-Event-ID` / `?after=` resume;
   closes on the terminal event (also when the resume point is already at/past it — a client
@@ -357,7 +357,7 @@ resume via `Last-Event-ID`); an OpenAI Agents SDK agent runs as one governed ste
   `UsageLimits(request_limit)`, `DeferredToolRequests` (approval / external execution) RAISES
   rather than auto-resolving, errors mapped by `ModelHTTPError.status_code`, client built
   from this provider's config only (never `OPENAI_BASE_URL`, tested). The second harness
-  forced the right refactor: the tool registry moved to `agentos.providerkit.tools` with the
+  forced the right refactor: the tool registry moved to `dagentos.providerkit.tools` with the
   SDK-neutral `agentos.tools` entry-point group (openai-agents still loads its old
   `agentos.openai_agents_tools` group as an alias for one release), `strip_fences` moved to
   `providerkit.prompt`, and a test pins that both harnesses emit the SAME output keys and
@@ -367,7 +367,7 @@ resume via `Last-Event-ID`); an OpenAI Agents SDK agent runs as one governed ste
 - [x] **Typed output** `config.output_schema` on both inner harnesses: a JSON Schema object in
   agent config (definition, never input), shown to the model by each SDK (PydanticAI
   `PromptedOutput(StructuredDict)`, Agents SDK `response_format` via an `AgentOutputSchemaBase`
-  adapter) and ENFORCED once by `agentos.providerkit.schema` — neither SDK validates the
+  adapter) and ENFORCED once by `dagentos.providerkit.schema` — neither SDK validates the
   contract itself (`StructuredDict` checks only "is an object"). Valid → `output["json"]` +
   `schema_sha256` on `step.completed`; violation → `BadResponse` naming the path, the node's
   retry policy decides (proven through the API: violation, `step.failed`, attempt 2 satisfies).
@@ -440,7 +440,7 @@ boundary, bounded by an operator, verifiable after the fact, and installable by 
 Order follows the control-plane check: the invariant first, the checklist that scopes the
 ceiling second, then the ceiling, then the signature, then operability, then distribution.
 
-- [x] **Auth → `Principal`** (#1). `agentos/api/auth.py`: an `Authenticator` protocol
+- [x] **Auth → `Principal`** (#1). `dagentos/api/auth.py`: an `Authenticator` protocol
   resolves the request's credential to a `Principal`; in bearer mode request bodies no longer
   *carry* a principal, they *receive* one. `AGENTOS_AUTH=asserted|bearer` (default `asserted`
   = today's behaviour, one startup WARNING that principals are unverified);
@@ -462,7 +462,7 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   row has no direction, or a row cites the placeholder without being declared unpinned. One
   gap surfaced and declared rather than hidden: `_fail`'s conflict branch (two settles failing
   the run at once) has no test. Doubles as the scoping checklist for the policy ceiling.
-- [x] **Operator policy ceiling** (#2): `agentos/core/policy.py`. `AGENTOS_POLICY=<file>`
+- [x] **Operator policy ceiling** (#2): `dagentos/core/policy.py`. `AGENTOS_POLICY=<file>`
   (`allowed_executors`, `effect_ceiling`, `always_approve`, `agent_approval_allowed`,
   `max_step_cost`, `max_run_cost`, `max_step_wall_seconds`; `extra=forbid`). Every workflow
   budget is intersected with it by `apply_ceiling` before the gate, the settle checks AND the
@@ -475,7 +475,7 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   allowlist (needs a `StepRequest` slot both harnesses honour), allowlist check at
   `POST /agents` (UX; dispatch is the invariant), hot reload / central distribution, policy
   signature (goes with #3).
-- [x] **Signed chain tail + `agentos verify`** (#3; absorbs Phase 6 ⏭ A7): `agentos/core/seal.py`.
+- [x] **Signed chain tail + `agentos verify`** (#3; absorbs Phase 6 ⏭ A7): `dagentos/core/seal.py`.
   `AGENTOS_SIGNING_KEYS=<keyring>` (`{"active": "k1", "keys": {"k1": "<64+ hex>"}}`, ≥32-byte
   keys, `key_id` per seal so rotation keeps old seals verifiable). Every idle/terminal event
   (`run.completed|failed|cancelled|suspended|paused`) is followed IN THE SAME BATCH by an
@@ -487,17 +487,17 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   rewrite-and-rechain fools the chain and is caught by the seal after the edit. Honest limits
   in TRUST_BOUNDARY §2 (symmetric key, truncation after last seal). Ed25519 is the next signer
   through the same seam.
-- [x] **`agentos doctor` / `policy explain`** (#4): `agentos/cli.py`, console script `agentos`
+- [x] **`agentos doctor` / `policy explain`** (#4): `dagentos/cli.py`, console script `agentos`
   (`[project.scripts]`). `verify [--run|--all]` exits 1 on any chain or seal failure. `doctor`:
   store reachable, schema at latest migration, every executor's `health()`, auth mode, policy,
   keyring, every run folds and verifies — warnings for unconfigured, FAIL only for broken.
   `policy explain <workflow>`: workflow budget → effective budget → each narrowing → per node
   executor allowed / each declared class runs · asks approval · REFUSED. `--json` everywhere.
-  `agentos/store/factory.py` is now the one `AGENTOS_STORE*` reader for API, worker and CLI.
+  `dagentos/store/factory.py` is now the one `AGENTOS_STORE*` reader for API, worker and CLI.
   ⏭ `agentos snapshot` (store + blobs export) deferred to the publishing slice.
 - [x] **PyPI + `ghcr.io` image with provenance** (#10). Found first: `agentos` on PyPI is taken
   (agentos.org, import package also `agentos`), so the distribution is **`agentos-durable`**;
-  providers depend on `agentos-durable[providerkit]`; import package unchanged (rename = open
+  providers depend on `agentos-durable[providerkit]`; import package unchanged then (renamed to `dagentos` in v0.11.0, below) (rename = open
   decision, `docs/RELEASING.md`). `publish.yml` on `v*` tags or `workflow_dispatch(dry_run)`:
   build sdist+wheel ×5, `twine check --strict`, fresh-venv install + `scripts/release_smoke.py`
   (version, entry points, `agentos doctor`), SLSA provenance for every artifact
@@ -546,7 +546,7 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   `docs/UI.md`, not a second source of state. Follows the time-travel seek.
 - [x] **Approvals inbox (authenticated)** — Phase 9 opener, the first surface a non-author
   operator touches. `ui/` Vite 5 + React 19 + TS, no UI kit yet (chosen against one screen it
-  would be the wrong kit). Served by the API at `/ui` (`agentos/api/ui.py`): same origin so no
+  would be the wrong kit). Served by the API at `/ui` (`dagentos/api/ui.py`): same origin so no
   CORS surface; the auth middleware exempts GET/HEAD of static files under `/ui` ONLY, and a test
   asserts no API route lives there and traversal cannot escape the bundle. Token in
   `sessionStorage` (never localStorage / cookie / URL), sent as `Authorization: Bearer`; SSE
@@ -558,7 +558,7 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   proposed ceiling. 6 component tests (threat model in the file header), 7 Python mount tests,
   CI `ui` job builds the bundle and runs the mount tests against it.
 - [x] **Bundle in the wheel and image.** `scripts/bundle_ui.py` copies `ui/dist` to
-  `agentos/_ui` (gitignored; hatch `artifacts` ships it; refuses a partial build; writes a
+  `dagentos/_ui` (gitignored; hatch `artifacts` ships it; refuses a partial build; writes a
   VERSION stamp) before `python -m build` in both `publish.yml` (Node step, SHA-pinned) and the
   CI `package` job. `ui_dir()` resolves env → checkout → package, so a developer's build is never
   shadowed. `release_smoke.py` fails a wheel without the bundle or with a mismatched UI version;
@@ -566,6 +566,21 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   only the wheels served `/ui/runs` and its hashed asset with no checkout present.
 
 **Tag:** `v0.10.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
+
+## Rename — `dagentos`  ·  `v0.11.0` (2026-09-20)
+
+The import package `agentos` collided with the PyPI project `agentos` (agentos.org) — the
+reason v0.9.0–v0.10.0 shipped as `agentos-durable`. `agenticos` was checked as a target and is
+**also taken** (PyPI, 21 releases, import package `agenticos`). `dagentos` — a *d* for durable —
+was free on PyPI, npm and GitHub on 2026-09-20, so from v0.11.0 **distribution and import package
+are both `dagentos`** (`pip install dagentos` → `import dagentos`). Kept, deliberately, because
+they are product names and none collide: the `AGENTOS_*` environment variables, the `agentos`
+CLI, the `agentos.executors` / `agentos.tools` entry-point groups, the `agentos.*` logger and
+OpenTelemetry attribute namespaces, the `agentos.db` default store file, the
+`agentos-provider-*` distributions and `ghcr.io/amitsinghom/agentos`. Providers now depend on
+`dagentos[providerkit]>=0.11`. Import-linter root and contracts follow the package. Release notes
+for earlier versions are unchanged history. A breaking change for anyone who imported
+`agentos.*` from this project — hence the minor bump.
 
 ---
 

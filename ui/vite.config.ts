@@ -2,7 +2,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Served by the API at /ui (agentos/api/ui.py), so every asset URL is under that base. In
+// Served by the API at /ui (dagentos/api/ui.py), so every asset URL is under that base. In
 // development `vite` proxies API calls to a local API process so the browser stays same-origin.
 export default defineConfig({
   base: "/ui/",

@@ -8,8 +8,8 @@ import time
 
 import pytest
 
-from agentos.core.engine import ControlNotAllowed, Engine
-from agentos.core.events import (
+from dagentos.core.engine import ControlNotAllowed, Engine
+from dagentos.core.events import (
     RunCancelled,
     RunCancelRequested,
     RunPaused,
@@ -19,7 +19,7 @@ from agentos.core.events import (
     StepCompleted,
     StepStarted,
 )
-from agentos.core.models import (
+from dagentos.core.models import (
     Agent,
     AgentType,
     Cost,
@@ -32,9 +32,9 @@ from agentos.core.models import (
     StepResult,
     WorkflowDefinition,
 )
-from agentos.core.ports import ConflictError
-from agentos.store.memory import MemoryStore
-from agentos.worker import Worker
+from dagentos.core.ports import ConflictError
+from dagentos.store.memory import MemoryStore
+from dagentos.worker import Worker
 
 HUMAN = Principal(kind=PrincipalKind.human, id="amit")
 
@@ -181,8 +181,8 @@ def test_cancel_request_appended_by_api_is_adopted_by_worker_log_not_a_conflict(
 
 
 def test_foreign_non_control_append_is_still_a_conflict():
-    from agentos.core.engine import _Log
-    from agentos.core.events import RunStarted, StepStarted
+    from dagentos.core.engine import _Log
+    from dagentos.core.events import RunStarted, StepStarted
     store = MemoryStore()
     store.append_events("r", 0, [RunStarted(run_id="r", workflow="w", workflow_version=1,
                                             request_id="q")])
@@ -267,7 +267,7 @@ def test_control_endpoints(monkeypatch):
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv("AGENTOS_STORE", "memory")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     client = TestClient(main.app)
     client.post("/agents", json={"name": "a", "type": "echo"})

@@ -14,13 +14,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agentos.agents.echo import EchoExecutor
-from agentos.core import events as E
-from agentos.core.engine import Engine
-from agentos.core.events import EVENT_TYPES, Event
-from agentos.core.fold import fold
-from agentos.core.integrity import chain
-from agentos.core.models import (
+from dagentos.agents.echo import EchoExecutor
+from dagentos.core import events as E
+from dagentos.core.engine import Engine
+from dagentos.core.events import EVENT_TYPES, Event
+from dagentos.core.fold import fold
+from dagentos.core.integrity import chain
+from dagentos.core.models import (
     Agent,
     AgentType,
     ApprovalKind,
@@ -36,8 +36,8 @@ from agentos.core.models import (
     WorkflowDefinition,
     WorkflowRun,
 )
-from agentos.store.memory import MemoryStore
-from agentos.store.sqlite import SqliteStore
+from dagentos.store.memory import MemoryStore
+from dagentos.store.sqlite import SqliteStore
 
 PG_DSN = os.environ.get("AGENTOS_TEST_PG_DSN")
 ADAPTERS = ["memory", "sqlite-file", "sqlite-memory"] + (["postgres"] if PG_DSN else [])
@@ -56,7 +56,7 @@ def store(request, tmp_path):
         yield s
         s.close()
     else:
-        from agentos.store.postgres import PostgresStore
+        from dagentos.store.postgres import PostgresStore
         schema = f"t_{tmp_path.name.lower().replace('-', '_')}"[:60]
         s = PostgresStore(PG_DSN, schema=schema, max_size=4)
         try:
@@ -202,7 +202,7 @@ def test_put_snapshot_is_monotonic_per_run(store):
 def test_schema_is_versioned_and_migrations_are_idempotent(store):
     if not hasattr(store, "schema_version"):
         pytest.skip("memory adapter has no schema")
-    from agentos.store.migrations import CURRENT_VERSION
+    from dagentos.store.migrations import CURRENT_VERSION
     assert store.schema_version() == CURRENT_VERSION >= 2
     assert store.migrate() == []                                          # nothing pending
     assert store.schema_version() == CURRENT_VERSION
@@ -229,7 +229,7 @@ class Tiny:
     name, version = "tiny", "t"
 
     def execute(self, req, progress):
-        from agentos.core.models import StepResult
+        from dagentos.core.models import StepResult
         return StepResult(output={"i": req.step_id},
                           effects=[Effect(effect_class=EffectClass.compute)], cost=Cost(),
                           provenance=Provenance(executor="tiny", executor_version="t"))
@@ -365,7 +365,7 @@ def test_snapshot_every_zero_disables_snapshots_entirely():
 
 
 def test_snapshot_every_env_is_validated_and_names_the_variable(monkeypatch):
-    from agentos.api.main import snapshot_every_from_env
+    from dagentos.api.main import snapshot_every_from_env
     monkeypatch.delenv("AGENTOS_SNAPSHOT_EVERY", raising=False)
     assert snapshot_every_from_env() == 200
     monkeypatch.setenv("AGENTOS_SNAPSHOT_EVERY", "0")

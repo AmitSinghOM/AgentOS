@@ -6,7 +6,7 @@ token usage is metered as cost, and the whole trajectory lands in the hash-chain
 
 Zero-config default: the SDK's chat-completions model against a local Ollama, no API key.
 """
-from agentos.providerkit import (
+from dagentos.providerkit import (
     AuthenticationFailed,
     BadResponse,
     ConfigError,

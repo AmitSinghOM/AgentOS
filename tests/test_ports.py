@@ -9,9 +9,9 @@ from collections.abc import Sequence
 
 import pytest
 
-from agentos.core.engine import Engine
-from agentos.core.events import Event, RunStarted, from_record
-from agentos.core.models import (
+from dagentos.core.engine import Engine
+from dagentos.core.events import Event, RunStarted, from_record
+from dagentos.core.models import (
     Agent,
     AgentType,
     BlobRef,
@@ -23,12 +23,12 @@ from agentos.core.models import (
     StepResult,
     WorkflowDefinition,
 )
-from agentos.core.ports import ConflictError
+from dagentos.core.ports import ConflictError
 
 
 class FakeStore:
     """Minimal in-test implementation of Store + BlobStore, written without looking at
-    agentos.store so the port is exercised from a stranger's perspective."""
+    dagentos.store so the port is exercised from a stranger's perspective."""
 
     def __init__(self) -> None:
         self.agents: dict[str, Agent] = {}
@@ -232,17 +232,17 @@ def test_core_package_imports_no_adapter():
     import importlib
     import sys
 
-    saved = {m: mod for m, mod in sys.modules.items() if m.startswith("agentos")}
+    saved = {m: mod for m, mod in sys.modules.items() if m.startswith("dagentos")}
     for m in saved:
         del sys.modules[m]
     try:
-        for name in ("agentos.core.engine", "agentos.core.ports", "agentos.core.fold",
-                     "agentos.core.events", "agentos.core.upcast"):
+        for name in ("dagentos.core.engine", "dagentos.core.ports", "dagentos.core.fold",
+                     "dagentos.core.events", "dagentos.core.upcast"):
             importlib.import_module(name)
-        loaded = {m for m in sys.modules if m.startswith("agentos.")}
-        assert not {m for m in loaded if m.startswith(("agentos.api", "agentos.store",
-                                                       "agentos.agents"))}, loaded
+        loaded = {m for m in sys.modules if m.startswith("dagentos.")}
+        assert not {m for m in loaded if m.startswith(("dagentos.api", "dagentos.store",
+                                                       "dagentos.agents"))}, loaded
     finally:
-        for m in [m for m in sys.modules if m.startswith("agentos")]:
+        for m in [m for m in sys.modules if m.startswith("dagentos")]:
             del sys.modules[m]
         sys.modules.update(saved)

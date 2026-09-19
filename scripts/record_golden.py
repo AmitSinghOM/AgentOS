@@ -13,9 +13,9 @@ import json
 import sys
 from pathlib import Path
 
-from agentos.agents.echo import EchoExecutor
-from agentos.core.engine import Engine
-from agentos.core.models import (
+from dagentos.agents.echo import EchoExecutor
+from dagentos.core.engine import Engine
+from dagentos.core.models import (
     Agent,
     AgentType,
     Cost,
@@ -25,9 +25,9 @@ from agentos.core.models import (
     StepResult,
     WorkflowDefinition,
 )
-from agentos.core.policy import OperatorPolicy
-from agentos.core.seal import HmacKeyring
-from agentos.store.memory import MemoryStore
+from dagentos.core.policy import OperatorPolicy
+from dagentos.core.seal import HmacKeyring
+from dagentos.store.memory import MemoryStore
 
 # From v0.9.0 every golden log also carries governance.policy_applied and integrity.sealed
 # events. The keyring is a FIXTURE, not a secret: it exists so the recorded seals are

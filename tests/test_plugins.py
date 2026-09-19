@@ -12,9 +12,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from agentos import plugins
-from agentos.core.engine import Engine
-from agentos.core.models import (
+from dagentos import plugins
+from dagentos.core.engine import Engine
+from dagentos.core.models import (
     Agent,
     AgentType,
     Cost,
@@ -27,7 +27,7 @@ from agentos.core.models import (
     StepResult,
     WorkflowDefinition,
 )
-from agentos.store.memory import MemoryStore
+from dagentos.store.memory import MemoryStore
 
 
 class AliasedExecutor:
@@ -169,13 +169,13 @@ def test_pricing_snapshot_is_stored_as_a_blob():
     stored = plugins.store_pricing_snapshots({"p": Priced(), "echo": object()}, store)
     import hashlib
     assert stored == {"p": hashlib.sha256(Priced().pricing_snapshot()).hexdigest()}
-    from agentos.core.models import BlobRef
+    from dagentos.core.models import BlobRef
     assert store.get(BlobRef(sha256=stored["p"], size=0)) == Priced().pricing_snapshot()
 
 
 def test_core_imports_no_provider_or_http_client():
-    code = ("import sys, agentos.core.engine, agentos.core.ports, agentos.core.fold; "
-            "bad=[m for m in sys.modules if m.startswith(('agentos_provider','httpx','agentos.plugins'))]; "
+    code = ("import sys, dagentos.core.engine, dagentos.core.ports, dagentos.core.fold; "
+            "bad=[m for m in sys.modules if m.startswith(('agentos_provider','httpx','dagentos.plugins'))]; "
             "print(len(bad))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "0"
@@ -185,7 +185,7 @@ def test_core_imports_no_provider_or_http_client():
 
 def _client(monkeypatch):
     monkeypatch.setenv("AGENTOS_STORE", "memory")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     return TestClient(main.app), main
 

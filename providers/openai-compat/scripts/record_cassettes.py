@@ -5,7 +5,7 @@
                                                 # cassettes came from
     python scripts/record_cassettes.py          # against the in-process reference server
 
-Scenarios are shared by every provider: `agentos.providerkit.conformance`.
+Scenarios are shared by every provider: `dagentos.providerkit.conformance`.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ sys.path.insert(0, str(HERE / "tests"))
 import openai_reference_server
 from agentos_provider_openai_compat import OpenAICompatExecutor, from_env
 
-from agentos.providerkit.conformance import record
+from dagentos.providerkit.conformance import record
 
 CASSETTE_DIR = HERE / "tests" / "cassettes"
 

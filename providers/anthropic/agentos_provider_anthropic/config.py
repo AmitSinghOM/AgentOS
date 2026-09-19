@@ -1,4 +1,4 @@
-"""Configuration for the Anthropic Messages provider (see `agentos.providerkit.config`).
+"""Configuration for the Anthropic Messages provider (see `dagentos.providerkit.config`).
 Zero-config default: a local Ollama, which serves the same wire format at /v1/messages.
 
     AGENTOS_ANTHROPIC_BASE_URL   http://127.0.0.1:11434     NO /v1 suffix: the API path is
@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from agentos.providerkit.config import ConfigError, ProviderConfig, config_from_env
+from dagentos.providerkit.config import ConfigError, ProviderConfig, config_from_env
 
 __all__ = ["BUNDLED_PRICING", "DEFAULT_ALIASES", "DEFAULT_BASE_URL", "ConfigError",
            "ProviderConfig", "api_version", "from_env"]

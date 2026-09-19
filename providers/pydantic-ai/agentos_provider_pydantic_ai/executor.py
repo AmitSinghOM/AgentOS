@@ -9,7 +9,7 @@ the governor's `_settle` checks the reported effects after. PydanticAI owns the 
 AgentOS owns the ledger and the authority.
 
 This is the second inner harness (after `agentos-provider-openai-agents`) and it shares the
-seam with the first: the same `agentos.providerkit.tools` registry, the same config keys,
+seam with the first: the same `dagentos.providerkit.tools` registry, the same config keys,
 the same output shape — a workflow switches harness by changing `executor` and nothing
 downstream moves (tested against the sibling).
 
@@ -54,10 +54,10 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.tools import DeferredToolRequests
 
-from agentos.core.models import Effect, EffectClass, Meter, Provenance, StepRequest, StepResult
-from agentos.core.ports import ProgressFn
-from agentos.providerkit.config import ProviderConfig
-from agentos.providerkit.errors import (
+from dagentos.core.models import Effect, EffectClass, Meter, Provenance, StepRequest, StepResult
+from dagentos.core.ports import ProgressFn
+from dagentos.providerkit.config import ProviderConfig
+from dagentos.providerkit.errors import (
     AuthenticationFailed,
     BadResponse,
     ModelNotFound,
@@ -66,10 +66,10 @@ from agentos.providerkit.errors import (
     ProviderServerError,
     ProviderUnreachable,
 )
-from agentos.providerkit.pricing import PricingTable
-from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, strip_fences, wrap_input
-from agentos.providerkit.schema import OutputSchema
-from agentos.providerkit.tools import ToolRegistry, ToolSpec, load_registry
+from dagentos.providerkit.pricing import PricingTable
+from dagentos.providerkit.prompt import DATA_BOUNDARY, render_prompt, strip_fences, wrap_input
+from dagentos.providerkit.schema import OutputSchema
+from dagentos.providerkit.tools import ToolRegistry, ToolSpec, load_registry
 
 from .config import from_env
 

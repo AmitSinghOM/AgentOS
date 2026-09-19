@@ -5,7 +5,7 @@ What a stranger's `pip install` sees. Run INSIDE a venv that has only the built 
 
     python scripts/release_smoke.py <expected-version>
 
-Asserts: the installed distribution is `agentos-durable` at the expected version, the import
+Asserts: the installed distribution is `dagentos` at the expected version, the import
 package `agentos` and the CLI import, all four provider executors are registered through the
 `agentos.executors` entry-point group, and `agentos doctor` runs against a memory store and
 lists the built-in and provider executors. Exit 1 with the mismatch on any failure.
@@ -28,17 +28,17 @@ def main(argv: list[str]) -> int:
     expected = argv[1]
     problems: list[str] = []
 
-    version = metadata.version("agentos-durable")
+    version = metadata.version("dagentos")
     if version != expected:
-        problems.append(f"agentos-durable is {version}, expected {expected}")
+        problems.append(f"dagentos is {version}, expected {expected}")
 
     eps = {e.name for e in metadata.entry_points(group="agentos.executors")}
     if eps != EXPECTED_EXECUTORS:
         problems.append(f"executor entry points {sorted(eps)} != {sorted(EXPECTED_EXECUTORS)}")
 
-    import agentos
-    import agentos.cli  # noqa: F401
-    from agentos.api.ui import PACKAGED_DIST
+    import dagentos
+    import dagentos.cli  # noqa: F401
+    from dagentos.api.ui import PACKAGED_DIST
     if not (PACKAGED_DIST / "index.html").is_file():
         problems.append(f"operator UI bundle missing from the wheel ({PACKAGED_DIST}); run "
                         "`npm run build` in ui/ and scripts/bundle_ui.py before python -m build")
@@ -51,7 +51,7 @@ def main(argv: list[str]) -> int:
     env = dict(os.environ, AGENTOS_STORE="memory")
     env.pop("AGENTOS_POLICY", None)
     env.pop("AGENTOS_SIGNING_KEYS", None)
-    proc = subprocess.run([sys.executable, "-m", "agentos.cli", "--json", "doctor"],
+    proc = subprocess.run([sys.executable, "-m", "dagentos.cli", "--json", "doctor"],
                           capture_output=True, text=True, env=env, check=False,
                           cwd=os.path.dirname(sys.executable))
     if proc.returncode != 0:
@@ -65,7 +65,7 @@ def main(argv: list[str]) -> int:
     if problems:
         print("release smoke FAILED:\n  " + "\n  ".join(problems), file=sys.stderr)
         return 1
-    print(f"release smoke ok: agentos-durable {version}, executors {sorted(eps)}, ui bundled")
+    print(f"release smoke ok: dagentos {version}, executors {sorted(eps)}, ui bundled")
     return 0
 
 

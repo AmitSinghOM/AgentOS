@@ -17,13 +17,13 @@ import time
 
 import pytest
 
-from agentos.agents.echo import EchoExecutor
-from agentos.core.engine import Engine
-from agentos.core.events import StepCompleted
-from agentos.core.models import Agent, AgentType, WorkflowDefinition
-from agentos.core.ports import ConflictError
-from agentos.store.postgres import PostgresStore
-from agentos.worker import Worker
+from dagentos.agents.echo import EchoExecutor
+from dagentos.core.engine import Engine
+from dagentos.core.events import StepCompleted
+from dagentos.core.models import Agent, AgentType, WorkflowDefinition
+from dagentos.core.ports import ConflictError
+from dagentos.store.postgres import PostgresStore
+from dagentos.worker import Worker
 
 from .conftest import LISTEN, PG_DSN, UPSTREAM, proxied_dsn
 

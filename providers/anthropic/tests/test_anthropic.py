@@ -23,14 +23,14 @@ from agentos_provider_anthropic import (
     from_env,
 )
 
-from agentos.providerkit.cassette import CassetteMiss
-from agentos.providerkit.conformance import (
+from dagentos.providerkit.cassette import CassetteMiss
+from dagentos.providerkit.conformance import (
     QUICKSTART,
     SCENARIOS,
     quickstart_requests,
     request_for,
 )
-from agentos.providerkit.prompt import strip_fences as _strip_fences
+from dagentos.providerkit.prompt import strip_fences as _strip_fences
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))

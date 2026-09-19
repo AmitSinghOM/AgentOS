@@ -1,4 +1,4 @@
-"""Copy the built operator UI (ui/dist) into the package as agentos/_ui so the wheel — and the
+"""Copy the built operator UI (ui/dist) into the package as dagentos/_ui so the wheel — and the
 image built from it — serve `/ui` with no Node at runtime (Phase 9).
 
     cd ui && npm ci && npm run build && cd .. && python scripts/bundle_ui.py
@@ -6,7 +6,7 @@ image built from it — serve `/ui` with no Node at runtime (Phase 9).
 Refuses to bundle a stale or partial build: `ui/dist/index.html` must exist and reference every
 asset it needs (a hashed `assets/*.js`), and a version stamp is written so `agentos doctor` and
 the release smoke can say which UI version an install carries. `--check` verifies an existing
-`agentos/_ui` matches `ui/dist` byte for byte (used by CI) without copying.
+`dagentos/_ui` matches `ui/dist` byte for byte (used by CI) without copying.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "ui" / "dist"
-DST = ROOT / "agentos" / "_ui"
+DST = ROOT / "dagentos" / "_ui"
 
 
 def _validate(src: Path) -> list[str]:
@@ -62,15 +62,15 @@ def check(src: Path = SRC, dst: Path = DST) -> int:
     cmp = filecmp.dircmp(src, dst, ignore=["VERSION"])
     diff = cmp.left_only + cmp.right_only + cmp.diff_files
     if diff:
-        print("agentos/_ui differs from ui/dist: " + ", ".join(sorted(diff)), file=sys.stderr)
+        print("dagentos/_ui differs from ui/dist: " + ", ".join(sorted(diff)), file=sys.stderr)
         return 1
-    print("agentos/_ui matches ui/dist")
+    print("dagentos/_ui matches ui/dist")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--check", action="store_true", help="verify agentos/_ui matches ui/dist; copy nothing")
+    ap.add_argument("--check", action="store_true", help="verify dagentos/_ui matches ui/dist; copy nothing")
     args = ap.parse_args(argv)
     return check() if args.check else bundle()
 

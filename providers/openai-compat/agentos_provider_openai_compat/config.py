@@ -1,5 +1,5 @@
 """Configuration for the OpenAI-compatible provider. Every knob is an environment
-variable with a documented default (see `agentos.providerkit.config`); the zero-config
+variable with a documented default (see `dagentos.providerkit.config`); the zero-config
 default talks to a local Ollama.
 
     AGENTOS_OPENAI_BASE_URL   http://127.0.0.1:11434/v1   any /v1 chat-completions server
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentos.providerkit.config import ConfigError, ProviderConfig, config_from_env
+from dagentos.providerkit.config import ConfigError, ProviderConfig, config_from_env
 
 __all__ = ["BUNDLED_PRICING", "DEFAULT_ALIASES", "DEFAULT_BASE_URL", "ConfigError",
            "ProviderConfig", "from_env"]

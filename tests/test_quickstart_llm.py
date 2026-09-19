@@ -23,7 +23,7 @@ def client(monkeypatch):
     monkeypatch.setenv("AGENTOS_OPENAI_CASSETTES", "replay")
     monkeypatch.setenv("AGENTOS_OPENAI_CASSETTE_DIR", str(CASSETTES))
     monkeypatch.setenv("AGENTOS_OPENAI_CASSETTE", "quickstart")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     return TestClient(main.app)
 
@@ -87,7 +87,7 @@ def test_examples_are_valid_definitions():
     typed = json.loads((EXAMPLES / "critic_typed_agent.json").read_text())
     assert typed["name"] == "critic" and typed["version"] == 2       # v1 stays registered
     assert typed["config"]["output_schema"]["type"] == "object"
-    from agentos.providerkit.schema import OutputSchema
+    from dagentos.providerkit.schema import OutputSchema
     OutputSchema.parse(typed["config"]["output_schema"])           # a usable contract
     wf = json.loads((EXAMPLES / "haiku_workflow.json").read_text())
     assert [n["id"] for n in wf["nodes"]] == ["write", "review"]
@@ -102,7 +102,7 @@ def test_same_agents_run_on_the_anthropic_wire_format(monkeypatch):
     monkeypatch.setenv("AGENTOS_ANTHROPIC_CASSETTE_DIR",
                        str(ROOT / "providers" / "anthropic" / "tests" / "cassettes"))
     monkeypatch.setenv("AGENTOS_ANTHROPIC_CASSETTE", "quickstart")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     c = TestClient(main.app)
     for f in ("poet_agent.json", "critic_agent.json"):
@@ -141,7 +141,7 @@ def test_same_agents_run_on_the_pydantic_ai_inner_harness(monkeypatch):
     monkeypatch.setattr(pai.PydanticAIExecutor, "_default_model",
                         lambda self, model_id: FunctionModel(scripted, model_name=model_id))
     monkeypatch.setenv("AGENTOS_STORE", "memory")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     c = TestClient(main.app)
     for f in ("poet_agent.json", "critic_agent.json"):
@@ -182,7 +182,7 @@ def test_typed_critic_runs_on_the_inner_harness(monkeypatch):
     monkeypatch.setattr(pai.PydanticAIExecutor, "_default_model",
                         lambda self, model_id: FunctionModel(scripted, model_name=model_id))
     monkeypatch.setenv("AGENTOS_STORE", "memory")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     c = TestClient(main.app)
     poet = json.loads((EXAMPLES / "poet_agent.json").read_text())
@@ -214,7 +214,7 @@ def test_research_example_fetch_then_poet(monkeypatch):
     monkeypatch.setenv("AGENTOS_OPENAI_CASSETTE", "research")
     import httpx
 
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
 
     def github(request: httpx.Request) -> httpx.Response:

@@ -50,7 +50,7 @@ two different doors.
 What the second provider did change was the shape of the first. Cassettes, the pricing
 table, the error vocabulary, prompt templating and environment parsing were all things a
 provider needs and none of them are provider-specific, so they moved into
-`agentos.providerkit` — in the core distribution behind an extra, forbidden to the core
+`dagentos.providerkit` — in the core distribution behind an extra, forbidden to the core
 itself, and in the adapter-independence contract. The OpenAI provider lost 150 lines and
 kept its behaviour. A third provider is now one executor module.
 

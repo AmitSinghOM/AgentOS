@@ -7,7 +7,7 @@ assemble it) for twenty topics at temperature 0 against any OpenAI-compatible se
 counts answers that contain the boundary paragraph's own text or the `<input` tag. The
 control column is the same task with no boundary paragraph at all. No AgentOS process is
 needed — this measures the model's response to the prompt shape, which is why the
-`DATA_BOUNDARY` wording carries a note about it (`agentos/providerkit/prompt.py`).
+`DATA_BOUNDARY` wording carries a note about it (`dagentos/providerkit/prompt.py`).
 
 Result on 2026-09-17, qwen2.5:0.5b on Ollama: unframed sentence 7/20 echoed, framed
 ("Note on the input format: …") 1/20, control 0/20.
@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib import request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from agentos.providerkit.prompt import DATA_BOUNDARY, render_prompt
+from dagentos.providerkit.prompt import DATA_BOUNDARY, render_prompt
 
 SYSTEM = "You are a terse poet. Answer with the poem only."
 TOPICS = ("event logs", "audit trails", "input validation", "untrusted data", "log files",

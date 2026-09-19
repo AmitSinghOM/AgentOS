@@ -1,5 +1,5 @@
 """Configuration for the PydanticAI inner-harness provider. Every knob is an environment
-variable with a documented default (`agentos.providerkit.config`); the zero-config default
+variable with a documented default (`dagentos.providerkit.config`); the zero-config default
 drives PydanticAI's OpenAI-compatible chat model against a local Ollama.
 
     AGENTOS_PYDANTIC_AI_BASE_URL   http://127.0.0.1:11434/v1   any /v1 chat-completions server
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentos.providerkit.config import ConfigError, ProviderConfig, config_from_env
+from dagentos.providerkit.config import ConfigError, ProviderConfig, config_from_env
 
 __all__ = ["BUNDLED_PRICING", "DEFAULT_ALIASES", "DEFAULT_BASE_URL", "ConfigError",
            "ProviderConfig", "from_env"]

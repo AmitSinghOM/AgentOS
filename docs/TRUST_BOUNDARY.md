@@ -16,7 +16,7 @@ The API's control endpoints — approve, reject, cancel, pause, resume, retry �
 body of exactly two fields: `principal` and `reason`. The models are `extra="forbid"`, so a
 payload that also carries a `tool_call`, an `output`, a `next_step` or `inputs` is rejected
 **422 before it reaches the engine**, and the rejection is logged with the offending field
-names (`agentos.api` logger). No event is appended, no step starts, the run's state is
+names (`dagentos.api` logger). No event is appended, no step starts, the run's state is
 unchanged.
 
 This is stronger than schema-validating a resume payload against the step, because there
@@ -33,7 +33,7 @@ Tests: `tests/test_trust_boundary.py::test_resume_payload_with_unexpected_fields
 Saying *who* you are is not the same as proving it. Until Phase 8 the `principal` was a body
 field, so `{"kind": "human"}` was a string any client could send, and the engine's
 human-only rule for `spend` / `write_external` was advisory. With `AGENTOS_AUTH=bearer`
-(`agentos/api/auth.py`) the API resolves `Authorization: Bearer <token>` to a `Principal`
+(`dagentos/api/auth.py`) the API resolves `Authorization: Bearer <token>` to a `Principal`
 through an operator-owned file of SHA-256 hashes — the file never holds a token and the API
 has no route that writes it — and hands *that* principal to the engine. A body `principal`
 is rejected 422, not ignored, so a client can never believe it decided as someone the log
@@ -56,7 +56,7 @@ Tests: `tests/test_auth.py` — one per line of the threat model in its module d
 
 After §1a, only a `human` or `system` principal can define a workflow — but a workflow's
 `budget` is still what the gate enforces, and its author could allow `spend` freely or let
-agents approve it. `AGENTOS_POLICY` (`agentos/core/policy.py`) is the operator's ceiling:
+agents approve it. `AGENTOS_POLICY` (`dagentos/core/policy.py`) is the operator's ceiling:
 every workflow budget is intersected with it before the gate, the settle checks or the
 approve path see a `Budget`. Tightest wins; a policy can only narrow. The gate itself is
 unchanged — it is correct against the budget it is given, the way the engine was correct
@@ -74,7 +74,7 @@ The event log is the source of truth and everything is derived from it, so an ev
 was edited, inserted or removed after the fact is the most dangerous "replayed event"
 there is. Every event the engine appends now carries `prev_hash` and `hash` (SHA-256 of
 its own canonical record, `hash` excluded; `seq` and `prev_hash` included — that is what
-makes it a chain). The chain is computed in the core (`agentos/core/integrity.py`) before
+makes it a chain). The chain is computed in the core (`dagentos/core/integrity.py`) before
 the store sees the event; the store persists exactly what it is given, and the contract
 test proves each adapter's serialization reproduces the hashed bytes on read.
 
@@ -94,7 +94,7 @@ boundary it draws is against *accidental* corruption, partial writes, and any wr
 is not the engine — including a future "import a log" feature — and it makes tampering
 detectable in the audit trail rather than silent.
 
-**Seals (Phase 8 #3, `agentos/core/seal.py`) close the recompute gap.** With
+**Seals (Phase 8 #3, `dagentos/core/seal.py`) close the recompute gap.** With
 `AGENTOS_SIGNING_KEYS` set, every event that leaves a run idle — `run.completed`, `run.failed`,
 `run.cancelled`, `run.suspended`, `run.paused` — is followed *in the same batch* by an
 `integrity.sealed` event carrying an HMAC-SHA256 over `(run_id, seq, hash)` under a key the
@@ -132,7 +132,7 @@ Tests: `::test_every_appended_event_is_chained_and_the_fold_verifies_it`,
 Only the agent definition — written by the operator, immutable per version, pinned per
 run — is instructions. Everything a prompt template interpolates is data: run inputs from
 a client, upstream step outputs from a model, tool results. Two things follow in
-`agentos.providerkit.prompt`, and both providers use them:
+`dagentos.providerkit.prompt`, and both providers use them:
 
 - `render_prompt` wraps every interpolated value as `<input name="write.text">…</input>`,
   escaping any `</input` inside the value so it cannot close the block early. Inputs sent

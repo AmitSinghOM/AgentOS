@@ -1,4 +1,4 @@
-"""agentos.providerkit.tools — the registry both inner harnesses offer from, tested once
+"""dagentos.providerkit.tools — the registry both inner harnesses offer from, tested once
 here rather than once per harness: selection by declared effect class, the definition
 error for unknown names, duplicate registration, entry-point loading (a plugin that raises
 is skipped with a warning naming it, an unknown group is simply empty), and the
@@ -10,9 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentos.core.models import EffectClass
-from agentos.providerkit import tools
-from agentos.providerkit.prompt import strip_fences
+from dagentos.core.models import EffectClass
+from dagentos.providerkit import tools
+from dagentos.providerkit.prompt import strip_fences
 
 
 def send_mail(to: str, body: str) -> str:

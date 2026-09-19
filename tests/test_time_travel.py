@@ -11,8 +11,8 @@ import json
 
 from fastapi.testclient import TestClient
 
-from agentos.core.events import from_record
-from agentos.core.fold import fold
+from dagentos.core.events import from_record
+from dagentos.core.fold import fold
 
 
 def _client(monkeypatch):
@@ -20,7 +20,7 @@ def _client(monkeypatch):
     monkeypatch.setenv("AGENTOS_AUTH", "asserted")
     for k in ("AGENTOS_POLICY", "AGENTOS_SIGNING_KEYS", "AGENTOS_UI_DIR"):
         monkeypatch.delenv(k, raising=False)
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     return main, TestClient(main.app)
 

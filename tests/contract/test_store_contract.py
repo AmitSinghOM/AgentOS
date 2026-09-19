@@ -7,11 +7,11 @@ import threading
 
 import pytest
 
-from agentos.core.events import RunCompleted, RunStarted, StepCompleted, StepStarted
-from agentos.core.models import Agent, AgentType, RunStatus, WorkflowDefinition
-from agentos.core.ports import ConflictError
-from agentos.store.memory import MemoryStore
-from agentos.store.sqlite import SqliteStore
+from dagentos.core.events import RunCompleted, RunStarted, StepCompleted, StepStarted
+from dagentos.core.models import Agent, AgentType, RunStatus, WorkflowDefinition
+from dagentos.core.ports import ConflictError
+from dagentos.store.memory import MemoryStore
+from dagentos.store.sqlite import SqliteStore
 
 PG_DSN = os.environ.get("AGENTOS_TEST_PG_DSN")  # e.g. postgresql://localhost/agentos_test
 
@@ -19,7 +19,7 @@ ADAPTERS = ["memory", "sqlite-file", "sqlite-memory"] + (["postgres"] if PG_DSN 
 
 
 def _postgres_store(schema: str):
-    from agentos.store.postgres import PostgresStore
+    from dagentos.store.postgres import PostgresStore
     return PostgresStore(PG_DSN, schema=schema, max_size=4)
 
 
@@ -130,7 +130,7 @@ def test_read_returns_typed_events_with_enum_status_after_round_trip(store):
     assert isinstance(ev, RunStarted)
     assert ev.request_id == "req-1" and ev.schema_version == 1
     # Exercise fold end to end through the adapter.
-    from agentos.core.fold import fold
+    from dagentos.core.fold import fold
     run = fold(store.read_events("r1"))
     assert run.status is RunStatus.running
 
@@ -178,7 +178,7 @@ def test_blob_store_is_content_addressed_and_idempotent(store):
     assert store.exists(ref) and store.get(ref) == b'{"a":1}'
     other = store.put(b"png-bytes", media_type="image/png")
     assert other.media_type == "image/png" and other.sha256 != ref.sha256
-    from agentos.core.models import BlobRef
+    from dagentos.core.models import BlobRef
     with pytest.raises(KeyError):
         store.get(BlobRef(sha256="0" * 64, size=1))
 
@@ -195,9 +195,9 @@ def test_step_completed_carries_blob_ref_not_bytes(store):
 def test_event_chain_survives_the_adapter_round_trip(store):
     """C12: the hash is computed over the record BEFORE append; the adapter's serialization
     (datetimes, enums, decimals, nested models) must reproduce those exact bytes on read."""
-    from agentos.agents.echo import EchoExecutor
-    from agentos.core.engine import Engine
-    from agentos.core.integrity import event_hash, verify
+    from dagentos.agents.echo import EchoExecutor
+    from dagentos.core.engine import Engine
+    from dagentos.core.integrity import event_hash, verify
 
     store.put_agent(Agent(name="g", type=AgentType.echo))
     store.put_workflow(WorkflowDefinition(name="w", nodes=[

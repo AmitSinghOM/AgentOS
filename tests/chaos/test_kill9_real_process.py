@@ -9,8 +9,8 @@ import subprocess
 import sys
 from collections import Counter
 
-from agentos.core.events import StepCompleted, StepStarted
-from agentos.core.fold import fold
+from dagentos.core.events import StepCompleted, StepStarted
+from dagentos.core.fold import fold
 
 from .conftest import assert_invariants, make_worker
 
@@ -26,7 +26,7 @@ def _worker(db_path, *, fault: str | None, holder: str, ttl: float = 0.5):
     else:
         env.pop("AGENTOS_FAULT", None)
     return subprocess.run(
-        [sys.executable, "-m", "agentos.worker", "--once", "--holder", holder,
+        [sys.executable, "-m", "dagentos.worker", "--once", "--holder", holder,
          "--lease-ttl", str(ttl)],
         env=env, capture_output=True, text=True, timeout=60, check=False,  # we assert rc
     )
@@ -43,7 +43,7 @@ def test_kill_9_after_step_2_then_restart_finishes_without_repeating_step_2(stor
     assert first.returncode == 137, (first.returncode, first.stderr[-800:])
 
     # Re-open read-only from the test to look at the wreckage.
-    from agentos.store.sqlite import SqliteStore
+    from dagentos.store.sqlite import SqliteStore
     s = SqliteStore(db_path)
     mid = s.read_events(run_id)
     assert [e.step_id for e in mid if isinstance(e, StepCompleted)] == ["s1", "s2"]

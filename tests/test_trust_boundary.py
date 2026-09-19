@@ -13,11 +13,11 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
-from agentos.core.engine import Engine
-from agentos.core.events import StepStarted
-from agentos.core.fold import FoldError, fold
-from agentos.core.integrity import IntegrityError, chain, event_hash, verify
-from agentos.core.models import (
+from dagentos.core.engine import Engine
+from dagentos.core.events import StepStarted
+from dagentos.core.fold import FoldError, fold
+from dagentos.core.integrity import IntegrityError, chain, event_hash, verify
+from dagentos.core.models import (
     Agent,
     AgentType,
     Budget,
@@ -27,14 +27,14 @@ from agentos.core.models import (
     RunStatus,
     WorkflowDefinition,
 )
-from agentos.store.memory import MemoryStore
+from dagentos.store.memory import MemoryStore
 
 HUMAN = {"kind": "human", "id": "amit"}
 
 
 def _client(monkeypatch):
     monkeypatch.setenv("AGENTOS_STORE", "memory")
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     return TestClient(main.app), main
 
@@ -107,7 +107,7 @@ def _run(store):
     store.put_workflow(WorkflowDefinition(name="w", nodes=[
         {"id": "a", "agent": "g"}, {"id": "b", "agent": "g", "depends_on": ["a"]}]))
     eng = Engine(store=store, blobs=store, executors={"echo": __import__(
-        "agentos.agents.echo", fromlist=["EchoExecutor"]).EchoExecutor()}, lease=store)
+        "dagentos.agents.echo", fromlist=["EchoExecutor"]).EchoExecutor()}, lease=store)
     return eng, eng.start_run("w", inputs={"topic": "t"})
 
 
@@ -201,7 +201,7 @@ def test_openai_provider_delimits_upstream_output_and_declares_the_boundary():
     pytest.importorskip("agentos_provider_openai_compat")
     from agentos_provider_openai_compat import OpenAICompatExecutor, from_env
 
-    from agentos.providerkit.conformance import request_for
+    from dagentos.providerkit.conformance import request_for
     ex = OpenAICompatExecutor(from_env({}))
     req = request_for("review", {"system": "Rate the haiku.", "prompt": "Haiku: {write.text}"},
                       {"write": {"text": INJECTION}})
@@ -214,7 +214,7 @@ def test_anthropic_provider_delimits_upstream_output_and_declares_the_boundary()
     pytest.importorskip("agentos_provider_anthropic")
     from agentos_provider_anthropic import AnthropicExecutor, from_env
 
-    from agentos.providerkit.conformance import request_for
+    from dagentos.providerkit.conformance import request_for
     ex = AnthropicExecutor(from_env({}))
     req = request_for("review", {"system": "Rate the haiku.", "prompt": "Haiku: {write.text}"},
                       {"write": {"text": INJECTION}})
@@ -231,7 +231,7 @@ def test_step_output_cannot_choose_the_next_step_executor_or_effects():
                                "effects": ["write_external"]})}))
     store.put_workflow(WorkflowDefinition(name="w", budget=Budget(), nodes=[
         {"id": "a", "agent": "liar"}, {"id": "b", "agent": "liar", "depends_on": ["a"]}]))
-    from agentos.agents.echo import EchoExecutor
+    from dagentos.agents.echo import EchoExecutor
     eng = Engine(store=store, blobs=store, executors={"echo": EchoExecutor()})
     run = eng.start_run("w", principal=Principal(kind=PrincipalKind.human, id="amit"))
     assert run.status is RunStatus.completed

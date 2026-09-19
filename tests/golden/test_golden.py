@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from agentos.core.events import from_record
-from agentos.core.fold import fold
+from dagentos.core.events import from_record
+from dagentos.core.fold import fold
 
 GOLDEN = Path(__file__).resolve().parent
 FILES = sorted(GOLDEN.glob("*.json"))
@@ -80,7 +80,7 @@ def test_fold_from_any_cut_point_equals_the_full_fold(path: Path):
     yields exactly the full fold. Run over the whole golden corpus so `_apply`'s seeded
     accumulators are checked against every event type and log shape we have ever
     released, and so a WorkflowRun field added later but not re-seeded fails here."""
-    from agentos.core.fold import fold_from
+    from dagentos.core.fold import fold_from
     doc = json.loads(path.read_text())
     events = [from_record(r) for r in doc["events"]]
     full = fold(events).model_dump(mode="json")
@@ -95,8 +95,8 @@ def test_seals_in_golden_logs_verify_with_the_fixture_key_or_are_absent(path: Pa
     """From v0.9.0 the corpus carries `integrity.sealed` events signed with the golden
     FIXTURE key (scripts/record_golden.py). Older logs have none and report `unsigned`.
     Either way a seal must never be INVALID against the recorded log."""
-    from agentos.core.integrity import verify
-    from agentos.core.seal import verify_seals
+    from dagentos.core.integrity import verify
+    from dagentos.core.seal import verify_seals
     from scripts.record_golden import GOLDEN_KEYRING
 
     events = [from_record(r) for r in json.loads(path.read_text())["events"]]

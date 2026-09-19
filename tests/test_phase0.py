@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
-from agentos.api.main import app
-from agentos.core.models import WorkflowDefinition
+from dagentos.api.main import app
+from dagentos.core.models import WorkflowDefinition
 
 client = TestClient(app)
 

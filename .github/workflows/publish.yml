@@ -77,7 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m venv /tmp/smoke
-          /tmp/smoke/bin/pip install --quiet "$(ls dist/agentos_durable-*.whl)[providerkit]" dist/agentos_provider_*.whl
+          /tmp/smoke/bin/pip install --quiet "$(ls dist/dagentos-*.whl)[providerkit]" dist/agentos_provider_*.whl
           /tmp/smoke/bin/agentos --help > /dev/null
           /tmp/smoke/bin/python scripts/release_smoke.py "${{ steps.version.outputs.version }}"
       - name: SHA256SUMS
@@ -157,7 +157,7 @@ jobs:
         run: |
           docker run --rm ${{ steps.name.outputs.image }}:${{ needs.build.outputs.version }} agentos --help
           docker run --rm ${{ steps.name.outputs.image }}:${{ needs.build.outputs.version }} \
-            python -c "from agentos.api.ui import ui_dir; d = ui_dir(); assert d and (d / 'index.html').is_file(), d; print('ui bundle at', d)"
+            python -c "from dagentos.api.ui import ui_dir; d = ui_dir(); assert d and (d / 'index.html').is_file(), d; print('ui bundle at', d)"
       - name: Attest the pushed image digest
         if: env.PUSH == 'true'
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
@@ -176,7 +176,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dist: [agentos_durable, agentos_provider_openai_compat, agentos_provider_anthropic,
+        dist: [dagentos, agentos_provider_openai_compat, agentos_provider_anthropic,
                agentos_provider_openai_agents, agentos_provider_pydantic_ai]
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

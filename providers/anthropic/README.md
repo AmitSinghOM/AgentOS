@@ -53,7 +53,7 @@ discount is recoverable from the log.
 ## Testing
 
 Cassettes in `tests/cassettes/` were recorded from a real Ollama (`qwen2.5:0.5b`) via
-`/v1/messages`; the shared scenarios live in `agentos.providerkit.conformance`.
+`/v1/messages`; the shared scenarios live in `dagentos.providerkit.conformance`.
 `tests/anthropic_reference_server.py` fakes 401 / 429 / 529. Re-record:
 `python scripts/record_cassettes.py --live`. The nightly `provider-live` workflow re-records
 both providers on a runner and replays.

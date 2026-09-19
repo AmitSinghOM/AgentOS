@@ -19,11 +19,11 @@ import secrets
 
 import pytest
 
-from agentos.cli import main as cli_main
-from agentos.core.engine import Engine
-from agentos.core.events import ChainSealed, from_record
-from agentos.core.integrity import chain, verify
-from agentos.core.models import (
+from dagentos.cli import main as cli_main
+from dagentos.core.engine import Engine
+from dagentos.core.events import ChainSealed, from_record
+from dagentos.core.integrity import chain, verify
+from dagentos.core.models import (
     Agent,
     AgentType,
     Budget,
@@ -33,7 +33,7 @@ from agentos.core.models import (
     RunStatus,
     WorkflowDefinition,
 )
-from agentos.core.seal import (
+from dagentos.core.seal import (
     SEAL_AFTER,
     HmacKeyring,
     SealError,
@@ -41,8 +41,8 @@ from agentos.core.seal import (
     seal_message,
     verify_seals,
 )
-from agentos.store.memory import MemoryStore
-from agentos.store.sqlite import SqliteStore
+from dagentos.store.memory import MemoryStore
+from dagentos.store.sqlite import SqliteStore
 from tests.test_approvals import PinnedWall, RecordingExecutor
 
 HUMAN = Principal(kind=PrincipalKind.human, id="amit")
@@ -235,7 +235,7 @@ def test_integrity_endpoint_reports_seal_state(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTOS_AUTH", "asserted")
     monkeypatch.setenv("AGENTOS_SIGNING_KEYS", str(_keyring_file(tmp_path)))
     monkeypatch.delenv("AGENTOS_POLICY", raising=False)
-    from agentos.api import main
+    from dagentos.api import main
     importlib.reload(main)
     c = TestClient(main.app)
     c.post("/agents", json={"name": "calc", "type": "echo"})
@@ -371,4 +371,4 @@ def test_console_script_is_declared():
     import tomllib
     from pathlib import Path
     py = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
-    assert py["project"]["scripts"] == {"agentos": "agentos.cli:main"}
+    assert py["project"]["scripts"] == {"agentos": "dagentos.cli:main"}
