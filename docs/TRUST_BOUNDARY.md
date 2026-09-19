@@ -28,6 +28,30 @@ author the next dispatch; it can only say *yes* or *no*, and it must say who it 
 Tests: `tests/test_trust_boundary.py::test_resume_payload_with_unexpected_fields_is_rejected_logged_and_starts_nothing`
 (the issue's acceptance test), `::test_every_control_endpoint_is_strict`.
 
+### 1a. The principal is derived from a credential, not typed into the body
+
+Saying *who* you are is not the same as proving it. Until Phase 8 the `principal` was a body
+field, so `{"kind": "human"}` was a string any client could send, and the engine's
+human-only rule for `spend` / `write_external` was advisory. With `AGENTOS_AUTH=bearer`
+(`agentos/api/auth.py`) the API resolves `Authorization: Bearer <token>` to a `Principal`
+through an operator-owned file of SHA-256 hashes — the file never holds a token and the API
+has no route that writes it — and hands *that* principal to the engine. A body `principal`
+is rejected 422, not ignored, so a client can never believe it decided as someone the log
+does not name. The recorded principal carries `attestation = "token:sha256:<12 hex>"`, so a
+reader can tell which credential decided. An `agent`-kind principal may not register agents
+or define workflows (403): definitions are what the gate trusts, so an agent that could
+author one could declare its own effects. Every request outside `/health` and `/metrics`
+needs a token (reads carry step inputs and outputs). The check is a middleware, so a route
+added tomorrow is protected without remembering a dependency. Rejections are logged with the
+method, path and hash prefix — never the token; accepted calls are not logged, the event is
+the record.
+
+The default mode, `asserted`, keeps the quick start zero-config and **is not a boundary**: it
+records the body's principal and warns once at startup. The word is chosen so that the
+configuration says what it does.
+
+Tests: `tests/test_auth.py` — one per line of the threat model in its module docstring.
+
 ## 2. Replayed events are tamper-evident
 
 The event log is the source of truth and everything is derived from it, so an event that

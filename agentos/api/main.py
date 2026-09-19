@@ -10,6 +10,8 @@ Configuration (env):
   AGENTOS_SQLITE_PATH     file path                   (default: ./agentos.db)
   AGENTOS_SNAPSHOT_EVERY  events between run snapshots (default: 200; 0 disables, C15)
   AGENTOS_STREAM_*        SSE poll / keep-alive / max seconds (see agentos.api.stream)
+  AGENTOS_AUTH            asserted | bearer            (default: asserted — warns; see agentos.api.auth)
+  AGENTOS_AUTH_TOKENS     token file (SHA-256 hashes → principals), required for bearer
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ from pydantic import BaseModel, ConfigDict
 
 from agentos.agents.echo import EchoExecutor
 from agentos.agents.tool import ToolExecutor
+from agentos.api.auth import AuthConfig, auth_middleware, openapi_security, principal_for
 from agentos.api.stream import MEDIA_TYPE, StreamConfig, parse_after, stream_run
 from agentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
 from agentos.core.fold import FoldError
@@ -78,8 +81,28 @@ engine = Engine(store=store, blobs=store, executors=executors,
                 snapshot_every=snapshot_every_from_env())
 
 stream_config = StreamConfig.from_env()
+auth_config = AuthConfig.from_env()
 
 app = FastAPI(title="AgentOS", version="0.8.1")
+
+
+@app.middleware("http")
+async def _authenticate(request: Request, call_next):
+    """Phase 8 #1: the credential decides who the caller is; the body may not. Middleware,
+    not a per-route dependency, so a route added later is protected by default."""
+    return await auth_middleware(request, call_next, config=auth_config)
+
+
+def _openapi() -> dict:
+    if app.openapi_schema is None:
+        from fastapi.openapi.utils import get_openapi
+        app.openapi_schema = openapi_security(
+            get_openapi(title=app.title, version=app.version, routes=app.routes),
+            config=auth_config)
+    return app.openapi_schema
+
+
+app.openapi = _openapi  # type: ignore[method-assign]
 
 
 @app.exception_handler(RequestValidationError)
@@ -240,14 +263,15 @@ class RetryBody(BaseModel):
 
 
 @app.post("/runs/{run_id}/steps/{step_id}/retry", status_code=202)
-def retry_step(run_id: str, step_id: str, body: RetryBody | None = None,
+def retry_step(run_id: str, step_id: str, request: Request, body: RetryBody | None = None,
                sync: bool = False, response: Response = None) -> dict:  # type: ignore[assignment]
     """Reopen a dead-lettered or failed step (C11). Records who asked (A2) as a
     `step.retry_requested` event, then re-enqueues the run (or, with `?sync=true`,
     advances it in-process). 409 if the step is not in a retryable state."""
     body = body or RetryBody()
+    principal = principal_for(request, body.principal, config=auth_config, required=False)
     try:
-        engine.request_retry(run_id, step_id, principal=body.principal, reason=body.reason)
+        engine.request_retry(run_id, step_id, principal=principal, reason=body.reason)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RetryNotAllowed as exc:
@@ -298,10 +322,11 @@ class ControlBody(BaseModel):
     reason: str = ""
 
 
-def _control(action, run_id: str, body: ControlBody | None) -> dict:
+def _control(action, run_id: str, request: Request, body: ControlBody | None) -> dict:
     body = body or ControlBody()
+    principal = principal_for(request, body.principal, config=auth_config, required=False)
     try:
-        return action(run_id, principal=body.principal, reason=body.reason).model_dump()
+        return action(run_id, principal=principal, reason=body.reason).model_dump()
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ControlNotAllowed as exc:
@@ -309,26 +334,26 @@ def _control(action, run_id: str, body: ControlBody | None) -> dict:
 
 
 @app.post("/runs/{run_id}/cancel", status_code=202)
-def cancel_run(run_id: str, body: ControlBody | None = None) -> dict:
+def cancel_run(run_id: str, request: Request, body: ControlBody | None = None) -> dict:
     """Persist a cancel request (C5). An idle or paused run is cancelled immediately; a
     running one at the worker's next boundary — the in-flight step is interrupted at its
     next progress() call or recorded if it finishes first (C4). Idempotent. 409 if the
     run is already terminal. A client disconnect never changes run state; only this
     endpoint does."""
-    return _control(engine.request_cancel, run_id, body)
+    return _control(engine.request_cancel, run_id, request, body)
 
 
 @app.post("/runs/{run_id}/pause", status_code=202)
-def pause_run(run_id: str, body: ControlBody | None = None) -> dict:
+def pause_run(run_id: str, request: Request, body: ControlBody | None = None) -> dict:
     """Persist a pause request: the current wave finishes and is recorded, then the run
     is `paused` and leaves the queue. 409 if terminal or already paused."""
-    return _control(engine.request_pause, run_id, body)
+    return _control(engine.request_pause, run_id, request, body)
 
 
 @app.post("/runs/{run_id}/resume", status_code=202)
-def resume_run(run_id: str, body: ControlBody | None = None) -> dict:
+def resume_run(run_id: str, request: Request, body: ControlBody | None = None) -> dict:
     """Append run.resumed and re-enqueue. 409 unless the run is paused."""
-    out = _control(engine.resume, run_id, body)
+    out = _control(engine.resume, run_id, request, body)
     store.push(run_id)
     return out
 
@@ -337,7 +362,9 @@ def resume_run(run_id: str, body: ControlBody | None = None) -> dict:
 
 class DecisionBody(BaseModel):
     model_config = _STRICT
-    principal: Principal              # mandatory: every decision names who made it (A2)
+    # Every decision names who made it (A2). In asserted mode the body must carry it
+    # (422 otherwise); in bearer mode the token supplies it and a body value is a 422.
+    principal: Principal | None = None
     reason: str = ""
 
 
@@ -364,12 +391,14 @@ def list_pending_approvals() -> dict:
 
 
 @app.post("/runs/{run_id}/approvals/{approval_id}/approve", status_code=202)
-def approve(run_id: str, approval_id: str, body: DecisionBody, sync: bool = False,
-            response: Response = None) -> dict:  # type: ignore[assignment]
+def approve(run_id: str, approval_id: str, body: DecisionBody, request: Request,
+            sync: bool = False, response: Response = None) -> dict:  # type: ignore[assignment]
     """Grant. 403 if the principal kind may not approve these effect classes; 409 if the
     approval is not pending. Re-enqueues the run (or `?sync=true` advances it)."""
+    principal = principal_for(request, body.principal, config=auth_config, required=True)
+    assert principal is not None
     try:
-        run = engine.approve(run_id, approval_id, principal=body.principal, reason=body.reason)
+        run = engine.approve(run_id, approval_id, principal=principal, reason=body.reason)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ControlNotAllowed as exc:
@@ -384,11 +413,13 @@ def approve(run_id: str, approval_id: str, body: DecisionBody, sync: bool = Fals
 
 
 @app.post("/runs/{run_id}/approvals/{approval_id}/reject", status_code=200)
-def reject(run_id: str, approval_id: str, body: DecisionBody) -> dict:
+def reject(run_id: str, approval_id: str, body: DecisionBody, request: Request) -> dict:
     """Reject: the step is dead-lettered naming the decider; the run fails. Reopen it with
     POST /runs/{id}/steps/{step}/retry, which re-requests approval."""
+    principal = principal_for(request, body.principal, config=auth_config, required=True)
+    assert principal is not None
     try:
-        return engine.reject(run_id, approval_id, principal=body.principal,
+        return engine.reject(run_id, approval_id, principal=principal,
                              reason=body.reason).model_dump()
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
