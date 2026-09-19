@@ -522,7 +522,20 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
 - [ ] Live workflow run graph: nodes light up as steps complete
 - [ ] Event-log timeline view (time-travel debugging over the log)
 - [ ] Cost + latency panel per run
-- [ ] Approvals inbox (authenticated, Phase 8)
+- [x] **Approvals inbox (authenticated)** — Phase 9 opener, the first surface a non-author
+  operator touches. `ui/` Vite 5 + React 19 + TS, no UI kit yet (chosen against one screen it
+  would be the wrong kit). Served by the API at `/ui` (`agentos/api/ui.py`): same origin so no
+  CORS surface; the auth middleware exempts GET/HEAD of static files under `/ui` ONLY, and a test
+  asserts no API route lives there and traversal cannot escape the bundle. Token in
+  `sessionStorage` (never localStorage / cookie / URL), sent as `Authorization: Bearer`; SSE
+  cannot carry headers so the inbox polls `GET /approvals` every 3 s rather than leak a token
+  in a query string. New `GET /me` tells the screen exactly what the log will record; the
+  banner shows it before any button is enabled. Asserted mode is labelled **Unverified** and
+  requires a typed principal. Decision bodies are the API's own (`reason` only in bearer mode);
+  401/403/409/422 text rendered verbatim — no client-side authorization. Cost approvals show the
+  proposed ceiling. 6 component tests (threat model in the file header), 7 Python mount tests,
+  CI `ui` job builds the bundle and runs the mount tests against it. Bundle is not in the wheel
+  or image yet — Phase 9 close-out, when publish.yml grows a Node step.
 
 **Tag:** `v0.10.0-ui`. **Post:** "Building a Time-Travel Debugger over an Event Log."
 

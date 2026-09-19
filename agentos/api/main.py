@@ -30,6 +30,7 @@ from agentos.agents.echo import EchoExecutor
 from agentos.agents.tool import ToolExecutor
 from agentos.api.auth import AuthConfig, auth_middleware, openapi_security, principal_for
 from agentos.api.stream import MEDIA_TYPE, StreamConfig, parse_after, stream_run
+from agentos.api.ui import mount_ui
 from agentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
 from agentos.core.fold import FoldError
 from agentos.core.integrity import IntegrityError, verify
@@ -119,6 +120,16 @@ def list_executors() -> list[dict]:
     `describe()` (models, aliases, pricing snapshot) and `health()` (is its model server
     reachable, does it have the model). The first thing to check when a step fails."""
     return describe(executors)
+
+
+@app.get("/me")
+def me(request: Request) -> dict:
+    """Who the API will record as the decider for this caller (Phase 9 inbox). In bearer mode
+    the token's Principal; in asserted mode `principal` is null and the client must supply
+    one in each decision body — and should label it unverified."""
+    principal = request.state.principal
+    return {"mode": auth_config.mode.value,
+            "principal": principal.model_dump() if principal is not None else None}
 
 
 @app.get("/policy")
@@ -435,3 +446,7 @@ def reject(run_id: str, approval_id: str, body: DecisionBody, request: Request) 
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ControlNotAllowed as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+# Operator UI (Phase 9): static bundle at /ui when built; see agentos/api/ui.py.
+mount_ui(app)

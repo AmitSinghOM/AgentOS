@@ -175,6 +175,14 @@ agent names anything else; the cost and wall limits are minimums. Each run recor
 narrowing, so the log says which ceiling governed it. No `AGENTOS_POLICY` → no ceiling and a
 startup warning. Tests: `tests/test_policy.py`.
 
+### Operator UI (Phase 9, in progress)
+
+The API serves a small React app at `/ui` when `ui/dist` exists — today, the approvals inbox.
+It shows exactly who the log will name before any button is enabled (`GET /me`), keeps the
+bearer token in the tab's `sessionStorage` only, sends the API's own decision bodies, and shows
+the API's errors verbatim. In `asserted` mode the banner says **Unverified** and makes you type
+a principal. Build once: `cd ui && npm ci && npm run build`; details in `docs/UI.md`.
+
 ### Sealed chains and the `agentos` CLI
 
 The hash chain makes edits visible; it cannot stop someone with database access from

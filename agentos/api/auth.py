@@ -49,6 +49,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from agentos.api.ui import is_ui_asset_path
 from agentos.core.models import Principal, PrincipalKind
 
 logger = logging.getLogger("agentos.api.auth")
@@ -202,7 +203,10 @@ async def auth_middleware(request: Request, call_next, *, config: AuthConfig):
     every path outside OPEN_PATHS needs a known token; the resolved Principal is placed on
     `request.state.principal` and definition routes refuse `agent`-kind principals."""
     request.state.principal = None
-    if not config.enforced or request.url.path in OPEN_PATHS:
+    if not config.enforced or request.url.path in OPEN_PATHS \
+            or is_ui_asset_path(request.method, request.url.path):
+        # /ui serves the operator UI's static files only (agentos.api.ui); the app shell must
+        # load before the user can present a token. No data lives under that prefix.
         return await call_next(request)
     header = request.headers.get("authorization", "")
     scheme, _, token = header.partition(" ")
