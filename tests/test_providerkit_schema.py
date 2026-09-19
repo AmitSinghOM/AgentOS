@@ -66,6 +66,20 @@ def test_unusable_schemas_are_definition_errors_at_first_use():
         OutputSchema.parse({"type": "object", "properties": {"a": {"type": "integr"}}})
 
 
+def test_both_reference_keywords_are_scanned_and_a_dangling_local_ref_is_a_definition_error():
+    """Review finding: 2020-12 has TWO reference keywords. A remote `$dynamicRef` used to pass
+    parse() and surface at validate() as a resolver crash (no fetch, but not the promised
+    definition error). Both are refused up front now, and a LOCAL pointer to nowhere is
+    reported as InvalidOutputSchema at validation rather than escaping as a crash."""
+    with pytest.raises(InvalidOutputSchema, match=r"remote \$ref \('https://example.invalid/d.json#x'\)"):
+        OutputSchema.parse({"type": "object", "properties": {
+            "a": {"$dynamicRef": "https://example.invalid/d.json#x"}}})
+    dangling = OutputSchema.parse({"type": "object", "properties": {"a": {"$ref": "#/$defs/missing"}}})
+    with pytest.raises(InvalidOutputSchema, match="unresolvable reference"):
+        dangling.validate({"a": 1})
+    assert dangling.validate({}) == {}          # the ref is never reached, so no error
+
+
 def test_local_refs_resolve_without_any_registry_and_format_is_not_enforced():
     schema = OutputSchema.parse({
         "type": "object",
@@ -86,3 +100,13 @@ def test_the_schema_is_never_templated_and_hashes_into_the_prompt():
     schema = OutputSchema.parse(raw)
     assert "{run.topic}" in schema.prompt_hash_input()       # literal braces survive
     assert schema.schema is raw
+
+
+def test_a_violation_message_is_capped_so_a_large_reply_never_lands_whole_in_step_failed():
+    """Security pass: jsonschema quotes the instance in its message; a root-level type
+    mismatch on a big reply would otherwise copy the entire reply into the failure text."""
+    schema = OutputSchema.parse({"type": "object", "properties": {"s": {"type": "integer"}}})
+    with pytest.raises(SchemaViolation) as info:
+        schema.validate({"s": "x" * 5000})
+    assert len(str(info.value)) < 400 and str(info.value).endswith("…")
+    assert "violates output_schema at $.s:" in str(info.value)

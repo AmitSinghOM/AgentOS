@@ -33,10 +33,16 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
 from referencing import Registry
+from referencing.exceptions import Unresolvable
 
 from agentos.providerkit.errors import BadResponse
 
 CONFIG_KEY = "output_schema"
+# jsonschema quotes the offending instance in its messages (`'x' is not valid…`, `{…} is not
+# of type 'object'`). A root-level mismatch on a large reply would otherwise put the whole
+# reply into step.failed; the log holds the reply on success anyway, so this is a size cap,
+# not a secrecy control.
+MAX_VIOLATION_MESSAGE = 300
 
 
 class SchemaViolation(BadResponse):
@@ -46,6 +52,8 @@ class SchemaViolation(BadResponse):
     node's retry policy decides, exactly like non-JSON on the `json_output` path."""
 
     def __init__(self, path: str, message: str, *, schema_sha256: str) -> None:
+        if len(message) > MAX_VIOLATION_MESSAGE:
+            message = message[:MAX_VIOLATION_MESSAGE] + "…"
         super().__init__(f"reply violates output_schema at {path}: {message}")
         self.path = path
         self.schema_sha256 = schema_sha256
@@ -100,7 +108,12 @@ class OutputSchema:
         """Return `value` when it satisfies the schema; raise `SchemaViolation` naming the
         first violation otherwise. Errors are ordered by `best_match` relevance so the message
         points at the most specific failure, not at an `anyOf` wrapper."""
-        errors = sorted(self._validator.iter_errors(value), key=_relevance)
+        try:
+            errors = sorted(self._validator.iter_errors(value), key=_relevance)
+        except Unresolvable as exc:
+            # A reference the scan above could not classify (a local pointer to nowhere, a
+            # missing $anchor). Still a DEFINITION error, still no fetch — never a crash.
+            raise InvalidOutputSchema(f"{CONFIG_KEY} has an unresolvable reference: {exc}") from exc
         if errors:
             first = errors[0]
             raise SchemaViolation(_pointer(first.absolute_path), first.message,
@@ -131,11 +144,14 @@ def _pointer(path) -> str:
 
 
 def _find_remote_ref(node: Any) -> str | None:
-    """First `$ref` that is not a local (`#...`) pointer, or None."""
+    """First `$ref` / `$dynamicRef` that is not a local (`#...`) pointer, or None. 2020-12 has
+    two reference keywords; a scan that knew only `$ref` let a remote `$dynamicRef` through
+    parse() and surface as a resolver crash at validate() (review finding, fixed here)."""
     if isinstance(node, Mapping):
-        ref = node.get("$ref")
-        if isinstance(ref, str) and not ref.startswith("#"):
-            return ref
+        for key in ("$ref", "$dynamicRef"):
+            ref = node.get(key)
+            if isinstance(ref, str) and not ref.startswith("#"):
+                return ref
         for v in node.values():
             found = _find_remote_ref(v)
             if found is not None:
