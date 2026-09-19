@@ -298,3 +298,15 @@ def test_get_policy_shows_the_ceiling_and_its_hash(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENTOS_POLICY")
     importlib.reload(main)
     assert TestClient(main.app).get("/policy").json()["sha256"] is None
+
+
+def test_no_approval_is_asked_for_a_step_the_policy_can_never_run():
+    """Review finding: the gate must refuse before it asks. A spend step on a forbidden
+    executor fails the run at dispatch; no human is asked to approve it first."""
+    store, eng, ex = _engine(Budget(), OperatorPolicy(allowed_executors=frozenset({"echo"})),
+                             payer_executor="fancy-llm")
+    run = eng.start_run("w")
+    assert run.status is RunStatus.failed and run.approvals == {}
+    assert "approval.requested" not in _types(store, run.id)
+    assert "operator policy does not allow" in run.error
+    assert [c[0] for c in ex.calls] == ["n1"]

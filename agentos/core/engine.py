@@ -456,25 +456,33 @@ class Engine:
         if existing is not None:
             return existing
         run_id = uuid4().hex
-        # Pin the current version of every agent the workflow references (DESIGN §5).
-        # Missing agents are pinned as 0 so the failure surfaces at dispatch, in the log.
+        inputs_ref = self._blobs.put(_canonical(inputs)) if inputs else None
+        events: list[Event] = [RunStarted(
+            run_id=run_id, workflow=wf.name, workflow_version=wf.version,
+            request_id=request_id, principal=principal, agent_versions=self._pin_agents(wf),
+            inputs_ref=inputs_ref,
+        )]
+        events += self._policy_events(run_id, wf)
+        self._emit(run_id, 0, events)
+        return run_id
+
+    def _pin_agents(self, wf: WorkflowDefinition) -> dict[str, int]:
+        """Pin the current version of every agent the workflow references (DESIGN §5).
+        Missing agents are pinned as 0 so the failure surfaces at dispatch, in the log."""
         pins: dict[str, int] = {}
         for node in wf.nodes:
             if node.agent not in pins:
                 agent = self._store.get_agent(node.agent)
                 pins[node.agent] = agent.version if agent is not None else 0
-        inputs_ref = self._blobs.put(_canonical(inputs)) if inputs else None
-        events: list[Event] = [RunStarted(
-            run_id=run_id, workflow=wf.name, workflow_version=wf.version,
-            request_id=request_id, principal=principal, agent_versions=pins,
-            inputs_ref=inputs_ref,
-        )]
-        if self._policy is not None:
-            _, narrowed = apply_ceiling(wf.budget, self._policy)
-            events.append(PolicyApplied(run_id=run_id, policy_sha256=self._policy_sha256 or "",
-                                        narrowed=narrowed))
-        self._emit(run_id, 0, events)
-        return run_id
+        return pins
+
+    def _policy_events(self, run_id: str, wf: WorkflowDefinition) -> list[Event]:
+        """Phase 8 #2: when an operator ceiling is configured, record WHICH one governs
+        this run and every way it narrowed the workflow's budget, right after run.started."""
+        if self._policy is None or self._policy_sha256 is None:
+            return []
+        _, narrowed = apply_ceiling(wf.budget, self._policy)
+        return [PolicyApplied(run_id=run_id, policy_sha256=self._policy_sha256, narrowed=narrowed)]
 
     def request_retry(self, run_id: str, step_id: str, *, principal: Principal | None = None,
                       reason: str = "") -> WorkflowRun:
@@ -912,12 +920,13 @@ class Engine:
         return agent, pinned
 
     def _approval_gate(self, ctx: _WaveContext, node: WorkflowNode) -> _Gate:
-        """Tier-2 gate (C7). Unknown agents and tier-3 classes (outside both `allowed` and
-        `approval_required_for`) return RUN so the error surfaces in the log at dispatch
-        (`_prepare`) or as a refusal (`_execute`) — never as a silent skip and never as an
-        approval request for something the budget forbids outright."""
+        """Tier-2 gate (C7). Unknown agents, executors the operator policy forbids, and
+        tier-3 classes (outside both `allowed` and `approval_required_for`) return RUN so the
+        error surfaces in the log at dispatch (`_prepare`) or as a refusal (`_execute`) —
+        never as a silent skip and never as an approval request for something that can
+        never run."""
         agent, _ = self._pinned_agent(ctx, node)
-        if agent is None:
+        if agent is None or not executor_allowed(self._policy, agent.executor or agent.type.value):
             return _Gate.RUN
         needs = _classes_needing_approval(agent, ctx.budget)
         if not needs:

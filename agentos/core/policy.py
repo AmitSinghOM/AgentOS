@@ -95,27 +95,43 @@ def apply_ceiling(budget: Budget, policy: OperatorPolicy | None) -> tuple[Budget
     if policy is None:
         return budget, []
     narrowed: list[str] = []
+    allowed, approval = _narrow_classes(budget, policy, narrowed)
+    allow_agent = budget.allow_agent_approval
+    if allow_agent and not policy.agent_approval_allowed:
+        allow_agent = False
+        narrowed.append("allow_agent_approval: true → false (agent_approval_allowed=false)")
+    step_cost, run_cost, wall = _narrow_limits(budget, policy, narrowed)
+    effective = budget.model_copy(update={
+        "allowed_effect_classes": allowed, "approval_required_for": approval,
+        "allow_agent_approval": allow_agent, "max_step_cost": step_cost,
+        "max_run_cost": run_cost, "max_step_wall_seconds": wall})
+    return effective, narrowed
+
+
+def _narrow_classes(budget: Budget, policy: OperatorPolicy,
+                    narrowed: list[str]) -> tuple[set[EffectClass], set[EffectClass]]:
+    """effect_ceiling removes classes from both tiers; always_approve moves a freely
+    allowed class into the approval tier. Ceiling wins: a class outside it is refused,
+    never asked about."""
     allowed = set(budget.allowed_effect_classes)
     approval = set(budget.approval_required_for)
-
     if policy.effect_ceiling is not None:
         for name, classes in (("allowed_effect_classes", allowed), ("approval_required_for", approval)):
             gone = classes - policy.effect_ceiling
             if gone:
                 narrowed.append(f"{name}: removed {_names(gone)} (outside effect_ceiling)")
                 classes -= gone
-
     for c in sorted(policy.always_approve, key=lambda c: c.value):
         if c in allowed:
             allowed.discard(c)
             approval.add(c)
             narrowed.append(f"{c.value}: allowed → approval_required (always_approve)")
+    return allowed, approval
 
-    allow_agent = budget.allow_agent_approval
-    if allow_agent and not policy.agent_approval_allowed:
-        allow_agent = False
-        narrowed.append("allow_agent_approval: true → false (agent_approval_allowed=false)")
 
+def _narrow_limits(budget: Budget, policy: OperatorPolicy,
+                   narrowed: list[str]) -> tuple[str | None, str | None, float | None]:
+    """Cost and wall limits take the minimum of workflow and policy."""
     step_cost = _min_decimal(budget.max_step_cost, policy.max_step_cost)
     if step_cost != budget.max_step_cost:
         narrowed.append(f"max_step_cost: {budget.max_step_cost} → {step_cost}")
@@ -123,15 +139,11 @@ def apply_ceiling(budget: Budget, policy: OperatorPolicy | None) -> tuple[Budget
     if run_cost != budget.max_run_cost:
         narrowed.append(f"max_run_cost: {budget.max_run_cost} → {run_cost}")
     wall = budget.max_step_wall_seconds
-    if policy.max_step_wall_seconds is not None and (wall is None or wall > policy.max_step_wall_seconds):
-        narrowed.append(f"max_step_wall_seconds: {wall} → {policy.max_step_wall_seconds}")
-        wall = policy.max_step_wall_seconds
-
-    effective = budget.model_copy(update={
-        "allowed_effect_classes": allowed, "approval_required_for": approval,
-        "allow_agent_approval": allow_agent, "max_step_cost": step_cost,
-        "max_run_cost": run_cost, "max_step_wall_seconds": wall})
-    return effective, narrowed
+    cap = policy.max_step_wall_seconds
+    if cap is not None and (wall is None or wall > cap):
+        narrowed.append(f"max_step_wall_seconds: {wall} → {cap}")
+        wall = cap
+    return step_cost, run_cost, wall
 
 
 def executor_allowed(policy: OperatorPolicy | None, executor_name: str) -> bool:
