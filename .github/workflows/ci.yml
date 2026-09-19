@@ -8,6 +8,7 @@ on:
     paths:
       - "agentos/**"
       - "providers/**"
+      - "ui/**"
       - "tests/**"
       - "examples/**"
       - "docker-compose.yml"
@@ -48,6 +49,30 @@ jobs:
           /tmp/smoke/bin/pip install --quiet "$(ls dist/agentos_durable-*.whl)[providerkit]" dist/agentos_provider_*.whl
           /tmp/smoke/bin/agentos --help > /dev/null
           /tmp/smoke/bin/python scripts/release_smoke.py "$version"
+
+  ui:
+    # Phase 9: the operator UI. Type-check, component tests (Vitest + Testing Library, fetch
+    # stubbed), production build; then the Python mount tests run against a REAL bundle so the
+    # SPA fallback and the auth exemption are proven on what ships, not a fixture.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: ui
+      - run: npm test
+        working-directory: ui
+      - run: npm run build
+        working-directory: ui
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: AGENTOS_UI_DIR="$PWD/ui/dist" pytest -q tests/test_ui_mount.py
 
   test:
     runs-on: ubuntu-latest
