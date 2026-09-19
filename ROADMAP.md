@@ -352,7 +352,7 @@ resume via `Last-Event-ID`); an OpenAI Agents SDK agent runs as one governed ste
 - [ ] ⏭ Token-level streaming via a `progress(fraction, note)`-style executor hook
 - [ ] ⏭ Mid-step suspension on the SDK's `needs_approval` interruptions (requires
   persisting `RunState` as a blob and a resume protocol)
-- [x] ⏭ **PydanticAI inner harness** `agentos-provider-pydantic-ai` (`providers/pydantic-ai/`):
+- [x] **PydanticAI inner harness** `agentos-provider-pydantic-ai` (`providers/pydantic-ai/`):
   same shape as the above — one `Agent.run` per step on its own loop, `max_turns` via
   `UsageLimits(request_limit)`, `DeferredToolRequests` (approval / external execution) RAISES
   rather than auto-resolving, errors mapped by `ModelHTTPError.status_code`, client built
