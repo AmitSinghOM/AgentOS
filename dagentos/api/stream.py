@@ -92,6 +92,17 @@ def format_event(record: dict) -> str:
     return f"id: {record['seq']}\nevent: {record['event_type']}\ndata: {payload}\n\n"
 
 
+def _after_anchor(events: list, after: int) -> list | None:
+    """First read peeks one extra row (the anchor at `after`) so a client resuming AT or
+    past the terminal event is told the run is over now, not after max_seconds. Returns the
+    events to send, or None when the anchor itself is terminal and the stream should end."""
+    if after > 0 and events and events[0].seq == after:
+        if type(events[0]).event_type in _TERMINAL_TYPES:
+            return None
+        return events[1:]
+    return events
+
+
 async def stream_run(store: Store, run_id: str, *, after: int, config: StreamConfig,
                      clock: Callable[[], float] = time.monotonic,
                      sleep: Callable[[float], Awaitable[None]] = anyio.sleep,
@@ -114,13 +125,9 @@ async def stream_run(store: Store, run_id: str, *, after: int, config: StreamCon
         return await anyio.to_thread.run_sync(store.read_events, run_id, after_seq)
 
     try:
-        # Peek the anchor: a client resuming at or past the terminal event must be told
-        # the run is over NOW, not after max_seconds. One extra row, only on the first read.
-        events = await read(max(after - 1, 0))
-        if after > 0 and events and events[0].seq == after:
-            if type(events[0]).event_type in _TERMINAL_TYPES:
-                return
-            events = events[1:]
+        events = _after_anchor(await read(max(after - 1, 0)), after)
+        if events is None:
+            return
         while True:
             for event in events:
                 record = event.to_record()
