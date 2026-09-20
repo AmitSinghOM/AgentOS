@@ -215,11 +215,13 @@ def test_parse_after_and_env_validation(monkeypatch):
         StreamConfig.from_env()
 
 
-def test_an_idle_stream_holds_no_thread_pool_token_between_polls():
+def test_an_idle_stream_holds_no_thread_pool_token_between_polls(caplog):
     """Production pass 2, A2. Starlette runs a sync generator through
     `iterate_in_threadpool`; the poll sleep sat inside `next()`, so every idle SSE client
     held one of anyio's 40 default thread-pool tokens for its whole connection. Sample the
-    limiter from the event loop while the response is waiting for its next frame."""
+    limiter from the event loop while the response is waiting for its next frame. Cancelling
+    the wait (what a client disconnect does) must end the generator quietly — cancellation is
+    not a store error and must not be logged as one."""
     import asyncio
 
     import anyio
@@ -242,4 +244,6 @@ def test_an_idle_stream_holds_no_thread_pool_token_between_polls():
             await pending
         return borrowed
 
-    assert asyncio.run(probe()) == 0
+    with caplog.at_level("WARNING", logger="agentos.api.stream"):
+        assert asyncio.run(probe()) == 0
+    assert "stream ended" not in caplog.text
