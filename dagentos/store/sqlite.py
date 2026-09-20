@@ -241,6 +241,12 @@ class SqliteStore:
         ).fetchall()
         return [from_record(json.loads(r[0])) for r in rows]
 
+    def ping(self, timeout: float) -> None:
+        """One statement against the file. SQLite has no acquire wait; `timeout` is not
+        separately enforceable here — a locked file fails after the connection's busy
+        timeout (sqlite3's default 5 s), which the probe window must allow for."""
+        self._conn.execute("SELECT 1").fetchone()
+
     def list_run_ids(self) -> list[str]:
         rows = self._conn.execute("SELECT run_id FROM runs ORDER BY created_at").fetchall()
         return [r[0] for r in rows]

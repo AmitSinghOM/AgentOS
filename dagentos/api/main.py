@@ -152,16 +152,20 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+#: `GET /ready` gives the store this long. The image HEALTHCHECK allows 3 s per probe; a
+#: pool acquire that would wait psycopg_pool's default 30 s must fail inside the window.
+READY_TIMEOUT_SECONDS = 2.0
+
+
 @app.get("/ready")
 def ready() -> JSONResponse:
-    """Readiness (production pass 2, A4): one real store round-trip, so an orchestrator
-    stops routing traffic to an API whose database is unreachable instead of letting every
-    request fail. `read_events` on a run id that cannot exist is a genuine query on every
-    adapter and returns nothing. On failure the body names the exception CLASS only; the
+    """Readiness (production pass 2, A4): one real, time-bounded store round-trip, so an
+    orchestrator stops routing traffic to an API whose database is unreachable instead of
+    letting every request fail. On failure the body names the exception CLASS only; the
     message — which may carry a host name or DSN — goes to the log. No token required:
     probes carry none (auth.OPEN_PATHS)."""
     try:
-        store.read_events("__ready__", after_seq=0)
+        store.ping(timeout=READY_TIMEOUT_SECONDS)
     except Exception as exc:  # noqa: BLE001 — a probe reports, it never raises
         logger.warning("readiness: store unreachable: %s: %s", type(exc).__name__, exc)
         return JSONResponse(status_code=503,

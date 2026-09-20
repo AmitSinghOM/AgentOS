@@ -26,7 +26,7 @@ def _app(monkeypatch, **env):
 
 
 class _Down(MemoryStore):
-    def read_events(self, run_id, after_seq=0, limit=None):
+    def ping(self, timeout):
         raise ConnectionError("connection to server at \"db.internal\" (10.0.0.7) failed")
 
 

@@ -251,6 +251,12 @@ class PostgresStore:
             ).fetchall()
         return [from_record(r[0]) for r in rows]
 
+    def ping(self, timeout: float) -> None:
+        """Bounded acquire + `SELECT 1`. `pool.connection()` alone waits psycopg_pool's default
+        30 s for a connection, longer than any readiness window; the probe passes its own."""
+        with self._pool.connection(timeout=timeout) as conn:
+            conn.execute("SELECT 1").fetchone()
+
     def list_run_ids(self) -> list[str]:
         with self._pool.connection() as conn:
             rows = conn.execute("SELECT run_id FROM runs ORDER BY created_at, run_id").fetchall()
