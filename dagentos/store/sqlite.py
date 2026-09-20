@@ -234,10 +234,10 @@ class SqliteStore:
                 self._conn.execute("ROLLBACK")
                 raise
 
-    def read_events(self, run_id: str, after_seq: int = 0) -> list[Event]:
+    def read_events(self, run_id: str, after_seq: int = 0, limit: int | None = None) -> list[Event]:
         rows = self._conn.execute(
-            "SELECT record FROM run_events WHERE run_id = ? AND seq > ? ORDER BY seq",
-            (run_id, after_seq),
+            "SELECT record FROM run_events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?",
+            (run_id, after_seq, -1 if limit is None else limit),
         ).fetchall()
         return [from_record(json.loads(r[0])) for r in rows]
 

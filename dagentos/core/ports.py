@@ -52,7 +52,10 @@ class Store(Protocol):
     # run log
     def append_events(self, run_id: str, expected_seq: int,
                       events: Sequence[Event], *, fence: int | None = None) -> list[Event]: ...
-    def read_events(self, run_id: str, after_seq: int = 0) -> list[Event]: ...
+    def read_events(self, run_id: str, after_seq: int = 0, limit: int | None = None) -> list[Event]:
+        """Events with seq > after_seq in seq order; at most `limit` when given. The fold
+        reads unbounded; `GET /runs/{id}/events` pages with it."""
+        ...
     def list_run_ids(self) -> list[str]:
         """Every run id, oldest first (creation order). `GET /runs` walks it from the end
         and stops when its page is full, so the order is part of the contract."""

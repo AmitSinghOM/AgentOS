@@ -98,10 +98,11 @@ class MemoryStore:
                     self._requests[ev.request_id] = run_id
             return out
 
-    def read_events(self, run_id: str, after_seq: int = 0) -> list[Event]:
+    def read_events(self, run_id: str, after_seq: int = 0, limit: int | None = None) -> list[Event]:
         # Round-trip through records so this adapter has the same serialization
         # behaviour as a real database (enum → str → enum), cf. agno #8454.
-        return [from_record(r) for r in self._events.get(run_id, []) if r["seq"] > after_seq]
+        out = [from_record(r) for r in self._events.get(run_id, []) if r["seq"] > after_seq]
+        return out if limit is None else out[:limit]
 
     # snapshots (C15): a bounded optimization of the fold, never the source of truth.
     # Monotonic per run (see SqliteStore.put_snapshot).

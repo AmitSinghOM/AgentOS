@@ -396,14 +396,19 @@ def retry_step(run_id: str, step_id: str, request: Request, body: RetryBody | No
 
 
 @app.get("/runs/{run_id}/events")
-def get_run_events(run_id: str, after: int = 0) -> dict:
+def get_run_events(run_id: str, after: int = 0, limit: int = 1000) -> dict:
     """The raw log, paged by seq (C15). This is the public API; the folded view above
-    is a convenience over it."""
-    events = store.read_events(run_id, after_seq=after)
+    is a convenience over it. `limit` is clamped to 1..5000; `has_more` says whether a
+    page after `last_seq` exists, so a client walks `after=last_seq` until it is false."""
+    limit = max(1, min(limit, 5000))
+    events = store.read_events(run_id, after_seq=after, limit=limit + 1)
     if not events and after == 0:
         raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
+    has_more = len(events) > limit
+    events = events[:limit]
     return {"data": [e.to_record() for e in events],
-            "last_seq": events[-1].seq if events else after}
+            "last_seq": events[-1].seq if events else after,
+            "has_more": has_more}
 
 
 @app.get("/runs/{run_id}/stream")
