@@ -44,6 +44,7 @@ class Worker:
         self.processed = 0
         self.errors = 0
         self.error_backoff_seconds = 1.0
+        self._current: str | None = None
 
     # ------------------------------------------------------------------ sweep
     def recover(self) -> list[str]:
@@ -67,11 +68,8 @@ class Worker:
         run_id = self._queue.pull(timeout)
         if run_id is None:
             return None
-        try:
-            self._process(run_id)
-        except Exception as exc:
-            exc.add_note(f"run {run_id}")      # so the loop's log line names the run
-            raise
+        self._current = run_id                 # so the loop's log line can name the run
+        self._process(run_id)
         return run_id
 
     def run_forever(self, *, stop: Callable[[], bool] = lambda: False,
@@ -86,12 +84,12 @@ class Worker:
         next_sweep = self._clock() + sweep_interval
         while not stop():
             try:
+                self._current = None
                 self.run_once(timeout=1.0)
             except Exception as exc:  # the loop is the boundary; see docstring
                 self.errors += 1
-                notes = " ".join(getattr(exc, "__notes__", ()) or ())
-                log.exception("worker loop: %s %s (continuing after %.1fs)",
-                              notes, type(exc).__name__, self.error_backoff_seconds)
+                log.exception("worker loop: run %s: %s (continuing after %.1fs)",
+                              self._current, type(exc).__name__, self.error_backoff_seconds)
                 if self.error_backoff_seconds > 0:
                     time.sleep(self.error_backoff_seconds)
             if self._clock() >= next_sweep:
