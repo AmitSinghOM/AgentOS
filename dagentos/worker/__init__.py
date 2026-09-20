@@ -42,6 +42,8 @@ class Worker:
         self._faults = faults or NoFaults()
         self._clock = clock
         self.processed = 0
+        self.errors = 0
+        self.error_backoff_seconds = 1.0
 
     # ------------------------------------------------------------------ sweep
     def recover(self) -> list[str]:
@@ -65,15 +67,33 @@ class Worker:
         run_id = self._queue.pull(timeout)
         if run_id is None:
             return None
-        self._process(run_id)
+        try:
+            self._process(run_id)
+        except Exception as exc:
+            exc.add_note(f"run {run_id}")      # so the loop's log line names the run
+            raise
         return run_id
 
     def run_forever(self, *, stop: Callable[[], bool] = lambda: False,
                     sweep_interval: float = 60.0) -> None:
+        """The worker process. A failure while handling one delivery — a transient store
+        error, an executor bug that escaped settle — is logged with the run id and the loop
+        goes on after a bounded back-off: one bad run or one database blip must not stall
+        every other run until an operator restarts the process (FAIL_MODES: Worker loop).
+        The delivery stays un-acked, so the queue redelivers it after its visibility timeout.
+        `run_once` deliberately keeps raising."""
         self.recover()
         next_sweep = self._clock() + sweep_interval
         while not stop():
-            self.run_once(timeout=1.0)
+            try:
+                self.run_once(timeout=1.0)
+            except Exception as exc:  # the loop is the boundary; see docstring
+                self.errors += 1
+                notes = " ".join(getattr(exc, "__notes__", ()) or ())
+                log.exception("worker loop: %s %s (continuing after %.1fs)",
+                              notes, type(exc).__name__, self.error_backoff_seconds)
+                if self.error_backoff_seconds > 0:
+                    time.sleep(self.error_backoff_seconds)
             if self._clock() >= next_sweep:
                 self.recover()
                 next_sweep = self._clock() + sweep_interval
