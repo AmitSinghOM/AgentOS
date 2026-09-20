@@ -3,8 +3,10 @@
 **A control plane for durable, observable, human-in-the-loop LLM agent workflows.**
 
 Define a workflow as a DAG of agent steps. AgentOS runs it durably — surviving crashes,
-never double-running a step, pausing for human approval, and emitting a full trace and
-cost breakdown for every run.
+recording exactly one committed completion per step (a step that ran but did not commit
+before a crash is re-run, so external effects rely on downstream idempotency — see
+[FAIL_MODES.md](./docs/FAIL_MODES.md)), pausing for human approval, and emitting a full
+trace and cost breakdown for every run.
 
 The interesting part isn't calling LLMs. It's the distributed-systems layer around them:
 **durable execution, idempotency, retries without corruption, suspended workflows, and
@@ -117,7 +119,7 @@ curl -X POST localhost:8000/runs/{run_id}/cancel
 
 # human-in-the-loop: a step whose agent declares spend / write_external / send_message /
 # execute_code suspends the run BEFORE it runs. Decide from the inbox; the decision and
-# who made it are in the log; the step then runs exactly once.
+# who made it are in the log; the step then runs, and its completion is committed once.
 curl localhost:8000/approvals
 curl -X POST localhost:8000/runs/{run_id}/approvals/{approval_id}/approve \
      -H 'Content-Type: application/json' \

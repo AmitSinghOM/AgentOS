@@ -98,6 +98,10 @@ the UI computes from events rather than from the fold. It follows the time-trave
 - `ui/src/App.test.tsx` — Vitest + Testing Library, `fetch` stubbed (three requests; MSW would
   be a dependency for nothing). One test per rule above, named for the rule.
 - `tests/test_ui_mount.py` — the mount contract, run in CI against the real built bundle.
+- Toolchain: `ui/package.json` declares Node `>=20`, which is what CI runs. One dev
+  dependency, `@testing-library/jest-dom@7`, declares `>=22`; `npm ci` prints an
+  `EBADENGINE` warning below that and the suite runs regardless (CI on 20 proves it). If it
+  ever becomes an error, that is the version to move first.
 
 ## In the wheel and the image
 

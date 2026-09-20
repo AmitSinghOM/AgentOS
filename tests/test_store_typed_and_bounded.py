@@ -161,6 +161,29 @@ def test_every_event_type_round_trips_through_the_store_with_equality(store):
     assert next(e for e in read if isinstance(e, E.StepFailed)).retry_at == T0 + timedelta(minutes=5)
 
 
+def test_read_events_limit_pages_in_seq_order_on_every_adapter(store):
+    """Production review A4: `read_events(limit=)` is honoured by every adapter, pages are in
+    seq order, `after_seq` + `limit` walk the whole log exactly, and no limit means all."""
+    run_id = "pg-run"
+    store.put_workflow(WorkflowDefinition(name="w", version=3, nodes=[{"id": "s1", "agent": "a"}]))
+    written = chain(every_event_type(run_id), 0, None)
+    store.append_events(run_id, 0, written)
+    n = len(written)
+    assert n > 6
+    first = store.read_events(run_id, limit=3)
+    assert [e.seq for e in first] == [1, 2, 3]
+    walked, after = [], 0
+    while True:
+        page = store.read_events(run_id, after_seq=after, limit=5)
+        if not page:
+            break
+        assert len(page) <= 5 and [e.seq for e in page] == list(range(after + 1, after + 1 + len(page)))
+        walked += page; after = page[-1].seq
+    assert [e.seq for e in walked] == list(range(1, n + 1))
+    assert store.read_events(run_id, limit=None) == store.read_events(run_id)
+    assert store.read_events(run_id, after_seq=n, limit=5) == []
+
+
 def test_definitions_and_snapshot_state_round_trip(store):
     agent = Agent(name="a", version=2, type=AgentType.llm, executor="openai-compat",
                   declared_effects=[EffectClass.read, EffectClass.spend],
@@ -217,8 +240,8 @@ class CountingStore(MemoryStore):
         super().__init__()
         self.reads: list[int] = []
 
-    def read_events(self, run_id, after_seq=0):
-        out = super().read_events(run_id, after_seq)
+    def read_events(self, run_id, after_seq=0, limit=None):
+        out = super().read_events(run_id, after_seq, limit)
         self.reads.append(len(out))
         return out
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EventRecord, deriveLatency, fmtDuration, salient } from "./derive";
+import { EventRecord, deriveLatency, fmtDuration, mergeEvents, salient } from "./derive";
 import type { RunState } from "./graph";
 
 const EVENTS: EventRecord[] = [
@@ -51,5 +51,22 @@ describe("fmtDuration", () => {
     expect(fmtDuration(250)).toBe("250 ms");
     expect(fmtDuration(6500)).toBe("6.50 s");
     expect(fmtDuration(125_000)).toBe("2 min 5 s");
+  });
+});
+
+describe("mergeEvents (incremental log fetch, review A4 self-review)", () => {
+  const ev = (seq: number): EventRecord => ({ seq, event_type: "step.progress", occurred_at: `t${seq}` });
+  it("appends a fresh tail", () => {
+    expect(mergeEvents([ev(1), ev(2)], [ev(3), ev(4)]).map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+  });
+  it("keeps each seq once when two refetches fetched the same page", () => {
+    const held = mergeEvents([], [ev(1), ev(2)]);
+    expect(mergeEvents(held, [ev(1), ev(2)]).map((e) => e.seq)).toEqual([1, 2]);
+    expect(mergeEvents(held, [ev(2), ev(3)]).map((e) => e.seq)).toEqual([1, 2, 3]);
+  });
+  it("is a no-op for an empty page and never reorders", () => {
+    const held = [ev(1), ev(2)];
+    expect(mergeEvents(held, [])).toBe(held);
+    expect(mergeEvents([ev(2)], [ev(1)]).map((e) => e.seq)).toEqual([1, 2]);
   });
 });

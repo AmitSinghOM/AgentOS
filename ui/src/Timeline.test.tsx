@@ -49,7 +49,7 @@ beforeEach(() => {
     if (url === "/me") return json(200, { mode: "bearer", principal: { kind: "human", id: "amit" } });
     if (url === "/runs/run1") return json(200, LIVE);
     if (url.startsWith("/runs/run1?at=")) { const k = Number(url.split("=")[1]); return AT[k] ? json(200, AT[k]) : json(422, { detail: `at must be within 1..6` }); }
-    if (url === "/runs/run1/events") return json(200, { data: EVENTS, last_seq: 6 });
+    if (url.startsWith("/runs/run1/events")) return json(200, { data: EVENTS, last_seq: 6, has_more: false });
     if (url === "/workflows/w") return json(200, DEF);
     if (url === "/runs/run1/stream") return new Response(new ReadableStream({ start(c) { c.close(); } }), { status: 200 });
     return json(404, {});

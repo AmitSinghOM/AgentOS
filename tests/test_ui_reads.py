@@ -37,6 +37,27 @@ def test_runs_list_is_newest_first_clamped_and_summarised(monkeypatch):
     assert len(c.get("/runs", params={"limit": 10000}).json()["data"]) == 2    # clamped to 500
 
 
+def test_runs_list_folds_only_the_runs_it_returns(monkeypatch):
+    """Production review A2: with N runs in the store and limit=k, the landing page must cost
+    k folds, not N. Counted at the store's read_events, which every fold goes through."""
+    c = _client(monkeypatch)
+    from dagentos.api import main
+    c.post("/agents", json={"name": "calc", "type": "echo"})
+    c.post("/workflows", json={"name": "w", "nodes": [{"id": "n", "agent": "calc"}]})
+    ids = [c.post("/workflows/w/runs", params={"sync": "true"}).json()["id"] for _ in range(8)]
+
+    folded: list[str] = []
+    real = main.store.read_events
+
+    def counting(run_id, after_seq=0, **kw):
+        folded.append(run_id)
+        return real(run_id, after_seq, **kw)
+
+    monkeypatch.setattr(main.store, "read_events", counting)
+    body = c.get("/runs", params={"limit": 3}).json()["data"]
+    assert [r["id"] for r in body] == ids[::-1][:3]                  # newest three
+    assert len(set(folded)) == 3, f"folded {len(set(folded))} runs to answer limit=3"
+
 def test_workflow_definition_is_readable_and_404s_when_unknown(monkeypatch):
     c = _client(monkeypatch)
     c.post("/agents", json={"name": "calc", "type": "echo"})

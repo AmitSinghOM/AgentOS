@@ -74,7 +74,44 @@ engine = Engine(store=store, blobs=store, executors=executors,
 stream_config = StreamConfig.from_env()
 auth_config = AuthConfig.from_env()
 
+
+def max_body_bytes_from_env() -> int:
+    """AGENTOS_MAX_BODY_BYTES: largest request body the API accepts (default 1 MiB). A
+    workflow definition or agent config far above this is not a use case; it is a way to
+    hold a request worker. Enforced before the body is read."""
+    raw = os.environ.get("AGENTOS_MAX_BODY_BYTES", str(1024 * 1024))
+    try:
+        value = int(raw)
+    except ValueError:
+        raise RuntimeError(f"AGENTOS_MAX_BODY_BYTES must be an integer > 0, got {raw!r}") from None
+    if value <= 0:
+        raise RuntimeError(f"AGENTOS_MAX_BODY_BYTES must be an integer > 0, got {raw!r}")
+    return value
+
+
+max_body_bytes = max_body_bytes_from_env()
+
 app = FastAPI(title="AgentOS", version="0.12.0")
+
+
+@app.middleware("http")
+async def _limit_body(request: Request, call_next):
+    """Production pass A3: refuse an over-limit body on its declared length, before any of
+    it is read (413), and refuse a bodyful request that declares no length (411) so chunked
+    encoding cannot walk around the limit. GET/HEAD/OPTIONS carry no body and pass through."""
+    if request.method in ("POST", "PUT", "PATCH"):
+        declared = request.headers.get("content-length")
+        if declared is None:
+            # No length and no chunked framing means no body at all (HTTP/1.1 §3.3.3) —
+            # e.g. `curl -X POST .../cancel`, with or without a stray Content-Type. Only
+            # chunked framing can carry a body of undeclared size, so only that is refused.
+            if "chunked" in request.headers.get("transfer-encoding", "").lower():
+                return JSONResponse(status_code=411, content={
+                    "detail": "Content-Length is required; chunked request bodies are not accepted"})
+        elif not declared.isdigit() or int(declared) > max_body_bytes:
+            return JSONResponse(status_code=413, content={
+                "detail": f"request body exceeds AGENTOS_MAX_BODY_BYTES ({max_body_bytes})"})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -257,12 +294,15 @@ def start_run(name: str, response: Response, sync: bool = False,
 
 @app.get("/runs")
 def list_runs(limit: int = 50) -> dict:
-    """Newest-first summary of runs for the operator UI's landing page. Folds each run
-    (unhydrated, snapshot-assisted); like `/approvals`, a store index arrives with the
-    operator surface. `limit` is clamped to 1..500."""
+    """Newest-first summary of runs for the operator UI's landing page. `limit` is clamped
+    to 1..500. Costs `limit` folds, not one per run in the store: `list_run_ids` is ordered
+    by creation, so we walk it newest-first and stop once the page is full. (`/approvals`
+    and the recovery sweep still scan — they filter on folded status; see ROADMAP.)"""
     limit = max(1, min(limit, 500))
     out = []
-    for run_id in store.list_run_ids():
+    for run_id in reversed(store.list_run_ids()):
+        if len(out) == limit:
+            break
         run = engine.get_run(run_id, hydrate=False)
         if run is None:
             continue
@@ -272,8 +312,7 @@ def list_runs(limit: int = 50) -> dict:
                     "started_at": run.started_at.isoformat(),
                     "pending_approvals": sum(1 for a in run.approvals.values()
                                              if a.status.value == "pending")})
-    out.sort(key=lambda r: r["started_at"], reverse=True)
-    return {"data": out[:limit]}
+    return {"data": out}
 
 
 @app.get("/runs/{run_id}")
@@ -359,14 +398,19 @@ def retry_step(run_id: str, step_id: str, request: Request, body: RetryBody | No
 
 
 @app.get("/runs/{run_id}/events")
-def get_run_events(run_id: str, after: int = 0) -> dict:
+def get_run_events(run_id: str, after: int = 0, limit: int = 1000) -> dict:
     """The raw log, paged by seq (C15). This is the public API; the folded view above
-    is a convenience over it."""
-    events = store.read_events(run_id, after_seq=after)
+    is a convenience over it. `limit` is clamped to 1..5000; `has_more` says whether a
+    page after `last_seq` exists, so a client walks `after=last_seq` until it is false."""
+    limit = max(1, min(limit, 5000))
+    events = store.read_events(run_id, after_seq=after, limit=limit + 1)
     if not events and after == 0:
         raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
+    has_more = len(events) > limit
+    events = events[:limit]
     return {"data": [e.to_record() for e in events],
-            "last_seq": events[-1].seq if events else after}
+            "last_seq": events[-1].seq if events else after,
+            "has_more": has_more}
 
 
 @app.get("/runs/{run_id}/stream")

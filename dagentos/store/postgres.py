@@ -243,11 +243,11 @@ class PostgresStore:
             )
             return out
 
-    def read_events(self, run_id: str, after_seq: int = 0) -> list[Event]:
+    def read_events(self, run_id: str, after_seq: int = 0, limit: int | None = None) -> list[Event]:
         with self._pool.connection() as conn:
             rows = conn.execute(
-                "SELECT record FROM run_events WHERE run_id = %s AND seq > %s ORDER BY seq",
-                (run_id, after_seq),
+                "SELECT record FROM run_events WHERE run_id = %s AND seq > %s ORDER BY seq LIMIT %s",
+                (run_id, after_seq, limit),        # LIMIT NULL = no limit in PostgreSQL
             ).fetchall()
         return [from_record(r[0]) for r in rows]
 

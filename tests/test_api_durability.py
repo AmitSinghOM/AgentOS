@@ -48,6 +48,19 @@ def test_run_survives_app_restart_and_events_page_by_seq(app_factory):
     assert last >= 6 and events_after["data"][-1]["event_type"] == "run.completed"
     page2 = c2.get(f"/runs/{run['id']}/events", params={"after": last - 2}).json()
     assert [e["seq"] for e in page2["data"]] == [last - 1, last]
+    assert page2["has_more"] is False
+
+    # Production review A4: the log is paged. Walking `after=last_seq` while has_more
+    # reproduces the whole log exactly, and a page never exceeds `limit`.
+    walked, after, pages = [], 0, 0
+    while True:
+        page = c2.get(f"/runs/{run['id']}/events", params={"after": after, "limit": 2}).json()
+        assert len(page["data"]) <= 2
+        walked += page["data"]; after = page["last_seq"]; pages += 1
+        if not page["has_more"]:
+            break
+    assert walked == events_after["data"] and pages >= 3
+    assert len(c2.get(f"/runs/{run['id']}/events", params={"limit": 0}).json()["data"]) == 1  # clamped
 
     # Idempotency-Key survives the restart too: same key → same run, no new log —
     # whether the retry is sync or async.

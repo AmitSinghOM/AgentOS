@@ -170,6 +170,39 @@ describe("run graph", () => {
     expect(alert).toHaveTextContent("cannot advance");
   });
 
+  it("fetches the log incrementally: after the first load, only events past the last seq it holds", async () => {
+    // Production review A4: the old page re-downloaded the WHOLE log on every stream frame.
+    const log: Record<string, unknown>[] = [
+      { seq: 1, event_type: "run.started", occurred_at: "2026-09-20T00:00:01Z" },
+    ];
+    const eventsCalls: string[] = [];
+    const base = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.startsWith("/runs/run1/events")) {
+        eventsCalls.push(url);
+        const after = Number(new URL(url, "http://x").searchParams.get("after") ?? "0");
+        const page = log.filter((e) => (e.seq as number) > after);
+        return json(200, { data: page, last_seq: page.length ? page[page.length - 1].seq : after, has_more: false });
+      }
+      return base(input, init);
+    });
+    render(<App />);
+    await screen.findByRole("group", { name: /workflow diamond run graph/ });
+    await waitFor(() => expect(eventsCalls.length).toBeGreaterThanOrEqual(1));
+    expect(eventsCalls[0]).toMatch(/after=0\b/);
+
+    log.push({ seq: 2, event_type: "step.started", occurred_at: "2026-09-20T00:00:02Z", step_id: "a", attempt: 1 });
+    state = run({ attempts: { a: 1 }, last_seq: 2 });
+    stream.emit(frame(2, "step.started", "a"));
+    await waitFor(() => expect(nodeLabel("a")).toBe("a: running"));
+    await waitFor(() => expect(eventsCalls.length).toBeGreaterThanOrEqual(2));
+    expect(eventsCalls[eventsCalls.length - 1]).toMatch(/after=1\b/);
+    // both events are on the timeline exactly once
+    const rows = screen.getAllByRole("button", { name: /view state after seq/ });
+    expect(rows.map((r) => r.textContent?.trim())).toEqual(["1", "2"]);
+  });
+
   it("the runs landing page lists runs newest-first and links to each graph", async () => {
     window.history.pushState(null, "", "/ui/runs");
     vi.mocked(fetch).mockImplementation(async (input) => {

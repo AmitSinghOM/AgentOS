@@ -48,6 +48,7 @@ the operator policy ceiling (#2) is scoped against this table.
 | Optimistic append | A foreign non-control event appeared since the last write | **closed** | `ConflictError`; the advance stops | `tests/test_control.py::test_foreign_non_control_append_is_still_a_conflict` |
 | Optimistic append | A control request (cancel / pause) appeared since the last write | **open, narrowly** | Adopted — the only foreign appends the engine accepts | `tests/test_control.py::test_cancel_request_appended_by_api_is_adopted_by_worker_log_not_a_conflict` |
 | `_fail` under conflict | Two settles fail the run at once | **open** | Second `run.failed` is dropped; the log already says failed. **Unpinned**: no test drives two concurrent failures into `_fail`; listed so the gap is visible | `tests/test_fail_modes.py::test_unpinned_rows_are_named_here` |
+| Worker loop | A transient store error (connection reset, `database is locked`) or an escaped executor bug while handling one delivery | **closed** | Logged with the run id and traceback; the loop backs off and continues; the un-acked delivery is redelivered after the visibility timeout. `run_once` still raises | `tests/test_worker_resilience.py::test_run_forever_survives_a_transient_store_error_and_finishes_the_run` |
 | API restart | Process restarts mid-run | **closed** | Run and events are on disk; paging by seq continues | `tests/test_api_durability.py::test_run_survives_app_restart_and_events_page_by_seq` |
 | Schema migration | Released migration edited | **closed** | Hash-pinned; the test fails with "add migration N+1" | `tests/test_migrations.py::test_released_migrations_are_never_edited` |
 
@@ -72,6 +73,7 @@ the operator policy ceiling (#2) is scoped against this table.
 
 | Chokepoint | Fault | Direction | What happens | Pinned by |
 | --- | --- | --- | --- | --- |
+| Request body | Body larger than `AGENTOS_MAX_BODY_BYTES` (default 1 MiB), or a bodyful request with no `Content-Length` | **closed** | 413 / 411 before any of the body is read; nothing parsed or stored | `tests/test_body_limit.py::test_oversized_declared_body_is_refused_before_parsing` |
 | Control payload | Body carries anything but `principal` + `reason` | **closed** | 422 before the engine, logged with the field names; nothing appended | `tests/test_trust_boundary.py::test_resume_payload_with_unexpected_fields_is_rejected_logged_and_starts_nothing` |
 | Authentication (bearer mode) | No / unknown token | **closed** | 401 on every path except `/health`, `/metrics`; logged by hash prefix | `tests/test_auth.py::test_anonymous_caller_is_401_everywhere_except_probes` |
 | Authentication (bearer mode) | Body carries a `principal` | **closed** | 422 — rejected, not replaced | `tests/test_auth.py::test_recorded_principal_comes_from_the_token_not_the_body` |

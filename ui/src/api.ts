@@ -73,7 +73,9 @@ export const api = {
   run: <T>(id: string) => request<T>("GET", `/runs/${encodeURIComponent(id)}`),
   /** Time travel: the SERVER folds the log prefix through `at` (same fold, fewer events). */
   runAt: <T>(id: string, at: number) => request<T>("GET", `/runs/${encodeURIComponent(id)}?at=${at}`),
-  events: <T>(id: string) => request<T>("GET", `/runs/${encodeURIComponent(id)}/events`),
+  /** The log is paged (`limit`, `has_more`); pass the last seq you hold to fetch only what follows. */
+  events: <T>(id: string, after = 0, limit = 1000) =>
+    request<T>("GET", `/runs/${encodeURIComponent(id)}/events?after=${after}&limit=${limit}`),
   workflow: <T>(name: string) => request<T>("GET", `/workflows/${encodeURIComponent(name)}`),
   /** In bearer mode the body carries only `reason`; the API derives the principal from the
    *  token and REJECTS a body principal (422). In asserted mode the API requires one — the
