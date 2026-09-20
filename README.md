@@ -276,6 +276,14 @@ Each phase produces an article on a distributed-systems problem solved here:
 
 (See [`docs/blog/`](./docs/blog).)
 
+## Security
+
+Report vulnerabilities privately through GitHub's Security Advisory form; scope, supported
+versions and response times are in [`SECURITY.md`](SECURITY.md). Dependabot watches every
+distribution, the UI and the workflow actions; CI runs `pip-audit --strict` and
+`npm audit --audit-level=high` on every pull request. Release artifacts carry build
+provenance (`gh attestation verify`).
+
 ## License
 
 MIT

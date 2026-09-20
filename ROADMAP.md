@@ -603,6 +603,35 @@ change with the migration hash-pinned like the others.
 
 ---
 
+## Production pass 2 — 2026-09-20 (four-seat review after `v0.13.0`)
+
+Where pass 1 had not gone: process lifecycle, the container's probes, the SSE stream's
+resource cost, supply-chain controls. Comparators (Temporal, Prefect, Hatchet, Inngest,
+DBOS) pulled live. Fixed with failing-first tests: the worker handles SIGTERM/SIGINT
+(finishes the delivery in flight, releases the lease, exits 0 — FAIL_MODES "Worker process,
+SIGTERM / SIGINT"); `GET /ready` is a store round-trip and the image `HEALTHCHECK` uses it
+(FAIL_MODES "Readiness probe"); the SSE stream is an async generator so an idle client holds
+no thread-pool token (was one of anyio's 40 per open tab); `SECURITY.md`, Dependabot for
+every distribution + the UI + the actions, and a CI `audit` job (`pip-audit --strict`,
+`npm audit --audit-level=high`) — which on day one surfaced a HIGH advisory on the UI's
+build-time `vite` 5.x (dev-server path traversal; not in the shipped bundle), fixed by
+`vite` 6.4.3. Record with dismissed candidates:
+`reviews/agentos-v0.13.0-production-2/DEBATE.md` (workspace).
+
+**Held majors (re-check monthly; a Dependabot ignore must not become permanent by default):**
+
+| Package | Held at | Why | Lift when |
+| --- | --- | --- | --- |
+| `vitest` (ui, dev) | 3.2.7 | `@vitest/mocker` moderate advisory is fixed only in vitest 5, which requires vite 8 | vite 8 + vitest 5 land together as one PR with the UI tests green |
+| `vite` (ui, dev) | 6.4.3 | 7/8 drop Node 18 (`jest-dom` already warns); the remaining `esbuild` advisory is moderate, dev-server only | same PR as above |
+
+**Declared bound, not fixed (D2):** the image resolves third-party wheels from PyPI at build
+time under our `>=` floors, so two builds of the same tag can differ and the attestation
+covers floating inputs. The fix is a constraints file used by the image and CI only (a
+library must not pin), with a refresh process — its own slice.
+
+---
+
 ## Chaos engineering plan
 
 Netflix's Chaos Monkey is the right *idea* and the wrong *tool* for this project. The tool

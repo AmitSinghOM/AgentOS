@@ -117,6 +117,31 @@ jobs:
       - run: pytest -q --ignore=tests/chaos
       - run: pytest -q tests/contract -k postgres --no-header -rN | tail -1
 
+  audit:
+    # Production pass 2, A3: a known-vulnerable dependency fails the PR instead of shipping.
+    # Audits the RESOLVED environment (what `pip install` actually picks under our floors),
+    # not the floors themselves; `--strict` also fails on packages the index cannot assess.
+    # The local editable projects are skipped (they are not on PyPI as these versions).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip   # setup-python's pip carries open PYSEC advisories
+      - run: pip install -e ".[dev,observability,providerkit]" -e providers/openai-compat -e providers/anthropic -e providers/openai-agents -e providers/pydantic-ai
+      - run: pip install pip-audit==2.10.1
+      - run: pip-audit --strict --skip-editable --progress-spinner off
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: ui
+      - run: npm audit --audit-level=high
+        working-directory: ui
+
   chaos:
     # Layer 1 fault points + the real-process kill -9 demo (ROADMAP → Chaos engineering
     # plan). Separate job so the evidence for "no step runs twice" is a named check.
