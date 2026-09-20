@@ -102,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
         print(handled or "", end="")
         return 0
     stop = install_stop_signal()
+    log.info("worker started: holder %s, lease ttl %.0fs; SIGTERM/SIGINT stop after the "
+             "current delivery", worker.holder, worker.lease_ttl)
     worker.run_forever(stop=stop)
     log.info("worker stopped cleanly (%d run(s) processed, %d loop error(s))",
              worker.processed, worker.errors)

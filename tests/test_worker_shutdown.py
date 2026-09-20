@@ -108,10 +108,22 @@ def test_the_real_worker_process_exits_0_on_sigterm(tmp_path):
     proc = subprocess.Popen([sys.executable, "-m", "dagentos.worker", "--holder", "sig-test"],
                             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        time.sleep(2.0)                          # import + boot sweep; then idle in pull()
-        assert proc.poll() is None, proc.stderr.read()
+        # Wait for the handlers to be installed (the process says so) rather than sleeping a
+        # fixed time: a SIGTERM that lands during boot still kills the process, by design.
+        seen: list[str] = []
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            line = proc.stderr.readline()
+            if not line and proc.poll() is not None:
+                break
+            seen.append(line)
+            if "worker started" in line:
+                break
+        assert any("worker started" in s for s in seen), "".join(seen)
+        assert proc.poll() is None
         proc.send_signal(signal.SIGTERM)
-        out, err = proc.communicate(timeout=10)
+        _out, rest = proc.communicate(timeout=10)
+        err = "".join(seen) + rest
     finally:
         if proc.poll() is None:
             proc.kill()
