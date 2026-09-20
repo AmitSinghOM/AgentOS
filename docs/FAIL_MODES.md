@@ -73,6 +73,7 @@ the operator policy ceiling (#2) is scoped against this table.
 
 | Chokepoint | Fault | Direction | What happens | Pinned by |
 | --- | --- | --- | --- | --- |
+| Request body | Body larger than `AGENTOS_MAX_BODY_BYTES` (default 1 MiB), or a bodyful request with no `Content-Length` | **closed** | 413 / 411 before any of the body is read; nothing parsed or stored | `tests/test_body_limit.py::test_oversized_declared_body_is_refused_before_parsing` |
 | Control payload | Body carries anything but `principal` + `reason` | **closed** | 422 before the engine, logged with the field names; nothing appended | `tests/test_trust_boundary.py::test_resume_payload_with_unexpected_fields_is_rejected_logged_and_starts_nothing` |
 | Authentication (bearer mode) | No / unknown token | **closed** | 401 on every path except `/health`, `/metrics`; logged by hash prefix | `tests/test_auth.py::test_anonymous_caller_is_401_everywhere_except_probes` |
 | Authentication (bearer mode) | Body carries a `principal` | **closed** | 422 — rejected, not replaced | `tests/test_auth.py::test_recorded_principal_comes_from_the_token_not_the_body` |

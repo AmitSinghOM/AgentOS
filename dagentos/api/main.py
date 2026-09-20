@@ -74,7 +74,42 @@ engine = Engine(store=store, blobs=store, executors=executors,
 stream_config = StreamConfig.from_env()
 auth_config = AuthConfig.from_env()
 
+
+def max_body_bytes_from_env() -> int:
+    """AGENTOS_MAX_BODY_BYTES: largest request body the API accepts (default 1 MiB). A
+    workflow definition or agent config far above this is not a use case; it is a way to
+    hold a request worker. Enforced before the body is read."""
+    raw = os.environ.get("AGENTOS_MAX_BODY_BYTES", str(1024 * 1024))
+    try:
+        value = int(raw)
+    except ValueError:
+        raise RuntimeError(f"AGENTOS_MAX_BODY_BYTES must be an integer > 0, got {raw!r}") from None
+    if value <= 0:
+        raise RuntimeError(f"AGENTOS_MAX_BODY_BYTES must be an integer > 0, got {raw!r}")
+    return value
+
+
+max_body_bytes = max_body_bytes_from_env()
+
 app = FastAPI(title="AgentOS", version="0.12.0")
+
+
+@app.middleware("http")
+async def _limit_body(request: Request, call_next):
+    """Production pass A3: refuse an over-limit body on its declared length, before any of
+    it is read (413), and refuse a bodyful request that declares no length (411) so chunked
+    encoding cannot walk around the limit. GET/HEAD/OPTIONS carry no body and pass through."""
+    if request.method in ("POST", "PUT", "PATCH"):
+        declared = request.headers.get("content-length")
+        if declared is None:
+            if request.headers.get("transfer-encoding", "").lower() == "chunked" \
+                    or request.headers.get("content-type"):
+                return JSONResponse(status_code=411, content={
+                    "detail": "Content-Length is required; chunked request bodies are not accepted"})
+        elif not declared.isdigit() or int(declared) > max_body_bytes:
+            return JSONResponse(status_code=413, content={
+                "detail": f"request body exceeds AGENTOS_MAX_BODY_BYTES ({max_body_bytes})"})
+    return await call_next(request)
 
 
 @app.middleware("http")
