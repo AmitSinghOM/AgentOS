@@ -38,6 +38,7 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
   const [atError, setAtError] = useState<string | null>(null);
   const debounce = useRef<number | null>(null);
   const lastId = useRef<string | null>(null);
+  const eventsRef = useRef<EventRecord[]>([]);     // what we hold, so refetch asks only for what follows
 
   const refetch = useCallback(async () => {
     try {
@@ -45,8 +46,19 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
       setRun(r);
       setError(null);
       try {
-        const page = await api.events<{ data: EventRecord[] }>(runId);
-        setEvents(page.data);
+        // Only the tail: the log is append-only, so events we hold never change. Walk the
+        // pages until has_more is false; a run with thousands of events costs one small page
+        // per frame instead of the whole log.
+        let held = eventsRef.current;
+        let after = held.length ? held[held.length - 1].seq : 0;
+        for (;;) {
+          const page = await api.events<{ data: EventRecord[]; last_seq: number; has_more: boolean }>(runId, after);
+          if (page.data.length) held = held.concat(page.data.filter((e) => e.seq > after));
+          after = page.last_seq;
+          if (!page.has_more) break;
+        }
+        eventsRef.current = held;
+        setEvents(held);
       } catch { /* the ticker still shows frames; the timeline catches up on the next refetch */ }
       return r;
     } catch (e) {
@@ -58,6 +70,8 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
   // initial load: the run, then its (current) definition
   useEffect(() => {
     let alive = true;
+    eventsRef.current = [];         // a different run starts from an empty log
+    setEvents([]);
     (async () => {
       const r = await refetch();
       if (!r || !alive) return;
