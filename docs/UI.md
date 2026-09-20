@@ -38,8 +38,12 @@ Development: `cd ui && npm run dev` serves the app on `:5173` and proxies API pa
 
 - **Landing** (`/ui/runs`): `GET /runs` newest-first — status, cost, event count, pending
   approvals linking to the inbox; each row links to its graph.
-- **The DAG** is the current `GET /workflows/{name}` definition, laid out by longest-path
-  layering (no graph library). If the run is pinned to another version the page says so and
+- **The DAG** is the current `GET /workflows/{name}` definition, laid out left-to-right by
+  [dagre](https://github.com/dagrejs/dagre) (`@dagrejs/dagre`, MIT): each column is the wave the
+  scheduler runs those steps in (longest path from a source), rows are ordered to minimise edge
+  crossings, and long edges are routed around the layers they skip. The layout is a
+  pure function of the definition (`ui/src/graph.ts`) and deterministic for it. If the run is
+  pinned to another version the page says so and
   that the run cannot advance (C3); it does not silently draw the wrong graph.
 - **Node state comes from the server's folded run**, never from folding events in the browser
   (one derivation of state, backed by the golden corpus). Each state is one field of

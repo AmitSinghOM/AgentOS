@@ -2,6 +2,8 @@
 // from the SERVER's folded run. The browser never folds events itself (docs/REPLAY.md: one
 // derivation of state, with a golden corpus); the stream only tells the page when to refetch.
 
+import * as dagre from "@dagrejs/dagre";
+
 export interface WorkflowNodeDef { id: string; agent: string; depends_on: string[] }
 export interface WorkflowDef { name: string; version: number; nodes: WorkflowNodeDef[]; max_parallelism?: number }
 
@@ -76,39 +78,67 @@ export function nodeState(run: RunState, node: WorkflowNodeDef): NodeView {
 }
 
 export interface Placed { id: string; layer: number; row: number; x: number; y: number }
-export interface Layout { nodes: Placed[]; edges: { from: string; to: string }[]; width: number; height: number }
+export interface Point { x: number; y: number }
+export interface LaidEdge { from: string; to: string; points: Point[] }
+export interface Layout { nodes: Placed[]; edges: LaidEdge[]; width: number; height: number }
 
 export const NODE_W = 150;
 export const NODE_H = 54;
-const GAP_X = 70;
-const GAP_Y = 22;
+const GAP_X = 70;   // between layers (dagre ranksep)
+const GAP_Y = 22;   // between rows in a layer (dagre nodesep)
 
-/** Longest-path layering: a node's layer is 1 + the max layer of its dependencies; sources
- *  are layer 0. Rows within a layer keep definition order. Cycles cannot occur (the API
- *  validates the DAG) but an unknown dependency is placed at layer 0 rather than thrown. */
+/** Layered left-to-right layout via dagre (Sugiyama: crossing minimisation, Brandes-Köpf
+ *  coordinates, long edges routed around intermediate layers). Ranking is pinned to the
+ *  scheduler's waves — a node's column is the longest path from a source, exactly the wave the
+ *  worker dispatches it in — by giving each edge `minlen` = wave gap; dagre's default ranker
+ *  would otherwise shorten edges and park a source with one long edge beside later nodes, which
+ *  reads as "starts later". Node insertion follows definition order, so the result is
+ *  deterministic for a definition. `x`/`y` are the node's top-left corner; `layer` is the wave
+ *  (0 = sources) and `row` the position within it. Cycles cannot occur (the API validates the
+ *  DAG); an unknown dependency is dropped rather than thrown, as before. */
 export function layout(def: WorkflowDef): Layout {
   const byId = new Map(def.nodes.map((n) => [n.id, n]));
+  const edgeList = def.nodes.flatMap((n) => n.depends_on.filter((d) => byId.has(d) && d !== n.id).map((d) => ({ from: d, to: n.id })));
+  const wave = waves(def.nodes, byId);
+  const g = new dagre.graphlib.Graph({ directed: true, multigraph: false, compound: false })
+    .setGraph({ rankdir: "LR", ranksep: GAP_X, nodesep: GAP_Y, edgesep: GAP_Y / 2, marginx: 0, marginy: 0 })
+    .setDefaultEdgeLabel(() => ({}));
+  for (const n of def.nodes) g.setNode(n.id, { width: NODE_W, height: NODE_H });
+  for (const e of edgeList) g.setEdge(e.from, e.to, { minlen: Math.max(1, wave.get(e.to)! - wave.get(e.from)!) });
+  dagre.layout(g);
+
+  // dagre leaves gaps in `rank` for the dummy ranks it inserts on long edges; compress to 0..n.
+  const ranks = Array.from(new Set(def.nodes.map((n) => g.node(n.id).rank as number))).sort((a, b) => a - b);
+  const layerOf = new Map(ranks.map((r, i) => [r, i]));
+  const nodes: Placed[] = def.nodes.map((n) => {
+    const p = g.node(n.id);
+    return { id: n.id, layer: layerOf.get(p.rank as number)!, row: p.order as number,
+      x: round(p.x - NODE_W / 2), y: round(p.y - NODE_H / 2) };
+  });
+  const edges: LaidEdge[] = edgeList.map((e) => ({
+    ...e, points: g.edge(e.from, e.to).points.map((p: Point) => ({ x: round(p.x), y: round(p.y) })),
+  }));
+  const gr = g.graph();
+  return { nodes, edges, width: round(gr.width ?? NODE_W), height: round(gr.height ?? NODE_H) };
+}
+
+/** Longest path from a source, per node: the wave the scheduler runs it in. Unknown or
+ *  self dependencies are ignored; a cycle (impossible past the API) resolves to 0. */
+function waves(nodes: WorkflowNodeDef[], byId: Map<string, WorkflowNodeDef>): Map<string, number> {
   const memo = new Map<string, number>();
-  const layerOf = (id: string, seen: Set<string>): number => {
+  const visit = (id: string, seen: Set<string>): number => {
     const hit = memo.get(id);
     if (hit !== undefined) return hit;
     const node = byId.get(id);
     if (!node || seen.has(id)) return 0;
     seen.add(id);
-    const deps = node.depends_on.filter((d) => byId.has(d));
-    const l = deps.length ? 1 + Math.max(...deps.map((d) => layerOf(d, seen))) : 0;
-    memo.set(id, l);
-    return l;
+    const deps = node.depends_on.filter((d) => byId.has(d) && d !== id);
+    const w = deps.length ? 1 + Math.max(...deps.map((d) => visit(d, seen))) : 0;
+    memo.set(id, w);
+    return w;
   };
-  const rows = new Map<number, number>();
-  const nodes: Placed[] = def.nodes.map((n) => {
-    const layer = layerOf(n.id, new Set());
-    const row = rows.get(layer) ?? 0;
-    rows.set(layer, row + 1);
-    return { id: n.id, layer, row, x: layer * (NODE_W + GAP_X), y: row * (NODE_H + GAP_Y) };
-  });
-  const edges = def.nodes.flatMap((n) => n.depends_on.filter((d) => byId.has(d)).map((d) => ({ from: d, to: n.id })));
-  const layers = Math.max(0, ...nodes.map((n) => n.layer)) + 1;
-  const tallest = Math.max(1, ...rows.values());
-  return { nodes, edges, width: layers * NODE_W + (layers - 1) * GAP_X, height: tallest * NODE_H + (tallest - 1) * GAP_Y };
+  for (const n of nodes) visit(n.id, new Set());
+  return memo;
 }
+
+const round = (v: number) => Math.round(v * 100) / 100;
