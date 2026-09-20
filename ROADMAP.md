@@ -585,6 +585,24 @@ for earlier versions are unchanged history. A breaking change for anyone who imp
 
 ---
 
+## Production pass — 2026-09-20 (four-seat review after `v0.12.0`)
+
+Where earlier passes had not gone: the worker loop under real failure, list endpoints and the
+recovery sweep under real data volume, the request-body boundary, the log read path on long
+runs, the README's guarantee wording. Fixed with failing-first tests: the worker loop now
+survives a transient store error (FAIL_MODES "Worker loop"); `GET /runs` folds only the runs
+it returns; a request-body size limit (`AGENTOS_MAX_BODY_BYTES`); `GET /runs/{id}/events` is
+paged and the UI fetches incrementally; README says what FAIL_MODES row 41 says. Record with
+dismissed candidates: `reviews/agentos-v0.12.0-production/DEBATE.md` (workspace).
+
+**Declared bound, not fixed:** `GET /approvals` and the recovery sweep still fold every
+non-terminal run to filter on status. Removing that needs a denormalised `runs.status`
+column maintained on append — a migration and a second copy of a fact the log already
+holds. Do it when a deployment has enough runs for the sweep to matter, and then as its own
+change with the migration hash-pinned like the others.
+
+---
+
 ## Chaos engineering plan
 
 Netflix's Chaos Monkey is the right *idea* and the wrong *tool* for this project. The tool
