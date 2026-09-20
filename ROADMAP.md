@@ -523,8 +523,9 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   parser (`ui/src/sse.ts`, unit-tested across chunk boundaries, multi-line data, id carry-over)
   because `EventSource` cannot send `Authorization` and the token is never allowed in a URL.
   Reconnects with `Last-Event-ID` after the server's max-duration close; stops on a terminal run.
-- [x] **Live workflow run graph** (`/ui/runs/<id>`): layered DAG (longest-path layering, no
-  graph library) from `GET /workflows/{name}`; node state derived from the SERVER's folded run —
+- [x] **Live workflow run graph** (`/ui/runs/<id>`): layered DAG from `GET /workflows/{name}`
+  (columns = scheduler waves; laid out by `@dagrejs/dagre` since v0.13 — the hand-rolled layout
+  crossed edges on a wide fan and drew a span-2 edge through a node); node state derived from the SERVER's folded run —
   the browser never folds events (one derivation of state, with the golden corpus); every stream
   frame lands in a ticker and schedules one debounced refetch of `GET /runs/{id}`. States:
   pending / running (+progress) / completed (+cost) / failed / dead-lettered / cancelled /

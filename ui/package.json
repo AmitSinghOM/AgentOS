@@ -4,7 +4,9 @@
   "version": "0.12.0",
   "description": "AgentOS operator UI — served by the API at /ui. Phase 9.",
   "type": "module",
-  "engines": { "node": ">=18.18" },
+  "engines": {
+    "node": ">=18.18"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
@@ -12,6 +14,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@dagrejs/dagre": "3.1.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "./api";
 import { CostPanel } from "./CostPanel";
-import { NODE_H, NODE_W, NodeView, RunState, WorkflowDef, layout, nodeState } from "./graph";
+import { NODE_H, NODE_W, NodeView, Point, RunState, WorkflowDef, layout, nodeState } from "./graph";
 import { Link, Route } from "./router";
 import { SSEFrame, readSSE } from "./sse";
 import { Timeline } from "./Timeline";
@@ -202,6 +202,22 @@ const LABEL: Record<NodeView["status"], string> = {
   retry_backoff: "retry backoff",
 };
 
+/** SVG path through dagre's waypoints: a cubic between each consecutive pair with horizontal
+ *  tangents, so a two-point edge is the same S-curve as before and a routed long edge bends
+ *  smoothly around the layer it skips. */
+export function edgePath(points: Point[]): string {
+  if (points.length === 0) return "";
+  const [first, ...rest] = points;
+  let d = `M ${first.x} ${first.y}`;
+  let prev = first;
+  for (const p of rest) {
+    const mx = (prev.x + p.x) / 2;
+    d += ` C ${mx} ${prev.y}, ${mx} ${p.y}, ${p.x} ${p.y}`;
+    prev = p;
+  }
+  return d;
+}
+
 export function Graph({ def, run }: { def: WorkflowDef; run: RunState }) {
   const l = layout(def);
   const pos = new Map(l.nodes.map((n) => [n.id, n]));
@@ -220,12 +236,9 @@ export function Graph({ def, run }: { def: WorkflowDef; run: RunState }) {
           <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
         </marker>
       </defs>
-      {l.edges.map((e) => {
-        const a = pos.get(e.from)!; const b = pos.get(e.to)!;
-        const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2, x2 = b.x, y2 = b.y + NODE_H / 2;
-        const mx = (x1 + x2) / 2;
-        return <path key={`${e.from}->${e.to}`} className="edge" d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} markerEnd="url(#arrow)" />;
-      })}
+      {l.edges.map((e) => (
+        <path key={`${e.from}->${e.to}`} className="edge" d={edgePath(e.points)} markerEnd="url(#arrow)" />
+      ))}
       {views.map(([n, v]) => {
         const p = pos.get(n.id)!;
         return (
