@@ -102,8 +102,10 @@ async def _limit_body(request: Request, call_next):
     if request.method in ("POST", "PUT", "PATCH"):
         declared = request.headers.get("content-length")
         if declared is None:
-            if request.headers.get("transfer-encoding", "").lower() == "chunked" \
-                    or request.headers.get("content-type"):
+            # No length and no chunked framing means no body at all (HTTP/1.1 §3.3.3) —
+            # e.g. `curl -X POST .../cancel`, with or without a stray Content-Type. Only
+            # chunked framing can carry a body of undeclared size, so only that is refused.
+            if "chunked" in request.headers.get("transfer-encoding", "").lower():
                 return JSONResponse(status_code=411, content={
                     "detail": "Content-Length is required; chunked request bodies are not accepted"})
         elif not declared.isdigit() or int(declared) > max_body_bytes:

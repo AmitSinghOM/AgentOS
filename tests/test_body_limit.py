@@ -58,6 +58,14 @@ def test_bodyful_request_without_content_length_is_refused(monkeypatch):
     assert c.get("/agents/calc").status_code == 404
 
 
+def test_bodyless_post_with_a_stray_content_type_reaches_the_route(monkeypatch):
+    """Self-review of A3: `curl -X POST .../cancel -H 'Content-Type: application/json'` sends
+    neither Content-Length nor chunked framing. That is no body, not an undeclared one."""
+    c, _ = _client(monkeypatch, limit="1024")
+    r = c.post("/runs/nope/cancel", headers={"Content-Type": "application/json"})
+    assert r.status_code == 404, r.text          # the route answered, not the middleware
+
+
 def test_get_and_ui_paths_carry_no_body_and_are_untouched(monkeypatch):
     c, _ = _client(monkeypatch, limit="1")
     assert c.get("/health").status_code == 200
