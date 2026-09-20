@@ -79,22 +79,24 @@ class Worker:
         goes on after a bounded back-off: one bad run or one database blip must not stall
         every other run until an operator restarts the process (FAIL_MODES: Worker loop).
         The delivery stays un-acked, so the queue redelivers it after its visibility timeout.
-        `run_once` deliberately keeps raising."""
+        `run_once` deliberately keeps raising, and so does the boot sweep: a store that is
+        down when the process starts must be loud, not retried quietly forever."""
         self.recover()
         next_sweep = self._clock() + sweep_interval
         while not stop():
             try:
                 self._current = None
                 self.run_once(timeout=1.0)
+                if self._clock() >= next_sweep:
+                    next_sweep = self._clock() + sweep_interval
+                    self._current = "<sweep>"
+                    self.recover()
             except Exception as exc:  # the loop is the boundary; see docstring
                 self.errors += 1
                 log.exception("worker loop: run %s: %s (continuing after %.1fs)",
                               self._current, type(exc).__name__, self.error_backoff_seconds)
                 if self.error_backoff_seconds > 0:
                     time.sleep(self.error_backoff_seconds)
-            if self._clock() >= next_sweep:
-                self.recover()
-                next_sweep = self._clock() + sweep_interval
 
     # ---------------------------------------------------------------- process
     def _process(self, run_id: str) -> None:

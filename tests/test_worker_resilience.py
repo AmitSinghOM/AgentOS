@@ -78,3 +78,52 @@ def test_run_forever_survives_a_transient_store_error_and_finishes_the_run(caplo
     assert hits, "the failure must be logged with the run id"
     assert any(r.exc_info and "connection reset" in str(r.exc_info[1]) for r in hits), \
         "the traceback must ride along"
+
+
+
+class SweepFlakyStore(MemoryStore):
+    """`list_run_ids` (called twice per sweep: expire, then re-enqueue) works for the boot
+    sweep, raises during the second sweep — the first periodic one — then works again."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+        self.fail_calls = {3}          # first call of the second sweep
+
+    def list_run_ids(self):
+        self.calls += 1
+        if self.calls in self.fail_calls:
+            raise ConnectionResetError("simulated: connection reset during sweep")
+        return super().list_run_ids()
+
+
+def test_run_forever_survives_a_transient_error_in_the_periodic_sweep(caplog):
+    store = SweepFlakyStore()
+    store.put_agent(Agent(name="a", type=AgentType.echo))
+    store.put_workflow(WorkflowDefinition(name="one", version=1, nodes=[{"id": "n1", "agent": "a"}]))
+    eng = Engine(store=store, blobs=store, executors={"echo": EchoExecutor()}, lease=store)
+    run_id = eng.create_run("one")                    # not pushed: only a sweep can find it
+    ticks = iter(range(1000))
+    worker = Worker(eng, store, lease=store, queue=store, holder="w", clock=lambda: float(next(ticks)))
+    worker.error_backoff_seconds = 0.0
+    n = {"i": 0}
+
+    def stop() -> bool:
+        n["i"] += 1
+        return n["i"] > 40 or eng.get_run(run_id, hydrate=False).status is RunStatus.completed
+
+    with caplog.at_level(logging.ERROR, logger="agentos.worker"):
+        worker.run_forever(stop=stop, sweep_interval=1.0)   # clock advances 1/call: a sweep per loop
+    assert store.calls >= 3, "boot sweep (2 calls) and the failing periodic sweep both happened"
+    assert worker.errors == 1
+    assert eng.get_run(run_id, hydrate=False).status is RunStatus.completed
+    assert any("sweep" in r.getMessage() for r in caplog.records)
+
+
+def test_boot_sweep_still_raises_so_a_down_store_is_loud_at_start():
+    store = SweepFlakyStore()
+    store.fail_calls = {1}                             # the very first call — the boot sweep
+    eng = Engine(store=store, blobs=store, executors={"echo": EchoExecutor()}, lease=store)
+    worker = Worker(eng, store, lease=store, queue=store, holder="w")
+    with pytest.raises(ConnectionResetError):
+        worker.run_forever(stop=lambda: True)
