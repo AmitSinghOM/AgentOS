@@ -86,3 +86,19 @@ export function fmtDuration(ms: number | null): string {
   if (ms < 60_000) return `${(ms / 1000).toFixed(2)} s`;
   return `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`;
 }
+
+/** Merge a fetched page into the events already held. The log is append-only and seq is
+ *  dense, so the only thing that can go wrong is a page we already have (two refetches in
+ *  flight both read the same tail): keep every seq once, in seq order. Pure, so it is tested
+ *  without the page. */
+export function mergeEvents(held: EventRecord[], page: EventRecord[]): EventRecord[] {
+  if (page.length === 0) return held;
+  const last = held.length ? held[held.length - 1].seq : 0;
+  const fresh = page.filter((e) => e.seq > last);
+  if (fresh.length === page.length) return held.concat(fresh);
+  // overlap: rebuild by seq, later fetch wins for an identical seq (same event either way)
+  const bySeq = new Map<number, EventRecord>();
+  for (const e of held) bySeq.set(e.seq, e);
+  for (const e of page) bySeq.set(e.seq, e);
+  return Array.from(bySeq.values()).sort((a, b) => a.seq - b.seq);
+}

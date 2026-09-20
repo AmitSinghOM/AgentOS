@@ -6,6 +6,7 @@ import { Link, Route } from "./router";
 import { SSEFrame, readSSE } from "./sse";
 import { Timeline } from "./Timeline";
 import type { EventRecord } from "./derive";
+import { mergeEvents } from "./derive";
 import { eventFamily, fmtClock, fmtDateTime, shortHash } from "./fmt";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
@@ -48,17 +49,16 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
       try {
         // Only the tail: the log is append-only, so events we hold never change. Walk the
         // pages until has_more is false; a run with thousands of events costs one small page
-        // per frame instead of the whole log.
-        let held = eventsRef.current;
-        let after = held.length ? held[held.length - 1].seq : 0;
-        for (;;) {
+        // per frame instead of the whole log. Re-read the ref each page: another refetch may
+        // have landed meanwhile, and mergeEvents keeps each seq once.
+        let after = eventsRef.current.length ? eventsRef.current[eventsRef.current.length - 1].seq : 0;
+        for (let guard = 0; guard < 100; guard++) {           // never trust has_more to terminate
           const page = await api.events<{ data: EventRecord[]; last_seq: number; has_more: boolean }>(runId, after);
-          if (page.data.length) held = held.concat(page.data.filter((e) => e.seq > after));
+          eventsRef.current = mergeEvents(eventsRef.current, page.data);
+          if (!page.has_more || page.last_seq <= after) break;
           after = page.last_seq;
-          if (!page.has_more) break;
         }
-        eventsRef.current = held;
-        setEvents(held);
+        setEvents(eventsRef.current);
       } catch { /* the ticker still shows frames; the timeline catches up on the next refetch */ }
       return r;
     } catch (e) {
