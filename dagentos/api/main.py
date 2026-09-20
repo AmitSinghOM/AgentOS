@@ -74,7 +74,7 @@ engine = Engine(store=store, blobs=store, executors=executors,
 stream_config = StreamConfig.from_env()
 auth_config = AuthConfig.from_env()
 
-app = FastAPI(title="AgentOS", version="0.11.1")
+app = FastAPI(title="AgentOS", version="0.12.0")
 
 
 @app.middleware("http")
