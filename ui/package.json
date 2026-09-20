@@ -5,7 +5,7 @@
   "description": "AgentOS operator UI — served by the API at /ui. Phase 9.",
   "type": "module",
   "engines": {
-    "node": ">=18.18"
+    "node": ">=20"
   },
   "scripts": {
     "dev": "vite",

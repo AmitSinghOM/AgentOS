@@ -22,8 +22,10 @@ around them**: durability, idempotency, retries without double-charging, suspend
 execution waiting on humans, and observability across an async pipeline.
 
 AgentOS is the missing control plane. You define a workflow as a DAG of agent steps;
-AgentOS executes it durably, survives crashes, never double-runs a step, pauses for
-human approval, and emits a full trace + cost breakdown for every run.
+AgentOS executes it durably, survives crashes, commits exactly one completion per step (a
+step interrupted before its commit is re-run — effects rely on downstream idempotency; see
+`docs/FAIL_MODES.md`), pauses for human approval, and emits a full trace + cost breakdown
+for every run.
 
 ## 2. Goals / Non-Goals
 
