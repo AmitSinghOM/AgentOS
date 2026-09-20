@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, Approval, api } from "./api";
+import { fmtAgo } from "./fmt";
 import type { Session } from "./Session";
 
 const POLL_MS = 3000;
@@ -80,12 +81,13 @@ export function Inbox({ session }: { session: Session }) {
           return (
             <li key={key} className="approval">
               <div className="approval__head">
-                <strong>{a.workflow}</strong> · run <code>{a.run_id.slice(0, 8)}</code> ·{" "}
+                <strong>{a.workflow}</strong> · run <code className="mono" title={a.run_id}>{a.run_id.slice(0, 8)}</code> ·{" "}
                 <span className={`kind kind--${a.kind}`}>{a.kind}</span>
+                {a.effect_classes.map((c) => <span key={c} className={`chip chip--effect chip--${c}`}>{c}</span>)}
               </div>
               <p className="approval__what">{describe(a)}</p>
               <p className="approval__meta">
-                requested {a.requested_at} · {expiry(a)}
+                requested <time dateTime={a.requested_at} title={a.requested_at}>{fmtAgo(a.requested_at)}</time> · {expiry(a)}
                 {a.reason ? ` · ${a.reason}` : ""}
               </p>
               <label>

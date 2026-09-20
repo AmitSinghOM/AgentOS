@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { EventRecord } from "./derive";
 import { salient } from "./derive";
+import { eventFamily, fmtClock, fmtDelta } from "./fmt";
 
 /** A drag across an n-event run must not become n server folds: the thumb's seq is shown
  *  instantly, the seek (`GET /runs/{id}?at=k`, O(k) on the server) fires once the thumb rests. */
@@ -49,18 +50,22 @@ export function Timeline({ events, lastSeq, at, onSeek }: {
         )}
       </div>
       <table className="events" aria-label="event log">
-        <thead><tr><th>seq</th><th>event</th><th>step</th><th>detail</th><th>at</th></tr></thead>
+        <thead><tr><th>seq</th><th>event</th><th>step</th><th>detail</th><th className="num">at</th><th className="num">gap</th></tr></thead>
         <tbody>
-          {events.map((e) => (
-            <tr key={e.seq} className={e.seq === shown ? "current" : e.seq > shown ? "future" : ""}
-                aria-current={e.seq === shown ? "step" : undefined}>
-              <td><button type="button" className="seek" onClick={() => seekNow(e.seq)} aria-label={`view state after seq ${e.seq}`}>{e.seq}</button></td>
-              <td><code>{e.event_type}</code></td>
-              <td>{e.step_id ?? ""}</td>
-              <td>{salient(e)}</td>
-              <td className="muted">{e.occurred_at}</td>
-            </tr>
-          ))}
+          {events.map((e, i) => {
+            const gap = i > 0 ? fmtDelta(events[i - 1].occurred_at, e.occurred_at) : null;
+            return (
+              <tr key={e.seq} className={e.seq === shown ? "current" : e.seq > shown ? "future" : ""}
+                  aria-current={e.seq === shown ? "step" : undefined}>
+                <td><button type="button" className="seek" onClick={() => seekNow(e.seq)} aria-label={`view state after seq ${e.seq}`}>{e.seq}</button></td>
+                <td><span className={`dot dot--${eventFamily(e.event_type)}`} aria-hidden="true" /><code>{e.event_type}</code></td>
+                <td>{e.step_id ? <span className="chip">{e.step_id}</span> : ""}</td>
+                <td className="detail">{salient(e)}</td>
+                <td className="muted num" title={e.occurred_at}><time dateTime={e.occurred_at}>{fmtClock(e.occurred_at)}</time></td>
+                <td className="muted num">{gap ?? ""}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </section>

@@ -82,7 +82,7 @@ describe("run graph", () => {
     state = run({ attempts: { a: 1 }, last_seq: 2 });
     stream.emit(frame(2, "step.started", "a"));
     await waitFor(() => expect(nodeLabel("a")).toBe("a: running"));
-    expect(screen.getByRole("list", { name: "event ticker" })).toHaveTextContent("2 step.started (a)");
+    expect(screen.getByRole("list", { name: "event ticker" })).toHaveTextContent("2 step.started a");
 
     // frame 3: a completed, b started
     state = run({ attempts: { a: 1, b: 1 }, last_seq: 4,
