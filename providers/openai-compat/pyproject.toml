@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentos-provider-openai-compat"
-version = "0.12.0"
+version = "0.13.0"
 description = "AgentOS executor for any OpenAI-compatible chat-completions server (Ollama, vLLM, LM Studio, OpenRouter, OpenAI) over plain HTTP"
 readme = "README.md"
 requires-python = ">=3.11"
