@@ -19,11 +19,19 @@ import time
 import pytest
 
 from dagentos.core.engine import Engine
-from dagentos.core.models import (Agent, AgentType, Effect, EffectClass, Provenance, RunStatus, StepRequest,
-                                  StepResult, WorkflowDefinition)
+from dagentos.core.models import (
+    Agent,
+    AgentType,
+    Effect,
+    EffectClass,
+    Provenance,
+    RunStatus,
+    StepRequest,
+    StepResult,
+    WorkflowDefinition,
+)
 from dagentos.store.memory import MemoryStore
 from dagentos.worker import Worker
-
 
 
 class SlowEcho:
