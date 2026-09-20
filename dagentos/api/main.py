@@ -148,7 +148,25 @@ async def _log_rejected_payload(request: Request, exc: RequestValidationError) -
 
 @app.get("/health")
 def health() -> dict:
+    """Liveness: the process is up. Says nothing about the store — that is `/ready`."""
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready() -> JSONResponse:
+    """Readiness (production pass 2, A4): one real store round-trip, so an orchestrator
+    stops routing traffic to an API whose database is unreachable instead of letting every
+    request fail. `read_events` on a run id that cannot exist is a genuine query on every
+    adapter and returns nothing. On failure the body names the exception CLASS only; the
+    message — which may carry a host name or DSN — goes to the log. No token required:
+    probes carry none (auth.OPEN_PATHS)."""
+    try:
+        store.read_events("__ready__", after_seq=0)
+    except Exception as exc:  # noqa: BLE001 — a probe reports, it never raises
+        logger.warning("readiness: store unreachable: %s: %s", type(exc).__name__, exc)
+        return JSONResponse(status_code=503,
+                            content={"status": "unavailable", "store": type(exc).__name__})
+    return JSONResponse(content={"status": "ready"})
 
 
 @app.get("/executors")

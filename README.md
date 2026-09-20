@@ -145,7 +145,7 @@ printf '{"principals": [{"sha256": "%s", "kind": "human", "id": "amit"}]}\n' \
   "$(printf %s "$TOKEN" | shasum -a 256 | cut -d' ' -f1)" > tokens.json
 AGENTOS_AUTH=bearer AGENTOS_AUTH_TOKENS=tokens.json uvicorn dagentos.api.main:app
 
-# every request except /health and /metrics needs the token; decisions drop the body principal
+# every request except /health, /ready and /metrics needs the token; decisions drop the body principal
 curl -X POST localhost:8000/runs/{run_id}/approvals/{approval_id}/approve \
      -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
      -d '{"reason": "within budget"}'

@@ -94,6 +94,7 @@ the operator policy ceiling (#2) is scoped against this table.
 | Subprocess tool | Command exceeds its timeout | **closed** | The whole process group is killed | `tests/test_tool_agent.py::test_subprocess_timeout_kills_the_whole_process_group` |
 | Subprocess tool | Output over cap | **closed** | Refused | `tests/test_tool_agent.py::test_subprocess_stdout_over_cap_is_refused` |
 | HTTP tool egress | Metadata / private address | **closed** | Refused unless opted in | `tests/test_tool_agent.py::test_egress_guard_refuses_metadata_and_private_addresses_unless_opted_in` |
+| Readiness probe | Store unreachable when `GET /ready` is asked | **closed** | 503 naming the exception class only (the message goes to the log); `/health` stays 200 as liveness, so an orchestrator drains the instance without restarting it | `tests/test_readiness.py::test_ready_is_503_with_the_exception_class_only_when_the_store_is_down` |
 
 ## Deliberately fail-open, and why that is acceptable
 
