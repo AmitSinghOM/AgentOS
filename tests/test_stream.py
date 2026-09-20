@@ -13,6 +13,8 @@ Properties under test:
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import importlib
 import json
 import threading
@@ -132,17 +134,27 @@ def test_events_appended_by_another_engine_instance_appear_live(tmp_path):
     api_engine, worker = _engine(api_store), _engine(worker_store)
     run_id = api_engine.create_run("w")
 
-    seen: list[str] = []
-    gen = stream_run(api_store, run_id, after=0, config=FAST)
-    seen.append(next(gen))                     # run.started, appended by the API side
-    t = threading.Thread(target=worker.advance, args=(run_id,))
-    t.start()
-    seen.extend(gen)                           # polls until the worker's terminal event
-    t.join(5)
-    frames = _frames("".join(seen))
+    async def consume() -> list[str]:
+        seen: list[str] = []
+        gen = stream_run(api_store, run_id, after=0, config=FAST)
+        seen.append(await gen.__anext__())      # run.started, appended by the API side
+        t = threading.Thread(target=worker.advance, args=(run_id,))
+        t.start()
+        async for frame in gen:                 # polls until the worker's terminal event
+            seen.append(frame)
+        t.join(5)
+        return seen
+
+    frames = _frames("".join(asyncio.run(consume())))
     assert frames[0]["event"] == "run.started" and frames[-1]["event"] == "run.completed"
     assert [int(f["id"]) for f in frames] == list(range(1, len(frames) + 1))
     assert "step.completed" in {f["event"] for f in frames}
+
+
+def _drain(agen) -> str:
+    async def go() -> str:
+        return "".join([frame async for frame in agen])
+    return asyncio.run(go())
 
 
 def test_stream_is_bounded_by_max_seconds_and_sends_keepalives_while_idle():
@@ -151,12 +163,12 @@ def test_stream_is_bounded_by_max_seconds_and_sends_keepalives_while_idle():
     run_id = engine.create_run("w")              # only run.started; never advanced → idle
     clock = [0.0]
 
-    def tick(seconds):                           # fake sleep advances the fake clock
+    async def tick(seconds):                     # fake sleep advances the fake clock
         clock[0] += seconds
 
     cfg = StreamConfig(poll_seconds=1.0, keepalive_seconds=3.0, max_seconds=10.0)
-    out = "".join(stream_run(store, run_id, after=0, config=cfg,
-                             clock=lambda: clock[0], sleep=tick))
+    out = _drain(stream_run(store, run_id, after=0, config=cfg,
+                            clock=lambda: clock[0], sleep=tick))
     assert out.count(": keep-alive") == 3       # at t=3, 6, 9 while nothing happened
     assert out.rstrip().endswith("reconnect with Last-Event-ID")
     assert clock[0] == 10.0                      # closed exactly at the bound
@@ -169,16 +181,19 @@ def test_a_store_error_ends_the_stream_without_fabricating_events(caplog):
             super().__init__()
             self.calls = 0
 
-        def read_events(self, run_id, after_seq=0):
+        def read_events(self, run_id, after_seq=0, limit=None):
             self.calls += 1
             if self.calls > 1:
                 raise ConnectionError("db went away")
-            return super().read_events(run_id, after_seq)
+            return super().read_events(run_id, after_seq, limit)
+
+    async def no_sleep(seconds):
+        return None
 
     store = Flaky()
     run_id = _engine(store).create_run("w")
     with caplog.at_level("WARNING", logger="agentos.api.stream"):
-        out = "".join(stream_run(store, run_id, after=0, config=FAST, sleep=lambda s: None))
+        out = _drain(stream_run(store, run_id, after=0, config=FAST, sleep=no_sleep))
     assert [f["event"] for f in _frames(out)] == ["run.started"]
     assert "stream ended after seq 1" in caplog.text and "db went away" in caplog.text
 
@@ -198,3 +213,33 @@ def test_parse_after_and_env_validation(monkeypatch):
     monkeypatch.setenv("AGENTOS_STREAM_MAX_SECONDS", "0")
     with pytest.raises(RuntimeError, match="AGENTOS_STREAM_MAX_SECONDS"):
         StreamConfig.from_env()
+
+
+def test_an_idle_stream_holds_no_thread_pool_token_between_polls():
+    """Production pass 2, A2. Starlette runs a sync generator through
+    `iterate_in_threadpool`; the poll sleep sat inside `next()`, so every idle SSE client
+    held one of anyio's 40 default thread-pool tokens for its whole connection. Sample the
+    limiter from the event loop while the response is waiting for its next frame."""
+    import asyncio
+
+    import anyio
+    from starlette.responses import StreamingResponse
+
+    store = MemoryStore()
+    run_id = _engine(store).create_run("w")          # run.started only; idle afterwards
+    cfg = StreamConfig(poll_seconds=0.5, keepalive_seconds=1000, max_seconds=1000)
+
+    async def probe() -> int:
+        resp = StreamingResponse(stream_run(store, run_id, after=0, config=cfg))
+        it = resp.body_iterator.__aiter__()
+        first = await it.__anext__()
+        assert "run.started" in (first if isinstance(first, str) else first.decode())
+        pending = asyncio.ensure_future(it.__anext__())    # now mid-poll for ~0.5 s
+        await asyncio.sleep(0.15)
+        borrowed = anyio.to_thread.current_default_thread_limiter().borrowed_tokens
+        pending.cancel()
+        with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+            await pending
+        return borrowed
+
+    assert asyncio.run(probe()) == 0

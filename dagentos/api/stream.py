@@ -26,8 +26,10 @@ import json
 import logging
 import os
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+
+import anyio
 
 from dagentos.core.engine import TERMINAL
 from dagentos.core.ports import Store
@@ -90,19 +92,31 @@ def format_event(record: dict) -> str:
     return f"id: {record['seq']}\nevent: {record['event_type']}\ndata: {payload}\n\n"
 
 
-def stream_run(store: Store, run_id: str, *, after: int, config: StreamConfig,
-               clock: Callable[[], float] = time.monotonic,
-               sleep: Callable[[float], None] = time.sleep) -> Iterator[str]:
+async def stream_run(store: Store, run_id: str, *, after: int, config: StreamConfig,
+                     clock: Callable[[], float] = time.monotonic,
+                     sleep: Callable[[float], Awaitable[None]] = anyio.sleep,
+                     ) -> AsyncIterator[str]:
     """Yield SSE frames for `run_id` from seq `after`+1 until the run's terminal event or
     `config.max_seconds`, whichever first. A store error is logged and ends the stream —
-    the client reconnects with Last-Event-ID; nothing is ever fabricated."""
+    the client reconnects with Last-Event-ID; nothing is ever fabricated.
+
+    An async generator on purpose (production pass 2, A2): Starlette runs a sync generator
+    through `iterate_in_threadpool`, one thread-pool token per `next()`, and the poll sleep
+    sat inside `next()` — so every idle client held one of anyio's 40 default tokens for its
+    whole connection, and N open tabs left 40 - N threads for the rest of the (sync) API.
+    Here the wait is `await sleep(...)` on the event loop and only the store query borrows a
+    thread, for the query's duration."""
     started = clock()
     last_sent = started
     seq = after
+
+    async def read(after_seq: int) -> list:
+        return await anyio.to_thread.run_sync(store.read_events, run_id, after_seq)
+
     try:
         # Peek the anchor: a client resuming at or past the terminal event must be told
         # the run is over NOW, not after max_seconds. One extra row, only on the first read.
-        events = store.read_events(run_id, after_seq=max(after - 1, 0))
+        events = await read(max(after - 1, 0))
         if after > 0 and events and events[0].seq == after:
             if type(events[0]).event_type in _TERMINAL_TYPES:
                 return
@@ -122,8 +136,8 @@ def stream_run(store: Store, run_id: str, *, after: int, config: StreamConfig,
             if now - last_sent >= config.keepalive_seconds:
                 last_sent = now
                 yield ": keep-alive\n\n"
-            sleep(config.poll_seconds)
-            events = store.read_events(run_id, after_seq=seq)
+            await sleep(config.poll_seconds)
+            events = await read(seq)
     except Exception as exc:  # noqa: BLE001 — headers are sent; the only honest move is to end
         _log.warning("run %s: stream ended after seq %s (%s)", run_id, seq, exc)
         return
