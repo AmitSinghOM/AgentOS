@@ -24,7 +24,9 @@ function expiry(a: Approval): string {
 interface Outcome { id: number; key: string; text: string; ok: boolean }
 let outcomeSeq = 0;   // stable keys for a prepend-ordered list; index keys re-associate rows
 
-export function Inbox({ session }: { session: Session }) {
+/** `onPending` lets the shell's nav badge follow this list instead of polling on its own while
+ *  the inbox is on screen — one reader of /approvals, and the badge drops the moment a decision lands. */
+export function Inbox({ session, onPending }: { session: Session; onPending?: (n: number) => void }) {
   const [items, setItems] = useState<Approval[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reasons, setReasons] = useState<Record<string, string>>({});
@@ -35,11 +37,12 @@ export function Inbox({ session }: { session: Session }) {
     try {
       const res = await api.approvals();
       setItems(res.data);
+      onPending?.(res.data.length);
       setError(null);
     } catch (e) {
       setError(e instanceof ApiError ? `${e.status} ${e.detail}` : String(e));
     }
-  }, []);
+  }, [onPending]);
 
   useEffect(() => {
     void refresh();

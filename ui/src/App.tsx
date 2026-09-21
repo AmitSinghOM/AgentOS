@@ -6,14 +6,15 @@ import { api } from "./api";
 import { Link, useRoute } from "./router";
 import { ActingAs, TokenForm, Unreachable, useSession } from "./Session";
 
-const PENDING_POLL_MS = 5000;
+const PENDING_POLL_MS = 15_000;   // the badge is a hint, not the inbox; /approvals folds every non-terminal run
 
 /** The pending-approval count for the nav badge and the tab title. The inbox has its own
  *  poll for its list; this one is the shell's, so the badge is right on every page. */
-function usePendingCount(enabled: boolean): number | null {
+function usePendingCount(enabled: boolean, paused: boolean): [number | null, (n: number) => void] {
   const [count, setCount] = useState<number | null>(null);
   useEffect(() => {
     if (!enabled) { setCount(null); return; }
+    if (paused) return;                 // the inbox is mounted and reports the count itself
     let alive = true;
     const load = async () => {
       try {
@@ -26,8 +27,8 @@ function usePendingCount(enabled: boolean): number | null {
     void load();
     const t = window.setInterval(() => { void load(); }, PENDING_POLL_MS);
     return () => { alive = false; window.clearInterval(t); };
-  }, [enabled]);
-  return count;
+  }, [enabled, paused]);
+  return [count, setCount];
 }
 
 export function App() {
@@ -36,7 +37,7 @@ export function App() {
   // Only a 401 means "needs a token"; a network error or 5xx is the API not answering.
   const needsToken = !session.loading && session.me === null && !session.unreachable;
   const apiDown = !session.loading && session.me === null && session.unreachable;
-  const pending = usePendingCount(session.me !== null);
+  const [pending, setPending] = usePendingCount(session.me !== null, route.page === "inbox");
 
   useEffect(() => {
     const base = route.page === "inbox" ? "Approvals" : route.page === "runs" ? "Runs" : `Run ${route.id.slice(0, 8)}`;
@@ -74,7 +75,7 @@ export function App() {
         {needsToken && <TokenForm session={session} />}
         {session.me && (
           <>
-            {route.page === "inbox" && <Inbox session={session} />}
+            {route.page === "inbox" && <Inbox session={session} onPending={setPending} />}
             {route.page === "runs" && <RunList navigate={navigate} />}
             {route.page === "run" && <RunGraph runId={route.id} navigate={navigate} />}
           </>
