@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentos-provider-anthropic"
-version = "0.13.0"
+version = "0.14.0"
 description = "AgentOS executor for the Anthropic Messages API wire format (Anthropic, and Ollama's /v1/messages) over plain HTTP"
 readme = "README.md"
 requires-python = ">=3.11"
