@@ -104,6 +104,10 @@ class MemoryStore:
         out = [from_record(r) for r in self._events.get(run_id, []) if r["seq"] > after_seq]
         return out if limit is None else out[:limit]
 
+    def ping(self, timeout: float) -> None:
+        """In-process: nothing can be unreachable. Present so `/ready` has one call."""
+        return
+
     # snapshots (C15): a bounded optimization of the fold, never the source of truth.
     # Monotonic per run (see SqliteStore.put_snapshot).
     def put_snapshot(self, run_id: str, seq: int, last_hash: str | None, state: dict) -> None:

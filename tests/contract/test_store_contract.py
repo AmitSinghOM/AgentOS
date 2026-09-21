@@ -2,8 +2,10 @@
 one fixture below, nothing else (docs/DEVELOPMENT_STRUCTURE.md §5.2)."""
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
+import time
 
 import pytest
 
@@ -208,3 +210,34 @@ def test_event_chain_survives_the_adapter_round_trip(store):
     events = store.read_events(run.id)
     assert all(e.hash and event_hash(e) == e.hash for e in events)
     assert verify(events) == len(events) == run.integrity_verified >= 7
+
+
+def test_ping_is_a_bounded_round_trip_and_returns_quickly(store):
+    """Production pass 2 self-review (R1): `GET /ready` must answer inside a probe window.
+    `ping` performs one real round-trip and honours its timeout — on PostgreSQL the pool's
+    acquire wait, which otherwise defaults to 30 s (psycopg_pool `timeout`)."""
+    started = time.monotonic()
+    store.ping(timeout=2.0)                          # healthy: returns None, raises nothing
+    assert time.monotonic() - started < 2.0
+
+
+def test_postgres_ping_passes_the_timeout_to_the_pool_acquire():
+    """The bound is the point: a store that cannot hand out a connection must fail the probe
+    within `timeout`, not after the pool's 30 s default. Exercised against the pool API the
+    adapter really calls (a live outage cannot be staged in CI)."""
+    from dagentos.store.postgres import PostgresStore
+
+    class FakePool:
+        def __init__(self):
+            self.timeouts: list[float | None] = []
+
+        @contextlib.contextmanager
+        def connection(self, timeout=None):
+            self.timeouts.append(timeout)
+            raise TimeoutError("pool exhausted (simulated)")
+
+    store = PostgresStore.__new__(PostgresStore)
+    store._pool = FakePool()
+    with pytest.raises(TimeoutError):
+        store.ping(timeout=1.5)
+    assert store._pool.timeouts == [1.5]

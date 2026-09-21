@@ -42,6 +42,7 @@ the operator policy ceiling (#2) is scoped against this table.
 | Crash after effect commit | Worker dies after `step.completed`, before the run advances | **closed** | Replay skips the step; it does not execute twice | `tests/chaos/test_fault_points.py::test_crash_after_effect_commit_replays_without_reexecuting` |
 | Crash after run commit, before ack | Queue redelivers a finished run | **closed** | No-op | `tests/chaos/test_fault_points.py::test_crash_after_run_commit_before_ack_is_a_noop_on_redelivery` |
 | Real process kill | `kill -9` mid-run, restart | **closed** | Finishes without repeating the completed step | `tests/chaos/test_kill9_real_process.py::test_kill_9_after_step_2_then_restart_finishes_without_repeating_step_2` |
+| Worker process, SIGTERM / SIGINT | `docker stop`, a rollout, Ctrl-C while a step runs | **closed** | The delivery in flight finishes its `advance()`, releases its lease and acks; the loop exits 0. A second signal exits at once and the lease expires by TTL (the row above) | `tests/test_worker_shutdown.py::test_sigterm_mid_step_finishes_the_delivery_releases_the_lease_and_returns` |
 | Two workers, one run | Both hold the run | **closed** | Exactly one advancement per step (fence + expected seq) | `tests/chaos/test_fault_points.py::test_two_workers_one_run_exactly_one_advancement_per_step` |
 | Lease lost mid-step | `heartbeat()` returns False during `progress()` | **closed** | Stops without writing a completion; the new holder finishes | `tests/test_governor.py::test_lease_lost_during_progress_stops_without_writing_completion` |
 | Lease expiry under network fault | Stale worker writes after takeover (Toxiproxy) | **closed** | Fenced at the store; its write is rejected, not merged | `tests/chaos/network/test_lease_expiry_race.py::test_lease_expiry_race_stale_worker_is_fenced_not_merged` |
@@ -94,6 +95,7 @@ the operator policy ceiling (#2) is scoped against this table.
 | Subprocess tool | Command exceeds its timeout | **closed** | The whole process group is killed | `tests/test_tool_agent.py::test_subprocess_timeout_kills_the_whole_process_group` |
 | Subprocess tool | Output over cap | **closed** | Refused | `tests/test_tool_agent.py::test_subprocess_stdout_over_cap_is_refused` |
 | HTTP tool egress | Metadata / private address | **closed** | Refused unless opted in | `tests/test_tool_agent.py::test_egress_guard_refuses_metadata_and_private_addresses_unless_opted_in` |
+| Readiness probe | Store unreachable when `GET /ready` is asked | **closed** | 503 naming the exception class only (the message goes to the log); `/health` stays 200 as liveness, so an orchestrator drains the instance without restarting it | `tests/test_readiness.py::test_ready_is_503_with_the_exception_class_only_when_the_store_is_down` |
 
 ## Deliberately fail-open, and why that is acceptable
 

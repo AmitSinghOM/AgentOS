@@ -3,13 +3,19 @@
 Shares store configuration with the API (AGENTOS_STORE / AGENTOS_SQLITE_PATH /
 AGENTOS_PG_DSN). AGENTOS_FAULT=<point>[:<step_id>] installs a hard-exit fault injector;
 this is how the real kill -9 chaos test crashes a worker at a chosen boundary.
+
+Shutdown: SIGTERM or SIGINT finishes the delivery in flight (its `advance()` runs to the next
+idle point, releases the lease, acks) and exits 0; a second signal exits immediately and the
+lease expires by TTL. See `install_stop_signal` and FAIL_MODES "Worker process, SIGTERM".
 """
 from __future__ import annotations
 
 import argparse
 import logging
 import os
+import signal
 import sys
+from collections.abc import Callable
 
 from dagentos.agents.echo import EchoExecutor
 from dagentos.agents.tool import ToolExecutor
@@ -22,6 +28,32 @@ from dagentos.observability import build_observers, store_resolver
 from dagentos.plugins import discover_executors, store_pricing_snapshots
 from dagentos.store.factory import store_from_env
 from dagentos.worker import Worker
+
+log = logging.getLogger("agentos.worker")
+
+
+def install_stop_signal(signals: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT),
+                        ) -> Callable[[], bool]:
+    """Graceful shutdown (production pass 2, A1). `docker stop`, a Kubernetes rollout and
+    Ctrl-C all deliver one of these; the worker is PID 1 in the image, so Python's default
+    disposition would kill it mid-step and leave the run leased-but-idle until the lease TTL
+    expired. The first signal sets the flag `run_forever(stop=...)` polls between deliveries:
+    the delivery in flight finishes its `advance()`, releases its lease and acks, then the
+    loop returns and the process exits 0. A second signal exits immediately with 128+signum
+    (the lease then expires by TTL, exactly as before). Must be called from the main thread."""
+    state = {"stop": False}
+
+    def handler(signum: int, frame) -> None:
+        name = signal.Signals(signum).name
+        if state["stop"]:
+            log.warning("%s again: exiting now; the current run's lease expires by TTL", name)
+            raise SystemExit(128 + signum)
+        state["stop"] = True
+        log.info("%s received: finishing the current delivery, then exiting", name)
+
+    for sig in signals:
+        signal.signal(sig, handler)
+    return lambda: state["stop"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -69,7 +101,12 @@ def main(argv: list[str] | None = None) -> int:
         handled = worker.run_once(timeout=2.0)
         print(handled or "", end="")
         return 0
-    worker.run_forever()
+    stop = install_stop_signal()
+    log.info("worker started: holder %s, lease ttl %.0fs; SIGTERM/SIGINT stop after the "
+             "current delivery", worker.holder, worker.lease_ttl)
+    worker.run_forever(stop=stop)
+    log.info("worker stopped cleanly (%d run(s) processed, %d loop error(s))",
+             worker.processed, worker.errors)
     return 0
 
 

@@ -1,7 +1,7 @@
 """Phase 8 #1 — the credential decides who the caller is; the body may not.
 
 Threat model, one test each (docs/TRUST_BOUNDARY.md §1a):
-  * anonymous caller in bearer mode → 401 on every path except /health and /metrics
+  * anonymous caller in bearer mode → 401 on every path except /health, /ready and /metrics
   * unknown token → 401, logged with the hash prefix, never the token
   * a body `principal` in bearer mode → 422 (rejected, not silently replaced)
   * the recorded Principal on approval.granted / run.* events is the TOKEN's, with an attestation
@@ -299,8 +299,8 @@ def test_every_route_is_covered_by_the_middleware_not_a_dependency(monkeypatch, 
     assert c.get("/added-later", headers=_bearer(AGENT_TOKEN)).json() == {"ok": True}
 
 
-def test_open_paths_are_exactly_health_and_metrics():
-    assert auth_mod.OPEN_PATHS == frozenset({"/health", "/metrics"})
+def test_open_paths_are_exactly_the_probes_and_metrics():
+    assert auth_mod.OPEN_PATHS == frozenset({"/health", "/ready", "/metrics"})
     assert auth_mod.DEFINITION_PATHS == frozenset({"/agents", "/workflows"})
 
 

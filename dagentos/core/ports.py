@@ -56,6 +56,11 @@ class Store(Protocol):
         """Events with seq > after_seq in seq order; at most `limit` when given. The fold
         reads unbounded; `GET /runs/{id}/events` pages with it."""
         ...
+    def ping(self, timeout: float) -> None:
+        """One real round-trip to the backing store, or raise. Must give up within `timeout`
+        seconds — a readiness probe has a window and a pool's default acquire wait (30 s for
+        psycopg_pool) is longer than any probe. Reads nothing; writes nothing."""
+        ...
     def list_run_ids(self) -> list[str]:
         """Every run id, oldest first (creation order). `GET /runs` walks it from the end
         and stops when its page is full, so the order is part of the contract."""

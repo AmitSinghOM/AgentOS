@@ -9,7 +9,7 @@ Two modes, selected by `AGENTOS_AUTH`:
 
   asserted   (default) the body's `principal` is recorded as given. Nothing is verified.
              One WARNING at startup says so. For the quickstart and local development.
-  bearer     every request except `/health` and `/metrics` must carry
+  bearer     every request except `/health`, `/ready` and `/metrics` must carry
              `Authorization: Bearer <token>`. The token resolves to a `Principal` through
              the operator's token file (`AGENTOS_AUTH_TOKENS`); a body `principal` is
              rejected 422. Unknown or missing token → 401. An `agent`-kind principal may
@@ -56,7 +56,7 @@ logger = logging.getLogger("agentos.api.auth")
 
 #: Paths that never require a credential: liveness probes and the metrics scraper. Neither
 #: returns run data.
-OPEN_PATHS: frozenset[str] = frozenset({"/health", "/metrics"})
+OPEN_PATHS: frozenset[str] = frozenset({"/health", "/ready", "/metrics"})
 
 #: Routes an `agent`-kind principal may not call: definitions are operator-owned
 #: (docs/TRUST_BOUNDARY.md — declared effects are what the gate trusts).

@@ -145,7 +145,7 @@ printf '{"principals": [{"sha256": "%s", "kind": "human", "id": "amit"}]}\n' \
   "$(printf %s "$TOKEN" | shasum -a 256 | cut -d' ' -f1)" > tokens.json
 AGENTOS_AUTH=bearer AGENTOS_AUTH_TOKENS=tokens.json uvicorn dagentos.api.main:app
 
-# every request except /health and /metrics needs the token; decisions drop the body principal
+# every request except /health, /ready and /metrics needs the token; decisions drop the body principal
 curl -X POST localhost:8000/runs/{run_id}/approvals/{approval_id}/approve \
      -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
      -d '{"reason": "within budget"}'
@@ -275,6 +275,14 @@ Each phase produces an article on a distributed-systems problem solved here:
 - The Stream Is the Log
 
 (See [`docs/blog/`](./docs/blog).)
+
+## Security
+
+Report vulnerabilities privately through GitHub's Security Advisory form; scope, supported
+versions and response times are in [`SECURITY.md`](SECURITY.md). Dependabot watches every
+distribution, the UI and the workflow actions; CI runs `pip-audit --strict` and
+`npm audit --audit-level=high` on every pull request. Release artifacts carry build
+provenance (`gh attestation verify`).
 
 ## License
 
