@@ -144,7 +144,7 @@ describe("cost panel status (polish)", () => {
     // table on the same page: the table derived a status from events instead of reading the fold.
     const suspended = base({ status: "suspended", attempts: { a: 1 }, last_seq: 4, total_cost: "0.10",
       steps: [{ node_id: "a", attempt: 1, cost: { amount: "0.10", currency: "USD" } }],
-      approvals: { ap1: { approval_id: "ap1", step_id: "b", status: "pending", kind: "effect", effect_classes: ["spend"] } } });
+      approvals: { ap1: { approval_id: "ap1", step_id: "b", status: "pending", kind: "effect", effect_classes: ["spend"], requested_at: "2026-09-20T00:00:04Z", expires_at: null } } });
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === "/me") return json(200, { mode: "bearer", principal: { kind: "human", id: "amit" } });

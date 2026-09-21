@@ -3,12 +3,21 @@
 // derivation of state, with a golden corpus); the stream only tells the page when to refetch.
 
 import * as dagre from "@dagrejs/dagre";
+import type { Approval } from "./api";
 
 export interface WorkflowNodeDef { id: string; agent: string; depends_on: string[] }
-export interface WorkflowDef { name: string; version: number; nodes: WorkflowNodeDef[]; max_parallelism?: number }
+/** The budget the core enforces (models.Budget); the UI only reads it to explain a gate. */
+export interface BudgetDef {
+  allowed_effect_classes?: string[]; approval_required_for?: string[];
+  allow_agent_approval?: boolean; approval_timeout_seconds?: number | null;
+}
+export interface WorkflowDef { name: string; version: number; nodes: WorkflowNodeDef[]; max_parallelism?: number; budget?: BudgetDef }
 
-export interface StepRecord { node_id: string; attempt: number; cost: { amount: string; currency: string }; finished_at?: string }
-export interface RunApproval { approval_id: string; step_id: string | null; status: string; kind: string; effect_classes: string[] }
+export interface StepRecord { node_id: string; attempt: number; cost: { amount: string; currency: string }; finished_at?: string;
+  /** Hydrated output for callers (GET /runs/{id}); what a downstream step receives as its input. */
+  output?: Record<string, unknown> }
+/** One approval as the fold carries it — same shape as the inbox's `Approval` minus run_id/workflow. */
+export interface RunApproval extends Omit<Approval, "run_id" | "workflow"> {}
 export interface RunState {
   id: string;
   workflow: string;
@@ -26,6 +35,8 @@ export interface RunState {
   cost_ceiling?: string | null;
   last_seq: number;
   started_at: string;
+  /** Run inputs, hydrated for callers. */
+  inputs?: Record<string, unknown>;
   policy_sha256?: string | null;
   sealed_through?: number | null;
   error?: string | null;
