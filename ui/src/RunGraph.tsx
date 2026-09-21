@@ -341,9 +341,12 @@ export function RunGraph({ runId, navigate, session }: { runId: string; navigate
 
   const shown = at === null ? run : atRun;      // live fold, or the SERVER's fold through `at`
 
-  // Approvals as the fold carries them, with run_id/workflow re-attached for the shared card.
-  const approvals: Approval[] = Object.values(run.approvals).map((a) => ({ ...a, run_id: run.id, workflow: run.workflow }));
+  // Approvals as the SHOWN fold carries them (live, or the server's fold through `at`), with
+  // run_id/workflow re-attached for the shared card. Decisions are offered only on the live fold:
+  // a historical fold's "pending" may be decided already, and the card would disagree with the API.
+  const approvals: Approval[] = Object.values((shown ?? run).approvals).map((a) => ({ ...a, run_id: run.id, workflow: run.workflow }));
   const pendingApprovals = approvals.filter((a) => a.status === "pending");
+  const decidable = at === null;
   const decidedApprovals = approvals.filter((a) => a.status !== "pending")
     .sort((x, y) => (x.decided_at ?? "").localeCompare(y.decided_at ?? ""));
   const versionMismatch = def !== null && def.version !== run.workflow_version;
@@ -390,13 +393,20 @@ export function RunGraph({ runId, navigate, session }: { runId: string; navigate
           <div className="panel__head">
             <h3 id="approvals-heading">Approvals{pendingApprovals.length > 0 ? <span className="count">{pendingApprovals.length}</span> : null}</h3>
             <p className="panel__sub">
-              {pendingApprovals.length > 0
+              {!decidable
+                ? <>Gates as the server's fold through seq <strong>{at}</strong> records them; decide from the live view. </>
+                : pendingApprovals.length > 0
                 ? "The run is suspended until each pending gate is decided; decide here or in the inbox. "
                 : "Every gate this run raised, as the log records it. "}
               Decisions are recorded with who decided and why.
             </p>
           </div>
-          {pendingApprovals.length > 0 && (
+          {!decidable && pendingApprovals.length > 0 && (
+            <ul className="approval-records" aria-label="pending approvals at this seq">
+              {pendingApprovals.map((a) => <ApprovalRecord key={a.approval_id} a={a} />)}
+            </ul>
+          )}
+          {decidable && pendingApprovals.length > 0 && (
             <ul className="inbox inbox--inline">
               {pendingApprovals.map((a) => (
                 <ApprovalCard

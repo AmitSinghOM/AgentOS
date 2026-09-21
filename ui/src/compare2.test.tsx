@@ -56,12 +56,14 @@ let state: RunState;
 let me: unknown;
 let pending: Approval[];
 let onDecide: (url: string) => Response;
+let atFold: Record<number, RunState>;
 
 beforeEach(() => {
   seen = [];
   me = { mode: "bearer", principal: { kind: "human", id: "amit" } };
   state = SUSPENDED;
   pending = [PENDING];
+  atFold = {};
   onDecide = () => { pending = []; state = base({ status: "running" }); return json(202, state); };
   window.sessionStorage.setItem("agentos.token", "tok");
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -72,6 +74,7 @@ beforeEach(() => {
     if (url === "/approvals") return json(200, { data: pending });
     if (url.startsWith("/runs?")) return json(200, { data: [] });
     if (url === "/runs/run1") return json(200, state);
+    if (url.startsWith("/runs/run1?at=")) { const k = Number(url.split("=")[1]); return atFold[k] ? json(200, atFold[k]) : json(422, { detail: `no fold at ${k}` }); }
     if (url.startsWith("/runs/run1/events")) return json(200, { data: EVENTS, last_seq: 4, has_more: false });
     if (url === "/workflows/payments") return json(200, DEF);
     if (url === "/runs/run1/stream") return new Response(new ReadableStream({ start(c) { c.close(); } }), { status: 200 });
@@ -112,6 +115,20 @@ describe("A1 approvals on the run page", () => {
     expect(row).toHaveTextContent(/looks right/);
     expect(row.querySelector("time")).toHaveAttribute("dateTime", "2026-09-20T00:05:00Z");
     expect(within(panel).queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+  });
+
+  it("offers no decision against a time-travelled fold (R1): the panel follows the seek", async () => {
+    window.history.pushState(null, "", "/ui/runs/run1");
+    // the SERVER's fold through seq 3: before the gate was requested, so no approvals at all
+    atFold = { 3: base({ status: "running", attempts: { a: 1 }, steps: SUSPENDED.steps }) };
+    render(<App />);
+    await screen.findByRole("region", { name: /approvals/i });
+    await userEvent.click(screen.getByRole("button", { name: "view state after seq 3" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument());
+    expect(screen.queryByRole("region", { name: /approvals/i })).not.toBeInTheDocument();   // that fold has none
+    // back to live: the decision card returns
+    await userEvent.click(screen.getByRole("button", { name: /back to live/i }));
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeInTheDocument();
   });
 });
 

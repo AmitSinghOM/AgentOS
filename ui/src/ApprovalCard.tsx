@@ -259,9 +259,13 @@ export function ApprovalRecord({ a }: { a: Approval }) {
     <li className={`approval-record approval-record--${a.status}`}>
       <span className={`status status--approval-${a.status}`}>{a.status}</span>
       <span className="approval-record__what">{describeApproval(a)}</span>
-      <span className="approval-record__who">by <code className="mono">{who}</code></span>
-      {a.decision_reason ? <span className="approval-record__why">“{a.decision_reason}”</span> : <span className="muted">no reason given</span>}
-      {a.decided_at && <time className="muted" dateTime={a.decided_at} title={a.decided_at}>{fmtDateTime(a.decided_at)} · {fmtAgo(a.decided_at)}</time>}
+      {a.status === "pending" ? <span className="muted">awaiting a decision at this point in the log</span> : (
+        <>
+          <span className="approval-record__who">by <code className="mono">{who}</code></span>
+          {a.decision_reason ? <span className="approval-record__why">“{a.decision_reason}”</span> : <span className="muted">no reason given</span>}
+          {a.decided_at && <time className="muted" dateTime={a.decided_at} title={a.decided_at}>{fmtDateTime(a.decided_at)} · {fmtAgo(a.decided_at)}</time>}
+        </>
+      )}
     </li>
   );
 }
