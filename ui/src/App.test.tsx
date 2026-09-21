@@ -99,7 +99,8 @@ describe("bearer mode", () => {
     bearerServer({ token: "s3cret" });
     render(<App />);
     const status = await screen.findByRole("status");
-    expect(status).toHaveTextContent("Acting as amit (human, token:sha256:abcdef123456) — verified by the API");
+    // The identity bar names the principal, its kind, the attestation, and that the API verified it.
+    expect(status).toHaveTextContent(/Acting as\s*amit\s*human · token:sha256:abcdef123456 · verified by the API/);
     expect(screen.queryByText(/unverified/i)).not.toBeInTheDocument();
     const item = await screen.findByRole("listitem");
     expect(item).toHaveTextContent("payments");

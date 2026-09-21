@@ -32,8 +32,11 @@ export function Timeline({ events, lastSeq, at, onSeek }: {
 
   const shown = pending ?? at ?? lastSeq;
   return (
-    <section aria-labelledby="timeline-heading" className="timeline">
-      <h3 id="timeline-heading">Timeline</h3>
+    <section aria-labelledby="timeline-heading" className="timeline panel">
+      <div className="panel__head">
+        <h3 id="timeline-heading">Timeline</h3>
+        <p className="panel__sub">Every event in the log. Drag the scrubber or click a seq to see the run as the server folds it up to that point.</p>
+      </div>
       <div className="timeline__controls">
         <label>
           Viewing seq{" "}
@@ -45,7 +48,7 @@ export function Timeline({ events, lastSeq, at, onSeek }: {
         {at !== null && (
           <>
             {" "}<span role="status" className="time-travel">time travel — the graph shows the run as it was right after seq {at}</span>
-            {" "}<button type="button" onClick={() => seekNow(null)}>Back to live</button>
+            {" "}<button type="button" className="primary" onClick={() => seekNow(null)}>Back to live</button>
           </>
         )}
       </div>

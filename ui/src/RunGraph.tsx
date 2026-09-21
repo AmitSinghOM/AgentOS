@@ -157,10 +157,14 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
 
   return (
     <section aria-labelledby="run-heading" className="run">
-      <header className="run__head">
+      <header className="run__head page-head page-head--stack">
+        <nav aria-label="breadcrumb" className="crumbs">
+          <Link to={{ page: "runs" }} navigate={navigate}>Runs</Link>
+          <span className="crumbs__sep" aria-hidden="true">/</span>
+          <span>{run.workflow}</span>
+        </nav>
         <h2 id="run-heading">
-          <Link to={{ page: "runs" }} navigate={navigate}>Runs</Link> / {run.workflow}{" "}
-          <code>{run.id.slice(0, 8)}</code>
+          {run.workflow} <code className="mono run__id" title={run.id}>{run.id.slice(0, 8)}</code>
         </h2>
         <p className="run__meta">
           <span className={`status status--${run.status}`}>{run.status}</span>
@@ -189,23 +193,38 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
       </header>
 
       {atError && <p role="alert" className="error">Could not load state at seq {at}: {atError}</p>}
-      {def && shown && <Graph def={def} run={shown} />}
+      {def && shown && (
+        <section className="panel" aria-labelledby="graph-heading">
+          <div className="panel__head">
+            <h3 id="graph-heading">Graph</h3>
+            <p className="panel__sub">
+              {at !== null ? <>State right after seq <strong>{at}</strong> — the server's fold of that prefix.</> : "Node states from the live fold; edges follow the workflow definition."}
+            </p>
+          </div>
+          <Graph def={def} run={shown} />
+        </section>
+      )}
       {def && shown && <CostPanel def={def} run={shown} events={at !== null ? events.filter((e) => e.seq <= at) : events} />}
       {def && !shown && !atError && <p role="status" aria-label="seek state">Loading the state at seq {at}…</p>}
       <Timeline events={events} lastSeq={run.last_seq} at={at} onSeek={setAt} />
 
-      <h3>Live frames</h3>
-      <ol className="ticker" aria-label="event ticker" reversed>
-        {ticker.map((t) => (
-          <li key={t.seq}>
-            <code className="seq">{t.seq}</code>{" "}
-            <span className={`dot dot--${eventFamily(t.type)}`} aria-hidden="true" />
-            <code>{t.type}</code>{t.step ? <> <span className="chip">{t.step}</span></> : null}{" "}
-            <span className="muted num" title={t.at}>{fmtClock(t.at)}</span>
-          </li>
-        ))}
-        {ticker.length === 0 && <li className="muted">waiting for the stream…</li>}
-      </ol>
+      <section className="panel" aria-labelledby="ticker-heading">
+        <div className="panel__head">
+          <h3 id="ticker-heading">Live frames</h3>
+          <p className="panel__sub">Newest first, straight from the event stream; the timeline above is the durable log.</p>
+        </div>
+        <ol className="ticker" aria-label="event ticker" reversed>
+          {ticker.map((t) => (
+            <li key={t.seq}>
+              <code className="seq">{t.seq}</code>{" "}
+              <span className={`dot dot--${eventFamily(t.type)}`} aria-hidden="true" />
+              <code>{t.type}</code>{t.step ? <> <span className="chip">{t.step}</span></> : null}{" "}
+              <span className="muted num" title={t.at}>{fmtClock(t.at)}</span>
+            </li>
+          ))}
+          {ticker.length === 0 && <li className="muted">waiting for the stream…</li>}
+        </ol>
+      </section>
     </section>
   );
 }

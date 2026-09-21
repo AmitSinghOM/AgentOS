@@ -83,12 +83,16 @@ export function useSession(): Session {
 
 export function Unreachable({ session }: { session: Session }) {
   return (
-    <div className="unreachable">
+    <div className="card card--center unreachable">
+      <h2>Cannot reach the API</h2>
       <p role="alert" className="error">
-        The API is not answering: {session.error ?? "unknown error"}. Nothing here is a sign-in
-        problem — check that the API process is running and reachable at this origin.
+        The API is not answering: {session.error ?? "unknown error"}
       </p>
-      <button type="button" onClick={() => void session.reload()}>Retry</button>
+      <p className="hint">
+        Nothing here is a sign-in problem — check that the API process is running and reachable at
+        this origin.
+      </p>
+      <button type="button" className="primary" onClick={() => void session.reload()}>Retry</button>
     </div>
   );
 }
@@ -98,28 +102,33 @@ export function ActingAs({ session }: { session: Session }) {
   if (!me) return null;
   if (me.mode === "bearer" && actingAs) {
     return (
-      <p className="acting" role="status">
-        Acting as <strong>{actingAs.id}</strong> ({actingAs.kind}
-        {actingAs.attestation ? `, ${actingAs.attestation}` : ""}) — verified by the API.
-        {" "}<button type="button" onClick={clearToken}>Forget token</button>
-      </p>
+      <div className="identity" role="status">
+        <span className="identity__label">Acting as</span>
+        <strong className="identity__who">{actingAs.id}</strong>
+        <span className="identity__kind muted">{actingAs.kind}{actingAs.attestation ? ` · ${actingAs.attestation}` : ""} · verified by the API</span>
+        <button type="button" className="ghost" onClick={clearToken}>Forget token</button>
+      </div>
     );
   }
   return (
-    <p className="acting acting--unverified" role="status">
-      <strong>Unverified.</strong> This API runs with <code>AGENTOS_AUTH=asserted</code>: the
-      principal below is recorded exactly as typed and nothing checks it.
-      {" "}
-      <label>
-        Record decisions as{" "}
-        <input
-          aria-label="principal id (unverified)"
-          value={actingAs?.id ?? ""}
-          onChange={(e) => setTypedPrincipalId(e.target.value)}
-          placeholder="your id"
-        />
-      </label>
-    </p>
+    <div className="identity identity--unverified" role="status">
+      <span className="identity__label"><strong>Unverified.</strong> Record decisions as</span>
+      <input
+        aria-label="principal id (unverified)"
+        value={actingAs?.id ?? ""}
+        onChange={(e) => setTypedPrincipalId(e.target.value)}
+        placeholder="your id"
+        autoComplete="off"
+      />
+      <details className="identity__why">
+        <summary aria-label="why unverified">why?</summary>
+        <p>
+          This API runs with <code>AGENTOS_AUTH=asserted</code>: the principal is recorded in the
+          event log exactly as typed here and nothing checks it. Run the API with bearer tokens
+          (<code>AGENTOS_AUTH=bearer</code>) to have the API verify who decides.
+        </p>
+      </details>
+    </div>
   );
 }
 
@@ -127,11 +136,13 @@ export function TokenForm({ session }: { session: Session }) {
   const [value, setValue] = useState("");
   return (
     <form
-      className="token-form"
+      className="card card--center token-form"
       onSubmit={(e) => { e.preventDefault(); void session.submitToken(value); setValue(""); }}
     >
+      <h2>Sign in</h2>
+      <p className="hint">This API verifies operators by bearer token (<code>AGENTOS_AUTH=bearer</code>). Decisions are recorded under the token's principal.</p>
       <label>
-        Bearer token{" "}
+        Bearer token
         <input
           type="password"
           autoComplete="off"
@@ -140,7 +151,7 @@ export function TokenForm({ session }: { session: Session }) {
           onChange={(e) => setValue(e.target.value)}
         />
       </label>
-      <button type="submit">Sign in</button>
+      <button type="submit" className="primary">Sign in</button>
       <p className="hint">Kept in this tab only (sessionStorage); never sent anywhere but this origin.</p>
       {session.error && <p role="alert" className="error">{session.error}</p>}
     </form>

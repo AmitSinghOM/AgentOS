@@ -24,14 +24,23 @@ export function RunList({ navigate }: { navigate: (r: Route) => void }) {
 
   return (
     <section aria-labelledby="runs-heading">
-      <h2 id="runs-heading">Runs</h2>
+      <div className="page-head">
+        <div>
+          <h2 id="runs-heading">Runs{runs && runs.length > 0 ? <span className="count">{runs.length}</span> : null}</h2>
+          <p className="page-head__sub">Newest first. Open a run for its graph, cost and latency, and the event timeline with time travel.</p>
+        </div>
+      </div>
       {error && <p role="alert" className="error">Could not load runs: {error}</p>}
-      {runs === null && !error && <p>Loading…</p>}
+      {runs === null && !error && <p className="muted">Loading…</p>}
       {runs !== null && runs.length === 0 && (
-        <p className="empty">No runs yet. Start one with <code>POST /workflows/{"{name}"}/runs</code> or
-          {" "}<code>python scripts/quickstart_llm.py</code>; it will appear here as soon as <code>run.started</code> is in the log.</p>
+        <div className="empty empty--calm">
+          <p><strong>No runs yet.</strong></p>
+          <p className="hint">Start one with <code>POST /workflows/{"{name}"}/runs</code> or
+            {" "}<code>python scripts/quickstart_llm.py</code>; it appears here as soon as <code>run.started</code> is in the log.</p>
+        </div>
       )}
       {runs && runs.length > 0 && (
+        <div className="card card--table">
         <table className="runs">
           <thead>
             <tr><th>Run</th><th>Workflow</th><th>Status</th><th className="num">Cost</th><th className="num">Events</th><th className="num">Started</th></tr>
@@ -54,6 +63,7 @@ export function RunList({ navigate }: { navigate: (r: Route) => void }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </section>
   );
