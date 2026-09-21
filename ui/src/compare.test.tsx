@@ -120,6 +120,40 @@ describe("A1 run controls", () => {
 });
 
 describe("A2 node selection", () => {
+  it("mirrors the engine's pause rule: a suspended run can be paused, a paused one cannot (R1)", async () => {
+    window.history.pushState(null, "", "/ui/runs/run1");
+    state = base({ status: "suspended" });
+    render(<App />);
+    const controls = await screen.findByRole("group", { name: "run controls" });
+    expect(within(controls).getByRole("button", { name: "Pause" })).toBeEnabled();
+    expect(within(controls).getByRole("button", { name: "Cancel run" })).toBeEnabled();
+  });
+
+  it("does not offer retry against a time-travelled fold (R3)", async () => {
+    window.history.pushState(null, "", "/ui/runs/run1");
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      seen.push({ url, method: init?.method ?? "GET", body: undefined });
+      if (url === "/me") return json(200, me);
+      if (url === "/approvals") return json(200, { data: [] });
+      if (url === "/runs/run1") return json(200, state);
+      if (url === "/runs/run1?at=5") return json(200, state);        // the historical fold also says b is dead-lettered
+      if (url.startsWith("/runs/run1/events")) return json(200, { data: EVENTS, last_seq: 5, has_more: false });
+      if (url === "/workflows/w") return json(200, DEF);
+      if (url === "/runs/run1/stream") return new Response(new ReadableStream({ start(c) { c.close(); } }), { status: 200 });
+      return json(404, { detail: `no route ${url}` });
+    });
+    render(<App />);
+    await screen.findByRole("group", { name: /run graph/ });
+    await userEvent.click(screen.getByRole("group", { name: /^b:/ }));
+    expect(within(await screen.findByRole("region", { name: "step b" })).getByRole("button", { name: "Retry step" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "view state after seq 5" }));
+    await waitFor(() => expect(screen.getByText(/time travel/)).toBeInTheDocument());
+    expect(within(screen.getByRole("region", { name: "step b" })).queryByRole("button", { name: "Retry step" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Back to live" }));
+    await waitFor(() => expect(within(screen.getByRole("region", { name: "step b" })).getByRole("button", { name: "Retry step" })).toBeInTheDocument());
+  });
+
   it("shows the step's detail, narrows the timeline to it, and offers retry only when the fold allows", async () => {
     window.history.pushState(null, "", "/ui/runs/run1");
     control = (url) => url === "/runs/run1/steps/b/retry" ? json(202, state) : null;

@@ -19,11 +19,12 @@ const TICKER_MAX = 40;
 const COPIED_MS = 1500;
 
 /** Which verbs the fold permits, mirroring the engine's 409 rules (C5) so a disabled button and a
- *  409 never disagree: cancel unless terminal; pause while it can still advance; resume only paused. */
+ *  409 never disagree: cancel unless terminal (request_cancel); pause unless terminal or already
+ *  paused (request_pause — a suspended run CAN be paused); resume only paused (resume). */
 export function allowedControls(status: string): { cancel: boolean; pause: boolean; resume: boolean } {
   return {
     cancel: !TERMINAL.has(status),
-    pause: status === "running" || status === "pending",
+    pause: !TERMINAL.has(status) && status !== "paused",
     resume: status === "paused",
   };
 }
@@ -62,7 +63,7 @@ export function RunControls({ run, session, onDone }: { run: RunState; session: 
     <div className="controls" role="group" aria-label="run controls">
       <div className="controls__row">
         <button type="button" className="ghost" disabled={!canAct || !allowed.pause || busy !== null}
-                title={allowed.pause ? "finish the current wave, then hold the run" : "only a running or pending run can be paused"}
+                title={allowed.pause ? "finish the current wave, then hold the run" : "a terminal or already-paused run cannot be paused"}
                 onClick={() => void act("pause")}>{busy === "pause" ? "Pausing…" : "Pause"}</button>
         <button type="button" className={allowed.resume ? "primary" : undefined} disabled={!canAct || !allowed.resume || busy !== null}
                 title={allowed.resume ? "re-enqueue the paused run" : "only a paused run can be resumed"}
@@ -101,8 +102,11 @@ const RETRYABLE = new Set(["failed", "dead_lettered"]);
 
 /** The selected node's facts (Argo's node panel, Hatchet's step detail), all from the fold plus
  *  the step's own events; retry only when the fold says the API will accept it (C11). */
-export function StepDetail({ node, view, run, events, session, onClose, onDone }: {
+export function StepDetail({ node, view, run, events, session, live, onClose, onDone }: {
   node: WorkflowNodeDef; view: NodeView; run: RunState; events: EventRecord[]; session: Session;
+  /** False while time-travelling: the facts are the historical fold, and retry acts on the LIVE run,
+   *  so it is not offered against a state that may no longer hold. */
+  live: boolean;
   onClose: () => void; onDone: () => void;
 }) {
   const [reason, setReason] = useState("");
@@ -148,7 +152,7 @@ export function StepDetail({ node, view, run, events, session, onClose, onDone }
           </div>
         )}
       </dl>
-      {RETRYABLE.has(view.status) && (
+      {live && RETRYABLE.has(view.status) && (
         <form className="confirm" onSubmit={(e) => { e.preventDefault(); void retry(); }}>
           <label className="confirm__reason">Reason
             <input type="text" aria-label="retry reason" value={reason} placeholder="optional — recorded as step.retry_requested"
@@ -396,10 +400,10 @@ export function RunGraph({ runId, navigate, session }: { runId: string; navigate
       {def && shown && <CostPanel def={def} run={shown} events={at !== null ? events.filter((e) => e.seq <= at) : events} selected={selected} onSelect={toggleSelect} />}
       {def && !shown && !atError && <p role="status" aria-label="seek state">Loading the state at seq {at}…</p>}
       {selectedNode && shown && (
-        <StepDetail node={selectedNode} view={nodeState(shown, selectedNode)} run={shown} events={events} session={session}
+        <StepDetail node={selectedNode} view={nodeState(shown, selectedNode)} run={shown} events={at !== null ? events.filter((e) => e.seq <= at) : events} session={session} live={at === null}
                     onClose={() => setSelected(null)} onDone={() => { void refetch(); }} />
       )}
-      <Timeline events={timelineEvents} lastSeq={run.last_seq} at={at} onSeek={setAt}
+      <Timeline key={runId} events={timelineEvents} lastSeq={run.last_seq} at={at} onSeek={setAt}
                 filterNote={selectedNode ? `step ${selectedNode.id} and run-level events only` : null} />
 
       <section className="panel" aria-labelledby="ticker-heading">
