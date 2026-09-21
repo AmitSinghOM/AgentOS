@@ -42,7 +42,7 @@ jobs:
         run: pytest -q providers/openai-compat/tests providers/anthropic/tests tests/test_quickstart_llm.py -p no:cacheprovider
       - name: Show what changed
         run: git -P diff --stat -- providers/*/tests/cassettes
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cassettes-${{ github.run_id }}
           path: providers/*/tests/cassettes
