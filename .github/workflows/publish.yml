@@ -143,7 +143,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.event_name == 'push' }}
       - name: Build (and push on a tag) — amd64 + arm64, from the attested wheels
         id: push
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: ${{ env.PUSH == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
