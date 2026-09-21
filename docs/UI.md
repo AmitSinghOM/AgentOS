@@ -98,10 +98,12 @@ the UI computes from events rather than from the fold. It follows the time-trave
 - `ui/src/App.test.tsx` — Vitest + Testing Library, `fetch` stubbed (three requests; MSW would
   be a dependency for nothing). One test per rule above, named for the rule.
 - `tests/test_ui_mount.py` — the mount contract, run in CI against the real built bundle.
-- Toolchain: `ui/package.json` declares Node `>=20`, which is what CI runs. One dev
-  dependency, `@testing-library/jest-dom@7`, declares `>=22`; `npm ci` prints an
-  `EBADENGINE` warning below that and the suite runs regardless (CI on 20 proves it). If it
-  ever becomes an error, that is the version to move first.
+- Toolchain: `ui/package.json` declares Node `>=22`, which is what CI and the publish
+  workflow run (moved from 20 on 2026-09-21: Node 20 reached end-of-life on 2026-04-30, and
+  vitest 5, jest-dom 7 and jsdom 30 all declare 22 as their floor). Dev majors move together
+  because of peer ranges — vite 8 needs `@vitejs/plugin-react` 6 in the same lockfile — and
+  `vite/client` is in `tsconfig` `types` so TypeScript 7's `TS2882` accepts the side-effect
+  `import './styles.css'`. Locally any Node ≥ 22 works (vitest 5 accepts 22, 24 and ≥ 26).
 
 ## In the wheel and the image
 

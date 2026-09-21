@@ -618,23 +618,19 @@ build-time `vite` 5.x (dev-server path traversal; not in the shipped bundle), fi
 `vite` 6.4.3. Record with dismissed candidates:
 `reviews/agentos-v0.13.0-production-2/DEBATE.md` (workspace).
 
-**Held majors (re-check monthly; a Dependabot ignore must not become permanent by default):**
-
-| Package | Held at | Why | Lift when |
-| --- | --- | --- | --- |
-| `vitest` (ui, dev) | 3.2.7 | vitest 5 declares engine `^22.12 \|\| ^24 \|\| >=26`; CI builds the UI on Node 20 (EOL 2026-04-30). Its peer range `^6.4 \|\| ^7 \|\| ^8` does accept our vite 6.4.3 — the earlier "requires vite 8" note here was wrong (Dependabot #81 passed 54/54 on vite 6, but on an unsupported Node). `@vitest/mocker` moderate advisory is fixed only in vitest 5 | the Node 22 toolchain PR below |
-| `vite` (ui, dev) | 6.4.3 | 7/8 drop Node 18 and want 20.19+/22; `@vitejs/plugin-react` 4.x peers on vite ≤7, so vite 8 needs plugin-react 6 in the same lockfile (Dependabot #78/#79 each failed `npm ci` with ERESOLVE alone). Remaining `esbuild` advisory is moderate, dev-server only | same PR |
-| `jsdom` (ui, dev) | 25.0.1 | 30 fails on Node 20: `webidl.util.markAsUncloneable is not a function` (Dependabot #80) | same PR |
-| `typescript` (ui, dev) | 5.9.3 | 7.0.2 adds `TS2882` on side-effect imports; `import './styles.css'` needs a `declare module "*.css"` ambient type (Dependabot #77) | same PR |
-
-**The one PR that lifts all four (2026-09-21):** set `node-version: "22"` in the three `ci.yml`
-steps and `publish.yml`; bump `ui/package.json` engines to `>=22`; take vite 8 +
-`@vitejs/plugin-react` 6 + vitest 5 + jsdom 30 + typescript 7 in one `npm install`; add the
-CSS module declaration; UI tests green, bundle renders under the CSP, publish dry run green.
-Dependabot's first sweep (2026-09-21, ten PRs) was handled as: the five `publish.yml` action
+**Held majors — lifted 2026-09-21 (toolchain PR).** The UI toolchain moved to Node 22 (CI and
+`publish.yml`; Node 20 reached end-of-life 2026-04-30) and took vite 8.3.0, `@vitejs/plugin-react`
+6.1.1, vitest 5.0.1, jsdom 30.1.0 and typescript 7.0.2 together in one lockfile — the holds
+below were all the same root cause. `npm audit` reports zero vulnerabilities at every level
+(the `@vitest/mocker` and `esbuild` moderates that justified the holds are gone). What each hold
+had been, for the record: vitest 5 and jest-dom 7 declare Node 22 as their floor (vitest 5's
+peer range does accept vite 6.4 — an earlier note here saying "requires vite 8" was wrong);
+vite 8 needs plugin-react 6 in the same install (Dependabot #78/#79 each failed `npm ci` alone);
+jsdom 30 fails on Node 20 with `webidl.util.markAsUncloneable is not a function` (#80);
+TypeScript 7 adds `TS2882` on side-effect imports, satisfied by `vite/client` in `tsconfig`
+`types` (#77). Dependabot's first sweep (ten PRs) was handled as: the five `publish.yml` action
 majors consolidated into PR #83 (each SHA re-verified against its upstream tag, dry run green);
-the five UI majors closed with the reason above — closed, not `@dependabot ignore`d, so they
-re-propose until this PR lands.
+the five UI majors closed with reasons, then lifted here. No majors are currently held.
 
 **Declared bound, not fixed (D2):** the image resolves third-party wheels from PyPI at build
 time under our `>=` floors, so two builds of the same tag can differ and the attestation
