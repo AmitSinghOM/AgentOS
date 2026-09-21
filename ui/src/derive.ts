@@ -57,9 +57,10 @@ export interface NodeLatency {
   finished_at: string | null;  // step.completed
   duration_ms: number | null;
   cost: string | null;         // from the fold (completed steps only)
-  status: "completed" | "in flight" | "not started" | "ended without completion";
 }
 
+/** Latency only. A node's STATUS is deliberately not here: `nodeState` in graph.ts reads it from
+ *  the fold, and the page must not have a second vocabulary for the same node. */
 export function deriveLatency(events: EventRecord[], run: RunState, nodeIds: string[]): NodeLatency[] {
   return nodeIds.map((id) => {
     const starts = events.filter((e) => e.event_type === "step.started" && e.step_id === id);
@@ -72,11 +73,8 @@ export function deriveLatency(events: EventRecord[], run: RunState, nodeIds: str
       const ms = new Date(finished_at).getTime() - new Date(started_at).getTime();
       duration_ms = Number.isNaN(ms) ? null : ms;
     }
-    const ended = id in run.dead_lettered || id in run.failed_steps || run.cancelled_steps.includes(id);
-    const status: NodeLatency["status"] = completed ? "completed" : ended ? "ended without completion"
-      : starts.length ? "in flight" : "not started";
     return { node_id: id, attempts: starts.length, started_at, finished_at, duration_ms,
-      cost: completed?.cost.amount ?? null, status };
+      cost: completed?.cost.amount ?? null };
   });
 }
 

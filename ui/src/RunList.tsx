@@ -49,7 +49,7 @@ export function RunList({ navigate }: { navigate: (r: Route) => void }) {
             {runs.map((r) => (
               <tr key={r.id}>
                 <td><Link to={{ page: "run", id: r.id }} navigate={navigate}><code className="mono" title={r.id}>{r.id.slice(0, 8)}</code></Link></td>
-                <td>{r.workflow} <span className="chip">v{r.workflow_version}</span></td>
+                <td><Link to={{ page: "run", id: r.id }} navigate={navigate} className="runs__wf">{r.workflow}</Link> <span className="chip">v{r.workflow_version}</span></td>
                 <td>
                   <span className={`status status--${r.status}`}>{r.status}</span>
                   {r.pending_approvals > 0 && (

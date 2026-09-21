@@ -45,6 +45,14 @@ export interface NodeView {
   detail: string | null;
 }
 
+/** The one vocabulary for a node's state, used by the graph, its legend and the cost table, so a
+ *  node is never "awaiting approval" in one place and "not started" in another. */
+export const NODE_LABEL: Record<NodeStatus, string> = {
+  pending: "pending", running: "running", completed: "completed", failed: "failed",
+  dead_lettered: "dead-lettered", cancelled: "cancelled", awaiting_approval: "awaiting approval",
+  retry_backoff: "retry backoff",
+};
+
 /** One field of the folded run decides each state; the order below is the precedence. */
 export function nodeState(run: RunState, node: WorkflowNodeDef): NodeView {
   const completed = run.steps.find((s) => s.node_id === node.id);

@@ -22,6 +22,14 @@ export interface Session {
 
 const TYPED_KEY = "agentos.typed_principal";
 
+/** The unverified-mode principal input lives in the top bar; the inbox's "enter your id" note
+ *  sends focus here so the operator does not have to find it. */
+export const PRINCIPAL_INPUT_ID = "principal-id";
+export function focusPrincipalInput(): void {
+  const el = document.getElementById(PRINCIPAL_INPUT_ID);
+  if (el instanceof HTMLInputElement) { el.focus(); el.select(); }
+}
+
 export function useSession(): Session {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
@@ -114,6 +122,7 @@ export function ActingAs({ session }: { session: Session }) {
     <div className="identity identity--unverified" role="status">
       <span className="identity__label"><strong>Unverified.</strong> Record decisions as</span>
       <input
+        id={PRINCIPAL_INPUT_ID}
         aria-label="principal id (unverified)"
         value={actingAs?.id ?? ""}
         onChange={(e) => setTypedPrincipalId(e.target.value)}

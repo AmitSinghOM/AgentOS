@@ -1,19 +1,42 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "./api";
 import { CostPanel } from "./CostPanel";
-import { NODE_H, NODE_W, NodeView, Point, RunState, WorkflowDef, layout, nodeState } from "./graph";
+import { NODE_H, NODE_LABEL, NODE_W, Point, RunState, WorkflowDef, layout, nodeState } from "./graph";
 import { Link, Route } from "./router";
 import { SSEFrame, readSSE } from "./sse";
 import { Timeline } from "./Timeline";
 import type { EventRecord } from "./derive";
 import { mergeEvents } from "./derive";
-import { eventFamily, fmtClock, fmtDateTime, shortHash } from "./fmt";
+import { eventFamily, fmtAgo, fmtClock, fmtDateTime, shortHash } from "./fmt";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const REFETCH_DEBOUNCE_MS = 150;
 const RECONNECT_MS = 1000;
 const MAX_CONSECUTIVE_ERRORS = 5;
 const TICKER_MAX = 40;
+const COPIED_MS = 1500;
+
+/** The run id, shown as its 8-char prefix (as everywhere else) and copied in full on click. The
+ *  prefix is what an operator reads; the full id is what they paste into a curl or a ticket. */
+export function CopyId({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<number | null>(null);
+  useEffect(() => () => { if (timer.current !== null) window.clearTimeout(timer.current); }, []);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopied(true);
+      if (timer.current !== null) window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => setCopied(false), COPIED_MS);
+    } catch { /* clipboard denied (insecure context, permission): the title still carries the full id */ }
+  };
+  return (
+    <button type="button" className={`copy-id${copied ? " copy-id--copied" : ""}`} onClick={() => void copy()} aria-label="copy run id" title={`${id} — click to copy`}>
+      <code className="mono run__id">{id.slice(0, 8)}</code>
+      <span className="copy-id__hint" aria-live="polite">{copied ? "copied" : "copy"}</span>
+    </button>
+  );
+}
 
 export interface TickerItem { seq: number; type: string; at: string; step?: string }
 
@@ -125,7 +148,7 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
         } catch (e) {
           if (ctrl.signal.aborted) return;
           setLive("error");
-          setError(e instanceof Error ? e.message : String(e));
+          setError(e instanceof ApiError ? `${e.status} ${e.detail}` : e instanceof Error ? e.message : String(e));
           if (++errors >= MAX_CONSECUTIVE_ERRORS) {
             setError((prev) => `${prev ?? "stream failed"} — gave up after ${errors} attempts; reload to retry`);
             return;
@@ -147,8 +170,17 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
     };
   }, [runId, refetch]);
 
-  if (error && !run) return <p role="alert" className="error">Could not load run: {error}</p>;
-  if (!run) return <p>Loading…</p>;
+  if (error && !run) {
+    return (
+      <div className="card card--center state">
+        <h2>Could not load run</h2>
+        <p role="alert" className="error">Could not load run: {error}</p>
+        <p className="hint">The id in the address bar may be wrong, or the run may live in another store.</p>
+        <Link to={{ page: "runs" }} navigate={navigate} className="button-link">← Back to runs</Link>
+      </div>
+    );
+  }
+  if (!run) return <p className="muted state state--inline">Loading run…</p>;
 
   const shown = at === null ? run : atRun;      // live fold, or the SERVER's fold through `at`
 
@@ -164,7 +196,7 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
           <span>{run.workflow}</span>
         </nav>
         <h2 id="run-heading">
-          {run.workflow} <code className="mono run__id" title={run.id}>{run.id.slice(0, 8)}</code>
+          {run.workflow} <CopyId id={run.id} />
         </h2>
         <p className="run__meta">
           <span className={`status status--${run.status}`}>{run.status}</span>
@@ -174,7 +206,7 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
           <span className="chip num" title="run cost from the fold">cost {run.total_cost}</span>
           {run.sealed_through != null && <span className="chip num" title="last seq covered by an integrity seal">sealed ≤ {run.sealed_through}</span>}
           {run.policy_sha256 && <span className="chip mono" title={`operator policy sha256 ${run.policy_sha256}`}>policy {shortHash(run.policy_sha256)}</span>}
-          <span className="muted" title={run.started_at}>started {fmtDateTime(run.started_at)}</span>
+          <span className="muted" title={run.started_at}>started {fmtDateTime(run.started_at)} · {fmtAgo(run.started_at)}</span>
         </p>
         {pending > 0 && (
           <p role="note" className="hint">
@@ -229,11 +261,7 @@ export function RunGraph({ runId, navigate }: { runId: string; navigate: (r: Rou
   );
 }
 
-const LABEL: Record<NodeView["status"], string> = {
-  pending: "pending", running: "running", completed: "completed", failed: "failed",
-  dead_lettered: "dead-lettered", cancelled: "cancelled", awaiting_approval: "awaiting approval",
-  retry_backoff: "retry backoff",
-};
+const LABEL = NODE_LABEL;
 
 /** SVG path through dagre's waypoints: a cubic between each consecutive pair with horizontal
  *  tangents, so a two-point edge is the same S-curve as before and a routed long edge bends

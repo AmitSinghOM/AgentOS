@@ -70,7 +70,7 @@ export function App() {
         </div>
       </header>
       <main className="app">
-        {session.loading && <p className="muted">Connecting to the API…</p>}
+        {session.loading && <p className="muted state state--inline">Connecting to the API…</p>}
         {apiDown && <Unreachable session={session} />}
         {needsToken && <TokenForm session={session} />}
         {session.me && (

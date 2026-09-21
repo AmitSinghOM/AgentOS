@@ -397,3 +397,36 @@ def test_snapshot_every_env_is_validated_and_names_the_variable(monkeypatch):
         monkeypatch.setenv("AGENTOS_SNAPSHOT_EVERY", bad)
         with pytest.raises(RuntimeError, match="AGENTOS_SNAPSHOT_EVERY"):
             snapshot_every_from_env()
+
+
+def test_concurrent_reads_on_one_store_never_raise(store):
+    """UI polish pass (v0.15.0 baseline): the run page's first paint fires GET /runs/{id}, the
+    stream's read_events and the badge's GET /approvals together, and the API runs sync store
+    calls on a thread pool. The SQLite adapter shares ONE connection (check_same_thread=False)
+    and serialises writers under its lock — reads must be serialised too, or two overlapping
+    reads raise sqlite3.InterfaceError (SQLITE_MISUSE) and the page shows a 500. Every adapter
+    must survive a burst of overlapping reads; only SQLite had the defect."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    run_id = "conc-run"
+    store.put_workflow(WorkflowDefinition(name="w", version=3, nodes=[{"id": "s1", "agent": "a"}]))
+    written = chain(every_event_type(run_id), 0, None)
+    store.append_events(run_id, 0, written)
+    n = len(written)
+    barrier = threading.Barrier(8)
+
+    def burst(i: int) -> int:
+        barrier.wait(timeout=5)
+        total = 0
+        for _ in range(25):
+            total += len(store.read_events(run_id))
+            total += len(store.read_events(run_id, after_seq=2, limit=3))
+            total += len(store.list_run_ids())
+            store.ping(timeout=1.0)
+            total += 1 if store.run_id_for_request("nope") is None else 0
+        return total
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(burst, range(8)))     # any InterfaceError propagates here
+    assert all(r == 25 * (n + 3 + 1 + 1) for r in results)
