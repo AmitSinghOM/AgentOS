@@ -99,7 +99,8 @@ describe("bearer mode", () => {
     bearerServer({ token: "s3cret" });
     render(<App />);
     const status = await screen.findByRole("status");
-    expect(status).toHaveTextContent("Acting as amit (human, token:sha256:abcdef123456) — verified by the API");
+    // The identity bar names the principal, its kind, the attestation, and that the API verified it.
+    expect(status).toHaveTextContent(/Acting as\s*amit\s*human · token:sha256:abcdef123456 · verified by the API/);
     expect(screen.queryByText(/unverified/i)).not.toBeInTheDocument();
     const item = await screen.findByRole("listitem");
     expect(item).toHaveTextContent("payments");
@@ -168,5 +169,35 @@ describe("asserted mode", () => {
     const post = calls.find((c) => c.method === "POST")!;
     expect(post.body).toEqual({ principal: { kind: "human", id: "amit" }, reason: "" });
     expect(post.headers.Authorization).toBeUndefined();
+  });
+});
+
+describe("shell", () => {
+  it("shows the pending count in the nav badge and the tab title, and clears it once nothing is pending", async () => {
+    window.sessionStorage.setItem("agentos.token", "s3cret");
+    bearerServer({ token: "s3cret", approvals: [PENDING, COST] });
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "primary" });
+    const badge = await within(nav).findByLabelText("2 pending");
+    expect(badge).toHaveTextContent("2");
+    await waitFor(() => expect(document.title).toBe("(2) Approvals — AgentOS"));
+    // While the inbox is on screen it is the only reader of /approvals; the badge follows its list.
+    expect(calls.filter((c) => c.path === "/approvals").length).toBe(1);
+    const items = await screen.findAllByRole("listitem");
+    await userEvent.click(within(items[0]).getByRole("button", { name: "Approve" }));
+    await userEvent.click(within(items[1]).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(screen.getByText(/nothing is waiting/i)).toBeInTheDocument());
+    await waitFor(() => expect(within(nav).queryByLabelText(/pending/)).not.toBeInTheDocument());
+    await waitFor(() => expect(document.title).toBe("Approvals — AgentOS"));
+  });
+
+  it("puts the identity in the top bar and the run-log promise in the footer, on every page", async () => {
+    window.sessionStorage.setItem("agentos.token", "s3cret");
+    bearerServer({ token: "s3cret", approvals: [] });
+    render(<App />);
+    const banner = await screen.findByRole("banner");
+    expect(within(banner).getByRole("status")).toHaveTextContent(/Acting as\s*amit/);
+    expect(within(banner).getByText("bearer auth")).toBeInTheDocument();
+    expect(screen.getByRole("contentinfo")).toHaveTextContent(/never folds events or authorizes anything/);
   });
 });
