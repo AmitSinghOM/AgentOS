@@ -256,7 +256,7 @@ See [ROADMAP.md](./ROADMAP.md).
 | 6 · Tools, snapshots, survey close-out | `tool` agent, verified snapshots + migrations, all 15 `landscape-con` issues closed with tests | ✅ `v0.7.0-complete` |
 | 7 · Streaming + inner harness | `GET /runs/{id}/stream` (SSE over the log), OpenAI Agents SDK and PydanticAI as governed steps | ✅ `v0.8.0-watchable`, `v0.8.1` |
 | 8 · Pilot readiness | Authenticated `Principal`, operator policy ceiling, sealed chains + `agentos verify` / `doctor` / `policy explain`, FAIL_MODES, publishing with provenance as `agentos-durable` (renamed `dagentos` in v0.11.0) | ✅ `v0.9.0-pilot` |
-| 9 · UI | Approvals inbox, live run graph over the stream, timeline with time travel, cost + latency — served at `/ui`, in the wheel and image | ✅ `v0.10.0-ui`, detailed in `v0.12.0`, production pass in `v0.13.0` |
+| 9 · UI | Approvals inbox, live run graph over the stream, timeline with time travel, cost + latency — served at `/ui`, in the wheel and image | ✅ `v0.10.0-ui`, detailed in `v0.12.0`, production passes in `v0.13.0` and `v0.14.0` |
 
 Phases 1–3 are scoped against a survey of what the popular agent runtimes get wrong
 (LangGraph, agno, Microsoft Agent Framework, crewAI, ADK, mastra, Temporal, Hatchet…).

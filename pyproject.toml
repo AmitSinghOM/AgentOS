@@ -6,7 +6,7 @@
 # `agentos` on PyPI belongs to agentos.org and `agenticos` to another project — both with the
 # same import names. `dagentos` was free on PyPI and npm on 2026-09-20 (docs/RELEASING.md).
 name = "dagentos"
-version = "0.13.0"
+version = "0.14.0"
 description = "A control plane for durable, observable, human-in-the-loop LLM agent workflows"
 readme = "README.md"
 license = { text = "MIT" }
