@@ -32,11 +32,11 @@ jobs:
     # same smoke a stranger's `pip install` would face — on every PR, not only on a tag.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -66,8 +66,8 @@ jobs:
     # SPA fallback and the auth exemption are proven on what ships, not a fixture.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -107,7 +107,7 @@ jobs:
       # Enables the Postgres leg of tests/contract/ (skipped when unset).
       AGENTOS_TEST_PG_DSN: postgresql://agentos:agentos@localhost:5432/agentos_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
@@ -127,7 +127,7 @@ jobs:
     # audits exactly the frozen pins without re-resolving.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -136,7 +136,7 @@ jobs:
       - run: pip install pip-audit==2.10.1
       - run: pip freeze --exclude-editable > /tmp/resolved.txt
       - run: pip-audit --strict --no-deps --progress-spinner off -r /tmp/resolved.txt
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -151,7 +151,7 @@ jobs:
     # plan). Separate job so the evidence for "no step runs twice" is a named check.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -184,7 +184,7 @@ jobs:
       AGENTOS_TEST_TOXIPROXY_LISTEN: 0.0.0.0:15432
       AGENTOS_TEST_TOXIPROXY_CLIENT: 127.0.0.1:15432
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -196,7 +196,7 @@ jobs:
     # their healthchecks. The API does not talk to them until Phase 1.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: cp .env.example .env
       - run: docker compose up -d --wait --wait-timeout 90
       - run: docker compose exec -T postgres pg_isready -U agentos
