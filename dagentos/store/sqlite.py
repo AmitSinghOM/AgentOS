@@ -20,6 +20,7 @@ import threading
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from dagentos.core.coordination import LeaseToken
 from dagentos.core.events import Event, RunStarted, from_record
@@ -87,6 +88,19 @@ class SqliteStore:
         self.migrate()
         self._lock = threading.RLock()
 
+    # Every statement goes through the lock — reads too. `check_same_thread=False` lets the API's
+    # thread pool share the connection, and sqlite3 connections are not safe for two overlapping
+    # statements: a read racing another read raises InterfaceError (SQLITE_MISUSE) or hands one
+    # caller the other's rows (seen as JSONDecodeError on a record). Writers always held the lock;
+    # reads bypassed it until the v0.15.0 UI polish pass surfaced a 500 on the run page's first paint.
+    def _one(self, sql: str, params: tuple = ()) -> Any:
+        with self._lock:
+            return self._conn.execute(sql, params).fetchone()
+
+    def _all(self, sql: str, params: tuple = ()) -> list[Any]:
+        with self._lock:
+            return self._conn.execute(sql, params).fetchall()
+
     def migrate(self) -> list[int]:
         """Apply pending schema migrations (dagentos/store/migrations.py); idempotent."""
         return migrations.apply(
@@ -97,8 +111,7 @@ class SqliteStore:
                 "INSERT OR IGNORE INTO schema_migrations VALUES (?, ?, ?)", (v, d, at)))
 
     def schema_version(self) -> int:
-        (v,) = self._conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
-                                  ).fetchone()
+        (v,) = self._one("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
         return int(v)
 
     # snapshots (C15): a bounded optimization of the fold, never the source of truth.
@@ -115,9 +128,7 @@ class SqliteStore:
                  time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
 
     def get_snapshot(self, run_id: str) -> tuple[int, str | None, dict] | None:
-        row = self._conn.execute(
-            "SELECT seq, last_hash, state FROM run_snapshots WHERE run_id = ?", (run_id,)
-        ).fetchone()
+        row = self._one("SELECT seq, last_hash, state FROM run_snapshots WHERE run_id = ?", (run_id,))
         return (int(row[0]), row[1], json.loads(row[2])) if row else None
 
     # definitions (agents immutable per (name, version))
@@ -139,28 +150,26 @@ class SqliteStore:
 
     def get_agent(self, name: str, version: int | None = None) -> Agent | None:
         if version is None:
-            row = self._conn.execute(
+            row = self._one(
                 "SELECT body FROM agent_versions WHERE name = ? ORDER BY version DESC LIMIT 1",
                 (name,),
-            ).fetchone()
+            )
         else:
-            row = self._conn.execute(
+            row = self._one(
                 "SELECT body FROM agent_versions WHERE name = ? AND version = ?", (name, version),
-            ).fetchone()
+            )
         return Agent.model_validate_json(row[0]) if row else None
 
     def list_agents(self) -> list[Agent]:
-        rows = self._conn.execute(
+        rows = self._all(
             "SELECT a.body FROM agent_versions a JOIN (SELECT name, MAX(version) v "
             "FROM agent_versions GROUP BY name) m ON a.name = m.name AND a.version = m.v "
             "ORDER BY a.name"
-        ).fetchall()
+        )
         return [Agent.model_validate_json(r[0]) for r in rows]
 
     def list_agent_versions(self, name: str) -> list[int]:
-        rows = self._conn.execute(
-            "SELECT version FROM agent_versions WHERE name = ? ORDER BY version", (name,)
-        ).fetchall()
+        rows = self._all("SELECT version FROM agent_versions WHERE name = ? ORDER BY version", (name,))
         return [r[0] for r in rows]
 
     def put_workflow(self, wf: WorkflowDefinition) -> None:
@@ -172,9 +181,7 @@ class SqliteStore:
             )
 
     def get_workflow(self, name: str) -> WorkflowDefinition | None:
-        row = self._conn.execute(
-            "SELECT body FROM workflows WHERE name = ?", (name,)
-        ).fetchone()
+        row = self._one("SELECT body FROM workflows WHERE name = ?", (name,))
         return WorkflowDefinition.model_validate_json(row[0]) if row else None
 
     # run log
@@ -235,26 +242,25 @@ class SqliteStore:
                 raise
 
     def read_events(self, run_id: str, after_seq: int = 0, limit: int | None = None) -> list[Event]:
-        rows = self._conn.execute(
+        rows = self._all(
             "SELECT record FROM run_events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?",
             (run_id, after_seq, -1 if limit is None else limit),
-        ).fetchall()
+        )
         return [from_record(json.loads(r[0])) for r in rows]
 
     def ping(self, timeout: float) -> None:
-        """One statement against the file. SQLite has no acquire wait; `timeout` is not
-        separately enforceable here — a locked file fails after the connection's busy
-        timeout (sqlite3's default 5 s), which the probe window must allow for."""
-        self._conn.execute("SELECT 1").fetchone()
+        """One statement against the file, behind the connection lock like every read. `timeout`
+        is not separately enforceable here: the call waits for any in-flight statement on this
+        connection, then a locked file fails after the connection's busy timeout (sqlite3's
+        default 5 s) — the probe window must allow for both."""
+        self._one("SELECT 1")
 
     def list_run_ids(self) -> list[str]:
-        rows = self._conn.execute("SELECT run_id FROM runs ORDER BY created_at").fetchall()
+        rows = self._all("SELECT run_id FROM runs ORDER BY created_at")
         return [r[0] for r in rows]
 
     def run_id_for_request(self, request_id: str) -> str | None:
-        row = self._conn.execute(
-            "SELECT run_id FROM runs WHERE request_id = ?", (request_id,)
-        ).fetchone()
+        row = self._one("SELECT run_id FROM runs WHERE request_id = ?", (request_id,))
         return row[0] if row else None
 
     # blobs
@@ -268,15 +274,13 @@ class SqliteStore:
         return BlobRef(sha256=digest, size=len(data), media_type=media_type)
 
     def get(self, ref: BlobRef) -> bytes:
-        row = self._conn.execute("SELECT data FROM blobs WHERE sha256 = ?", (ref.sha256,)).fetchone()
+        row = self._one("SELECT data FROM blobs WHERE sha256 = ?", (ref.sha256,))
         if row is None:
             raise KeyError(f"blob {ref.sha256[:12]}… not found")
         return bytes(row[0])
 
     def exists(self, ref: BlobRef) -> bool:
-        return self._conn.execute(
-            "SELECT 1 FROM blobs WHERE sha256 = ?", (ref.sha256,)
-        ).fetchone() is not None
+        return self._one("SELECT 1 FROM blobs WHERE sha256 = ?", (ref.sha256,)) is not None
 
     # lease (wall clock, so a lease outlives the process that took it)
     def acquire(self, run_id: str, holder: str, ttl_seconds: float) -> LeaseToken | None:
@@ -373,8 +377,9 @@ class SqliteStore:
             self._conn.execute("DELETE FROM queue WHERE run_id = ?", (run_id,))
 
     def queue_depth(self) -> int:
-        (n,) = self._conn.execute("SELECT COUNT(*) FROM queue").fetchone()
+        (n,) = self._one("SELECT COUNT(*) FROM queue")
         return int(n)
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()

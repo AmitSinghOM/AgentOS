@@ -3,7 +3,7 @@
 // parsed here. Honours `id:`, `event:`, `data:` (multi-line), comments (`:`), and frames split
 // across chunks. Resume is the caller's job via `lastEventId` (→ Last-Event-ID).
 
-import { getToken } from "./api";
+import { ApiError, getToken } from "./api";
 
 export interface SSEFrame { id: string | null; event: string | null; data: string }
 
@@ -64,8 +64,15 @@ export async function readSSE(url: string, opts: ReadSSEOptions): Promise<string
   if (opts.lastEventId) headers["Last-Event-ID"] = opts.lastEventId;
   const res = await fetch(url, { headers, signal: opts.signal, credentials: "omit" });
   if (!res.ok || !res.body) {
+    // Same error shape as the JSON client, so the page shows "404 unknown run 'x'" whichever of
+    // the run fetch or the stream reports first — not the raw JSON body from one of them.
     const text = await res.text().catch(() => "");
-    throw new Error(`${res.status}: ${text || res.statusText}`);
+    let detail = text || res.statusText;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (typeof parsed === "object" && parsed !== null && "detail" in parsed) detail = String((parsed as { detail: unknown }).detail);
+    } catch { /* not JSON: keep the text */ }
+    throw new ApiError(res.status, detail);
   }
   const parser = createSSEParser(opts.onFrame);
   const reader = res.body.getReader();

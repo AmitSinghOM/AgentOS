@@ -75,10 +75,10 @@ describe("time travel", () => {
     const banner = screen.getAllByRole("status").find((el) => el.className.includes("time-travel"))!;
     expect(banner).toHaveTextContent("time travel — the graph shows the run as it was right after seq 2");
     expect(screen.getByRole("slider", { name: "time travel scrubber" })).toHaveValue("2");
-    // the cost panel follows the seek: only a is known so far, and it is still running
+    // the cost panel follows the seek, in the fold's words: only a is known so far, and it is still running
     const cost = screen.getByRole("table", { name: "cost and latency per node" });
-    expect(within(cost).getAllByRole("row")[1]).toHaveTextContent("in flight");
-    expect(within(cost).getAllByRole("row")[2]).toHaveTextContent("not started");
+    expect(within(cost).getAllByRole("row")[1]).toHaveTextContent("running");
+    expect(within(cost).getAllByRole("row")[2]).toHaveTextContent("pending");
 
     await userEvent.click(screen.getByRole("button", { name: "Back to live" }));
     await waitFor(() => expect(label("b")).toBe("b: completed"));
@@ -135,6 +135,33 @@ describe("time travel", () => {
     // be hidden from a screen reader even though DOM queries (like this one) still find them.
     expect(graph.getAttribute("role")).not.toBe("img");
     expect(label("b")).toBe("b: completed");
+  });
+});
+
+describe("cost panel status (polish)", () => {
+  it("names a node's state with the same words as the graph — one fold, one vocabulary", async () => {
+    // v0.15.0 showed `pay` as "awaiting approval" in the graph and "not started" in the cost
+    // table on the same page: the table derived a status from events instead of reading the fold.
+    const suspended = base({ status: "suspended", attempts: { a: 1 }, last_seq: 4, total_cost: "0.10",
+      steps: [{ node_id: "a", attempt: 1, cost: { amount: "0.10", currency: "USD" } }],
+      approvals: { ap1: { approval_id: "ap1", step_id: "b", status: "pending", kind: "effect", effect_classes: ["spend"] } } });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/me") return json(200, { mode: "bearer", principal: { kind: "human", id: "amit" } });
+      if (url === "/runs/run1") return json(200, suspended);
+      if (url.startsWith("/runs/run1/events")) return json(200, { data: EVENTS.slice(0, 3), last_seq: 3, has_more: false });
+      if (url === "/workflows/w") return json(200, DEF);
+      if (url === "/runs/run1/stream") return new Response(new ReadableStream({ start(c) { c.close(); } }), { status: 200 });
+      return json(404, {});
+    });
+    render(<App />);
+    await screen.findByRole("group", { name: /run graph/ });
+    expect(label("b")).toBe("b: awaiting approval");
+    const cost = screen.getByRole("table", { name: "cost and latency per node" });
+    const rowB = within(cost).getAllByRole("row")[2];
+    expect(rowB).toHaveTextContent("awaiting approval");
+    expect(rowB).not.toHaveTextContent("not started");
+    expect(within(cost).getAllByRole("row")[1]).toHaveTextContent("completed");
   });
 });
 

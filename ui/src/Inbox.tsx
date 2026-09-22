@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, Approval, api } from "./api";
 import { fmtAgo } from "./fmt";
+import { focusPrincipalInput } from "./Session";
 import type { Session } from "./Session";
 
 const POLL_MS = 3000;
@@ -31,6 +32,7 @@ export function Inbox({ session, onPending }: { session: Session; onPending?: (n
   const [error, setError] = useState<string | null>(null);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [verbInFlight, setVerbInFlight] = useState<"approve" | "reject" | null>(null);
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
 
   const refresh = useCallback(async () => {
@@ -53,6 +55,7 @@ export function Inbox({ session, onPending }: { session: Session; onPending?: (n
   const decide = async (a: Approval, verb: "approve" | "reject") => {
     const key = `${a.run_id}:${a.approval_id}`;
     setBusy(key);
+    setVerbInFlight(verb);
     try {
       const principal = session.unverified ? session.actingAs ?? undefined : undefined;
       await api.decide(a, verb, reasons[key] ?? "", principal);
@@ -64,6 +67,7 @@ export function Inbox({ session, onPending }: { session: Session; onPending?: (n
       setOutcomes((o) => [{ id: ++outcomeSeq, key, ok: false, text: `${verb} failed — ${text}` }, ...o].slice(0, 8));
     } finally {
       setBusy(null);
+      setVerbInFlight(null);
     }
   };
 
@@ -118,18 +122,21 @@ export function Inbox({ session, onPending }: { session: Session; onPending?: (n
                 </label>
                 <div className="approval__actions">
                   <button type="button" className="primary" disabled={!canDecide || busy === key}
+                          aria-busy={busy === key && verbInFlight === "approve" ? true : undefined}
                           onClick={() => void decide(a, "approve")}>
-                    Approve
+                    {busy === key && verbInFlight === "approve" ? "Approving…" : "Approve"}
                   </button>
                   <button type="button" disabled={!canDecide || busy === key} className="danger"
+                          aria-busy={busy === key && verbInFlight === "reject" ? true : undefined}
                           onClick={() => void decide(a, "reject")}>
-                    Reject
+                    {busy === key && verbInFlight === "reject" ? "Rejecting…" : "Reject"}
                   </button>
                 </div>
               </div>
               {!canDecide && (
                 <p role="note" className="hint approval__locked">
-                  Decisions are disabled until the API knows who is deciding — enter your id in the top bar.
+                  Decisions are disabled until the API knows who is deciding —{" "}
+                  <button type="button" className="linklike" onClick={focusPrincipalInput}>enter your id in the top bar</button>.
                 </p>
               )}
             </li>

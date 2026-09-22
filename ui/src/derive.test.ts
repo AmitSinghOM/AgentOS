@@ -23,13 +23,13 @@ describe("deriveLatency", () => {
   it("measures from the FIRST start to completion and counts attempts; cost comes from the fold", () => {
     const [a, pay, d] = deriveLatency(EVENTS, RUN, ["a", "pay", "d"]);
     expect(a).toMatchObject({ node_id: "a", attempts: 2, started_at: "2026-09-20T00:00:01Z",
-      finished_at: "2026-09-20T00:00:07.500Z", duration_ms: 6500, cost: "0.10", status: "completed" });
-    expect(pay).toMatchObject({ attempts: 1, finished_at: null, duration_ms: null, cost: null, status: "in flight" });
-    expect(d).toMatchObject({ attempts: 0, started_at: null, status: "not started" });
+      finished_at: "2026-09-20T00:00:07.500Z", duration_ms: 6500, cost: "0.10" });
+    expect(pay).toMatchObject({ attempts: 1, finished_at: null, duration_ms: null, cost: null });
+    expect(d).toMatchObject({ attempts: 0, started_at: null });
   });
-  it("names a step that ended without completing", () => {
-    const run = { ...RUN, dead_lettered: { pay: "undeclared" } };
-    expect(deriveLatency(EVENTS, run, ["pay"])[0].status).toBe("ended without completion");
+  it("carries no status of its own — that is the fold's (nodeState), one vocabulary for the page", () => {
+    const row = deriveLatency(EVENTS, { ...RUN, dead_lettered: { pay: "undeclared" } }, ["pay"])[0];
+    expect("status" in row).toBe(false);
   });
 });
 
