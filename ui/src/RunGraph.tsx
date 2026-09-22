@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, Approval, api } from "./api";
+import { ApiError, Approval, Integrity, api } from "./api";
 import { ApprovalCard, ApprovalRecord, Outcome, OutcomesList } from "./ApprovalCard";
 import { CostPanel } from "./CostPanel";
 import { NODE_H, NODE_LABEL, NODE_W, NodeView, Point, RunState, WorkflowDef, WorkflowNodeDef, layout, nodeState } from "./graph";
@@ -192,6 +192,40 @@ export function CopyId({ id }: { id: string }) {
   );
 }
 
+/** The integrity VERDICT (U10). The header used to show only `sealed ≤ N` — a fact, not a
+ *  verdict; this is `GET /runs/{id}/integrity`'s word on the chain and the seals. Bad states
+ *  (broken chain, INVALID seal) are red; `unsigned` is a note, since it is the documented
+ *  default without AGENTOS_SIGNING_KEYS; `unverifiable` (a seal by a key the API does not hold)
+ *  is amber. */
+export function integrityChip(v: Integrity): { text: string; tone: "ok" | "note" | "warn" | "bad"; title: string } {
+  if (v.error) {
+    return { text: "chain broken", tone: "bad", title: `hash chain failed verification: ${v.error} (${v.events} events)` };
+  }
+  const s = v.seals;
+  const hashed = `${v.hashed ?? 0} of ${v.events} events hashed`;
+  switch (s.state) {
+    case "verified":
+      return { text: "integrity verified", tone: "ok",
+        title: `${hashed}; ${s.valid} seal${s.valid === 1 ? "" : "s"} valid, sealed through ${s.sealed_through}${s.unsigned_tail ? `, ${s.unsigned_tail} unsigned after it` : ""}` };
+    case "INVALID":
+      return { text: "seal INVALID", tone: "bad", title: `${hashed}; ${s.problems.join("; ") || "a seal failed verification"}` };
+    case "unverifiable":
+      return { text: "seal unverifiable", tone: "warn",
+        title: `${hashed}; sealed with key${s.unknown_keys.length === 1 ? "" : "s"} the API does not hold (${s.unknown_keys.join(", ") || "unknown"})` };
+    default:
+      return { text: "unsigned", tone: "note", title: `${hashed}; no seals — AGENTOS_SIGNING_KEYS is unset, so the chain is hash-linked but not signed` };
+  }
+}
+
+export function IntegrityChip({ v }: { v: Integrity }) {
+  const c = integrityChip(v);
+  return (
+    <span role="status" aria-label="integrity" className={`chip integrity integrity--${c.tone}`} title={c.title}>
+      {c.text}
+    </span>
+  );
+}
+
 export interface TickerItem { seq: number; type: string; at: string; step?: string }
 
 function tickerItem(f: SSEFrame): TickerItem | null {
@@ -216,10 +250,20 @@ export function RunGraph({ runId, navigate, session }: { runId: string; navigate
   const [atError, setAtError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null); // node whose detail + events are shown
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);      // decisions made from this page
+  const [integrity, setIntegrity] = useState<Integrity | null>(null);
   const debounce = useRef<number | null>(null);
   const lastId = useRef<string | null>(null);
   const eventsRef = useRef<EventRecord[]>([]);     // what we hold, so refetch asks only for what follows
 
+  // the integrity verdict (U10): the chain and seal check is a full read of the log, so it runs on
+  // load and again when the run's STATUS changes (seals land at idle/terminal) — not per frame
+  const status = run?.status ?? null;
+  useEffect(() => {
+    if (status === null) return;
+    let alive = true;
+    api.integrity(runId).then((v) => { if (alive) setIntegrity(v); }).catch(() => { if (alive) setIntegrity(null); });
+    return () => { alive = false; };
+  }, [runId, status]);
   const refetch = useCallback(async () => {
     try {
       const r = await api.run<RunState>(runId);
@@ -373,6 +417,7 @@ export function RunGraph({ runId, navigate, session }: { runId: string; navigate
           <span className="chip num" title="events in the log">{run.last_seq} events</span>
           <span className="chip num" title="run cost from the fold">cost {run.total_cost}</span>
           {run.sealed_through != null && <span className="chip num" title="last seq covered by an integrity seal">sealed ≤ {run.sealed_through}</span>}
+          {integrity && <IntegrityChip v={integrity} />}
           {run.policy_sha256 && <span className="chip mono" title={`operator policy sha256 ${run.policy_sha256}`}>policy {shortHash(run.policy_sha256)}</span>}
           <span className="muted" title={run.started_at}>started {fmtDateTime(run.started_at)} · {fmtAgo(run.started_at)}</span>
         </p>

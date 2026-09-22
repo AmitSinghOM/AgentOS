@@ -70,6 +70,18 @@ export interface RunSummary {
   last_seq: number; started_at: string; pending_approvals: number;
 }
 
+/** GET /runs/{id}/integrity: the chain and seal verdict (C12, Phase 8 #3). `error` is set and
+ *  `hashed` absent when the hash chain itself is broken; otherwise `seals.state` is the verdict. */
+export interface Integrity {
+  run_id: string; ok: boolean; events: number; hashed?: number; error?: string;
+  seals: { state: "unsigned" | "verified" | "unverifiable" | "INVALID"; seals: number; valid: number;
+    sealed_through: number | null; unsigned_tail: number; problems: string[]; unknown_keys: string[] };
+}
+
+/** GET /policy: the operator ceiling (null when AGENTOS_POLICY is unset). The UI reads one field
+ *  of it — `agent_approval_allowed` — to word the non-human warning; it enforces nothing. */
+export interface PolicyDoc { sha256: string | null; policy: { agent_approval_allowed?: boolean } | null; note?: string }
+
 export const api = {
   me: () => request<Me>("GET", "/me"),
   approvals: () => request<{ data: Approval[] }>("GET", "/approvals"),
@@ -81,6 +93,9 @@ export const api = {
   events: <T>(id: string, after = 0, limit = 1000) =>
     request<T>("GET", `/runs/${encodeURIComponent(id)}/events?after=${after}&limit=${limit}`),
   workflow: <T>(name: string) => request<T>("GET", `/workflows/${encodeURIComponent(name)}`),
+  /** The run's integrity verdict. Read on load and on a status change — never per stream frame. */
+  integrity: (id: string) => request<Integrity>("GET", `/runs/${encodeURIComponent(id)}/integrity`),
+  policy: () => request<PolicyDoc>("GET", "/policy"),
   /** In bearer mode the body carries only `reason`; the API derives the principal from the
    *  token and REJECTS a body principal (422). In asserted mode the API requires one — the
    *  caller passes the principal the operator typed, and the UI labels it unverified. */

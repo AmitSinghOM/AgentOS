@@ -9,8 +9,9 @@ import { TUTORIAL_URL } from "./links";
 const POLL_MS = 3000;
 
 /** `onPending` lets the shell's nav badge follow this list instead of polling on its own while
- *  the inbox is on screen — one reader of /approvals, and the badge drops the moment a decision lands. */
-export function Inbox({ session, onPending, navigate }: { session: Session; onPending?: (n: number) => void; navigate: (r: Route) => void }) {
+ *  the inbox is on screen — one reader of /approvals, and the badge drops the moment a decision lands.
+ *  It carries the items, not a count, so the shell can tell a NEW arrival from one already shown (H6). */
+export function Inbox({ session, onPending, navigate }: { session: Session; onPending?: (items: Approval[]) => void; navigate: (r: Route) => void }) {
   const [items, setItems] = useState<Approval[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
@@ -19,7 +20,7 @@ export function Inbox({ session, onPending, navigate }: { session: Session; onPe
     try {
       const res = await api.approvals();
       setItems(res.data);
-      onPending?.(res.data.length);
+      onPending?.(res.data);
       setError(null);
     } catch (e) {
       setError(e instanceof ApiError ? `${e.status} ${e.detail}` : String(e));
