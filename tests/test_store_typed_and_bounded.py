@@ -430,3 +430,44 @@ def test_concurrent_reads_on_one_store_never_raise(store):
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(burst, range(8)))     # any InterfaceError propagates here
     assert all(r == 25 * (n + 3 + 1 + 1) for r in results)
+
+
+def test_migrate_is_serialised_with_reads(store):
+    """Four-seat review v0.16.0 (A3): `migrate()` is public and idempotent, so an operator or a
+    readiness path may re-run it on a live store. The SQLite adapter's class comment promises
+    "every statement goes through the lock", but migrate() ran its SELECT on the raw connection
+    outside the lock (and the lock was created AFTER the constructor's migrate). Overlapping with
+    a locked read it raises sqlite3.InterfaceError (SQLITE_MISUSE) exactly like the read/read
+    race above, or the unlocked SELECT gets another statement's rows and migrate() re-applies
+    schema it already has (seen as a non-empty return on a re-run). Every adapter with a
+    migrate(): a re-run must apply nothing and never collide with reads."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    if not hasattr(store, "migrate"):
+        pytest.skip("adapter has no schema to migrate")
+    assert store.migrate() == [], "precondition: single-threaded re-run applies nothing"
+
+    run_id = "mig-run"
+    store.put_workflow(WorkflowDefinition(name="w", version=3, nodes=[{"id": "s1", "agent": "a"}]))
+    written = chain(every_event_type(run_id), 0, None)
+    store.append_events(run_id, 0, written)
+    n = len(written)
+    barrier = threading.Barrier(8)
+
+    def burst(i: int) -> int:
+        barrier.wait(timeout=5)
+        total = 0
+        for _ in range(25):
+            if i % 2:
+                total += 0 if store.migrate() == [] else 10_000   # nothing pending on a re-run
+                total += store.schema_version() > 0
+            else:
+                total += len(store.read_events(run_id))
+                total += store.schema_version() > 0
+        return total
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(burst, range(8)))     # any InterfaceError propagates here
+    assert [r for r in results[1::2]] == [25 * 1] * 4
+    assert [r for r in results[0::2]] == [25 * (n + 1)] * 4

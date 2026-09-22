@@ -85,8 +85,10 @@ class SqliteStore:
                                      isolation_level=None)  # autocommit; explicit BEGIN
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
-        self.migrate()
+        # The lock exists before the first migrate(): migrate() is public and idempotent, so it
+        # can be re-run on a live store, and it must serialise with reads like every statement.
         self._lock = threading.RLock()
+        self.migrate()
 
     # Every statement goes through the lock — reads too. `check_same_thread=False` lets the API's
     # thread pool share the connection, and sqlite3 connections are not safe for two overlapping
@@ -102,13 +104,18 @@ class SqliteStore:
             return self._conn.execute(sql, params).fetchall()
 
     def migrate(self) -> list[int]:
-        """Apply pending schema migrations (dagentos/store/migrations.py); idempotent."""
-        return migrations.apply(
-            "sqlite", SCHEMA, self._conn.executescript,
-            lambda: {r[0] for r in self._conn.execute(
-                "SELECT version FROM schema_migrations").fetchall()},
-            lambda v, d, at: self._conn.execute(
-                "INSERT OR IGNORE INTO schema_migrations VALUES (?, ?, ?)", (v, d, at)))
+        """Apply pending schema migrations (dagentos/store/migrations.py); idempotent.
+
+        Held under the lock end to end: the version SELECT, each script and each version
+        INSERT are statements on the shared connection, and a re-run overlapping a locked
+        read otherwise gets that read's rows (four-seat review v0.16.0, A3)."""
+        with self._lock:
+            return migrations.apply(
+                "sqlite", SCHEMA, self._conn.executescript,
+                lambda: {r[0] for r in self._conn.execute(
+                    "SELECT version FROM schema_migrations").fetchall()},
+                lambda v, d, at: self._conn.execute(
+                    "INSERT OR IGNORE INTO schema_migrations VALUES (?, ?, ?)", (v, d, at)))
 
     def schema_version(self) -> int:
         (v,) = self._one("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
