@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, api } from "./api";
+import { ApiError, Approval, api } from "./api";
+import { ApprovalCard, ApprovalRecord, Outcome, OutcomesList } from "./ApprovalCard";
 import { CostPanel } from "./CostPanel";
 import { NODE_H, NODE_LABEL, NODE_W, NodeView, Point, RunState, WorkflowDef, WorkflowNodeDef, layout, nodeState } from "./graph";
 import { Link, Route } from "./router";
@@ -214,6 +215,7 @@ export function RunGraph({ runId, navigate, session }: { runId: string; navigate
   const [atRun, setAtRun] = useState<RunState | null>(null);    // the SERVER's fold through `at`
   const [atError, setAtError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null); // node whose detail + events are shown
+  const [outcomes, setOutcomes] = useState<Outcome[]>([]);      // decisions made from this page
   const debounce = useRef<number | null>(null);
   const lastId = useRef<string | null>(null);
   const eventsRef = useRef<EventRecord[]>([]);     // what we hold, so refetch asks only for what follows
@@ -339,7 +341,14 @@ export function RunGraph({ runId, navigate, session }: { runId: string; navigate
 
   const shown = at === null ? run : atRun;      // live fold, or the SERVER's fold through `at`
 
-  const pending = Object.values(run.approvals).filter((a) => a.status === "pending").length;
+  // Approvals as the SHOWN fold carries them (live, or the server's fold through `at`), with
+  // run_id/workflow re-attached for the shared card. Decisions are offered only on the live fold:
+  // a historical fold's "pending" may be decided already, and the card would disagree with the API.
+  const approvals: Approval[] = Object.values((shown ?? run).approvals).map((a) => ({ ...a, run_id: run.id, workflow: run.workflow }));
+  const pendingApprovals = approvals.filter((a) => a.status === "pending");
+  const decidable = at === null;
+  const decidedApprovals = approvals.filter((a) => a.status !== "pending")
+    .sort((x, y) => (x.decided_at ?? "").localeCompare(y.decided_at ?? ""));
   const versionMismatch = def !== null && def.version !== run.workflow_version;
   const selectedNode = def?.nodes.find((n) => n.id === selected) ?? null;
   // The step's own events plus run-level ones (no step_id): the run's frame around the step.
@@ -368,12 +377,6 @@ export function RunGraph({ runId, navigate, session }: { runId: string; navigate
           <span className="muted" title={run.started_at}>started {fmtDateTime(run.started_at)} · {fmtAgo(run.started_at)}</span>
         </p>
         <RunControls run={run} session={session} onDone={() => { void refetch(); }} />
-        {pending > 0 && (
-          <p role="note" className="hint">
-            {pending} approval{pending > 1 ? "s" : ""} waiting —{" "}
-            <Link to={{ page: "inbox" }} navigate={navigate}>decide in the inbox</Link>.
-          </p>
-        )}
         {run.error && <p role="alert" className="error">{run.error}</p>}
         {versionMismatch && (
           <p role="alert" className="error">
@@ -385,6 +388,48 @@ export function RunGraph({ runId, navigate, session }: { runId: string; navigate
       </header>
 
       {atError && <p role="alert" className="error">Could not load state at seq {at}: {atError}</p>}
+      {approvals.length > 0 && (
+        <section className="panel approvals" role="region" aria-labelledby="approvals-heading">
+          <div className="panel__head">
+            <h3 id="approvals-heading">Approvals{pendingApprovals.length > 0 ? <span className="count">{pendingApprovals.length}</span> : null}</h3>
+            <p className="panel__sub">
+              {!decidable
+                ? <>Gates as the server's fold through seq <strong>{at}</strong> records them; decide from the live view. </>
+                : pendingApprovals.length > 0
+                ? "The run is suspended until each pending gate is decided; decide here or in the inbox. "
+                : "Every gate this run raised, as the log records it. "}
+              Decisions are recorded with who decided and why.
+            </p>
+          </div>
+          {!decidable && pendingApprovals.length > 0 && (
+            <ul className="approval-records" aria-label="pending approvals at this seq">
+              {pendingApprovals.map((a) => <ApprovalRecord key={a.approval_id} a={a} />)}
+            </ul>
+          )}
+          {decidable && pendingApprovals.length > 0 && (
+            <ul className="inbox inbox--inline">
+              {pendingApprovals.map((a) => (
+                <ApprovalCard
+                  key={a.approval_id}
+                  a={a}
+                  session={session}
+                  context={{ run, def }}
+                  linkToRun={false}
+                  navigate={navigate}
+                  onOutcome={(o) => setOutcomes((prev) => [o, ...prev].slice(0, 8))}
+                  onChanged={refetch}
+                />
+              ))}
+            </ul>
+          )}
+          {decidedApprovals.length > 0 && (
+            <ul className="approval-records" aria-label="decided approvals">
+              {decidedApprovals.map((a) => <ApprovalRecord key={a.approval_id} a={a} />)}
+            </ul>
+          )}
+          <OutcomesList outcomes={outcomes} />
+        </section>
+      )}
       {def && shown && (
         <section className="panel" aria-labelledby="graph-heading">
           <div className="panel__head">

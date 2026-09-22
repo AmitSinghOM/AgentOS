@@ -156,9 +156,9 @@ describe("nodeState precedence — one folded-run field per state", () => {
     expect(nodeState(run({ cancelled_steps: ["b"] }), node).status).toBe("cancelled");
   });
   it("awaiting approval when a PENDING approval names the step; a granted one does not", () => {
-    const pend = run({ approvals: { ap: { approval_id: "ap", step_id: "b", status: "pending", kind: "effect", effect_classes: ["spend"] } } });
+    const pend = run({ approvals: { ap: { approval_id: "ap", step_id: "b", status: "pending", kind: "effect", effect_classes: ["spend"], requested_at: "2026-09-20T00:00:04Z", expires_at: null } } });
     expect(nodeState(pend, node)).toMatchObject({ status: "awaiting_approval", detail: "spend" });
-    const granted = run({ approvals: { ap: { approval_id: "ap", step_id: "b", status: "granted", kind: "effect", effect_classes: ["spend"] } } });
+    const granted = run({ approvals: { ap: { approval_id: "ap", step_id: "b", status: "granted", kind: "effect", effect_classes: ["spend"], requested_at: "2026-09-20T00:00:04Z", expires_at: null } } });
     expect(nodeState(granted, node).status).toBe("pending");
   });
   it("retry backoff when a retry is scheduled", () => {

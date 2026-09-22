@@ -4,7 +4,7 @@
  *   - every frame lands in the ticker and triggers a refetch of the SERVER's folded run; node
  *     states come from that fold, not from the frames
  *   - nodes light up: pending → running → completed as the fold changes
- *   - a pending approval renders as "awaiting approval" and links to the inbox
+ *   - a pending approval renders as "awaiting approval" and the page carries its decision card
  *   - a pinned-version mismatch is stated, not hidden
  *   - the stream closing on a terminal run is "closed", not an error
  */
@@ -141,15 +141,16 @@ describe("run graph", () => {
     expect(streams).toBe(2);
   });
 
-  it("shows a pending approval on the node and links to the inbox", async () => {
+  it("shows a pending approval on the node and carries its decision card on the page", async () => {
     state = run({ status: "suspended", attempts: { a: 1 }, steps: [{ node_id: "a", attempt: 1, cost: { amount: "0", currency: "USD" } }],
-      approvals: { ap1: { approval_id: "ap1", step_id: "b", status: "pending", kind: "effect", effect_classes: ["spend"] } } });
+      approvals: { ap1: { approval_id: "ap1", step_id: "b", status: "pending", kind: "effect", effect_classes: ["spend"], requested_at: "2026-09-20T00:00:04Z", expires_at: null } } });
     render(<App />);
     await screen.findByRole("group", { name: /run graph/ });
     expect(nodeLabel("b")).toBe("b: awaiting approval");
-    const note = screen.getByRole("note");
-    expect(note).toHaveTextContent("1 approval waiting");
-    expect(within(note).getByRole("link", { name: /decide in the inbox/ })).toHaveAttribute("href", "/ui/");
+    const panel = screen.getByRole("region", { name: /approvals/i });
+    expect(panel).toHaveTextContent(/step "b" declares spend/);
+    expect(within(panel).getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(screen.queryByText(/decide in the inbox/)).not.toBeInTheDocument();
   });
 
   it("states a pinned-version mismatch instead of drawing the wrong graph silently", async () => {

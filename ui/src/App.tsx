@@ -75,7 +75,7 @@ export function App() {
         {needsToken && <TokenForm session={session} />}
         {session.me && (
           <>
-            {route.page === "inbox" && <Inbox session={session} onPending={setPending} />}
+            {route.page === "inbox" && <Inbox session={session} onPending={setPending} navigate={navigate} />}
             {route.page === "runs" && <RunList navigate={navigate} />}
             {route.page === "run" && <RunGraph runId={route.id} navigate={navigate} session={session} />}
           </>

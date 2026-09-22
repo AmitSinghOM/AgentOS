@@ -1,38 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, Approval, api } from "./api";
-import { fmtAgo } from "./fmt";
-import { focusPrincipalInput } from "./Session";
+import { ApprovalCard, ApprovalContext, Outcome, OutcomesList, approvalKey } from "./ApprovalCard";
 import type { Session } from "./Session";
+import type { RunState, WorkflowDef } from "./graph";
+import type { Route } from "./router";
 
 const POLL_MS = 3000;
 
-function describe(a: Approval): string {
-  if (a.kind === "cost") {
-    return `run cost ${a.cost_at_request ?? "?"} exceeded its ceiling; approving raises it to ${a.proposed_ceiling ?? "?"}`;
-  }
-  return `step "${a.step_id}" declares ${a.effect_classes.join(", ")}`;
-}
-
-function expiry(a: Approval): string {
-  if (!a.expires_at) return "no expiry";
-  const ms = new Date(a.expires_at).getTime() - Date.now();
-  if (Number.isNaN(ms)) return `expires ${a.expires_at}`;
-  if (ms <= 0) return "expired — the sweep will reject it";
-  const min = Math.round(ms / 60000);
-  return min < 1 ? "expires in under a minute" : `expires in ${min} min`;
-}
-
-interface Outcome { id: number; key: string; text: string; ok: boolean }
-let outcomeSeq = 0;   // stable keys for a prepend-ordered list; index keys re-associate rows
-
 /** `onPending` lets the shell's nav badge follow this list instead of polling on its own while
  *  the inbox is on screen — one reader of /approvals, and the badge drops the moment a decision lands. */
-export function Inbox({ session, onPending }: { session: Session; onPending?: (n: number) => void }) {
+export function Inbox({ session, onPending, navigate }: { session: Session; onPending?: (n: number) => void; navigate: (r: Route) => void }) {
   const [items, setItems] = useState<Approval[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [reasons, setReasons] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState<string | null>(null);
-  const [verbInFlight, setVerbInFlight] = useState<"approve" | "reject" | null>(null);
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
 
   const refresh = useCallback(async () => {
@@ -52,26 +31,14 @@ export function Inbox({ session, onPending }: { session: Session; onPending?: (n
     return () => window.clearInterval(t);
   }, [refresh]);
 
-  const decide = async (a: Approval, verb: "approve" | "reject") => {
-    const key = `${a.run_id}:${a.approval_id}`;
-    setBusy(key);
-    setVerbInFlight(verb);
-    try {
-      const principal = session.unverified ? session.actingAs ?? undefined : undefined;
-      await api.decide(a, verb, reasons[key] ?? "", principal);
-      setOutcomes((o) => [{ id: ++outcomeSeq, key, ok: true,
-        text: `${verb === "approve" ? "Approved" : "Rejected"} ${a.step_id ?? "cost ceiling"} on run ${a.run_id.slice(0, 8)} as ${session.actingAs?.id ?? "?"}` }, ...o].slice(0, 8));
-      await refresh();
-    } catch (e) {
-      const text = e instanceof ApiError ? `${e.status}: ${e.detail}` : String(e);
-      setOutcomes((o) => [{ id: ++outcomeSeq, key, ok: false, text: `${verb} failed — ${text}` }, ...o].slice(0, 8));
-    } finally {
-      setBusy(null);
-      setVerbInFlight(null);
-    }
+  /** The inbox lists approvals, not runs; the run and its definition are fetched only when the
+   *  operator opens "what this approves" on a card — never on the 3 s poll. */
+  const loadContext = (a: Approval) => async (): Promise<ApprovalContext> => {
+    const run = await api.run<RunState>(a.run_id);
+    let def: WorkflowDef | null = null;
+    try { def = await api.workflow<WorkflowDef>(a.workflow); } catch { def = null; }   // the run is the point; the definition is a bonus
+    return { run, def };
   };
-
-  const canDecide = session.actingAs !== null;
 
   return (
     <section aria-labelledby="inbox-heading">
@@ -90,71 +57,20 @@ export function Inbox({ session, onPending }: { session: Session; onPending?: (n
         </div>
       )}
       <ul className="inbox">
-        {items?.map((a) => {
-          const key = `${a.run_id}:${a.approval_id}`;
-          return (
-            <li key={key} className={`approval card approval--${a.kind}`}>
-              <div className="approval__head">
-                <span className="approval__wf"><strong>{a.workflow}</strong></span>
-                <span className="muted">run</span>
-                <code className="mono" title={a.run_id}>{a.run_id.slice(0, 8)}</code>
-                <span className="approval__badges">
-                  <span className={`kind kind--${a.kind}`}>{a.kind}</span>
-                  {a.effect_classes.map((c) => <span key={c} className={`chip chip--effect chip--${c}`}>{c}</span>)}
-                </span>
-              </div>
-              <p className="approval__what">{describe(a)}</p>
-              <p className="approval__meta">
-                requested <time dateTime={a.requested_at} title={a.requested_at}>{fmtAgo(a.requested_at)}</time>
-                <span className="sep">·</span>{expiry(a)}
-                {a.reason && a.reason !== describe(a) && a.reason.replace(/'/g, '"') !== describe(a)
-                  ? <><span className="sep">·</span>{a.reason}</> : null}
-              </p>
-              <div className="approval__decide">
-                <label className="approval__reason">
-                  <span>Reason</span>
-                  <input
-                    aria-label={`reason for ${a.step_id ?? "cost"} on ${a.run_id.slice(0, 8)}`}
-                    value={reasons[key] ?? ""}
-                    placeholder="optional — recorded in the log"
-                    onChange={(e) => setReasons((r) => ({ ...r, [key]: e.target.value }))}
-                  />
-                </label>
-                <div className="approval__actions">
-                  <button type="button" className="primary" disabled={!canDecide || busy === key}
-                          aria-busy={busy === key && verbInFlight === "approve" ? true : undefined}
-                          onClick={() => void decide(a, "approve")}>
-                    {busy === key && verbInFlight === "approve" ? "Approving…" : "Approve"}
-                  </button>
-                  <button type="button" disabled={!canDecide || busy === key} className="danger"
-                          aria-busy={busy === key && verbInFlight === "reject" ? true : undefined}
-                          onClick={() => void decide(a, "reject")}>
-                    {busy === key && verbInFlight === "reject" ? "Rejecting…" : "Reject"}
-                  </button>
-                </div>
-              </div>
-              {!canDecide && (
-                <p role="note" className="hint approval__locked">
-                  Decisions are disabled until the API knows who is deciding —{" "}
-                  <button type="button" className="linklike" onClick={focusPrincipalInput}>enter your id in the top bar</button>.
-                </p>
-              )}
-            </li>
-          );
-        })}
+        {items?.map((a) => (
+          <ApprovalCard
+            key={approvalKey(a)}
+            a={a}
+            session={session}
+            loadContext={loadContext(a)}
+            linkToRun
+            navigate={navigate}
+            onOutcome={(o) => setOutcomes((prev) => [o, ...prev].slice(0, 8))}
+            onChanged={refresh}
+          />
+        ))}
       </ul>
-      {outcomes.length > 0 && (
-        <section className="outcomes-wrap" aria-labelledby="outcomes-heading">
-          <h3 id="outcomes-heading">Recent decisions</h3>
-          <ul className="outcomes" aria-label="recent decisions">
-            {outcomes.map((o) => (
-              <li key={o.id} role={o.ok ? "status" : "alert"} className={o.ok ? "ok" : "error"}>
-                {o.text}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <OutcomesList outcomes={outcomes} />
     </section>
   );
 }

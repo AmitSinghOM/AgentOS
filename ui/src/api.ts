@@ -22,6 +22,10 @@ export interface Approval {
   reason?: string;
   cost_at_request?: string | null;
   proposed_ceiling?: string | null;
+  /** Present once decided (the fold carries them; GET /approvals only lists pending ones). */
+  decided_by?: Principal | null;
+  decision_reason?: string;
+  decided_at?: string | null;
 }
 
 export class ApiError extends Error {

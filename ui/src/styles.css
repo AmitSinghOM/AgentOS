@@ -151,8 +151,33 @@ input:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb,
 .approval__decide { display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap; padding-top: 0.9rem; border-top: 1px solid var(--line); }
 .approval__reason { flex: 1 1 18rem; display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; color: var(--fg-muted); }
 .approval__reason input { width: 100%; box-sizing: border-box; }
-.approval__actions { display: flex; gap: 0.5rem; }
+.approval__actions { display: flex; gap: 0.5rem; align-items: center; }
+.approval__as { font-size: 0.85rem; margin-right: 0.35rem; white-space: nowrap; }
 .approval__locked { margin: 0.6rem 0 0; }
+.approval__consequence { margin: 0.55rem 0 0; }
+.approval__warn { margin: 0.6rem 0 0; padding: 0.5rem 0.75rem; font-size: 0.88rem; border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 9%, var(--card)); }
+.approval__run { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--line-strong); }
+.approval__run:hover { border-bottom-color: var(--fg); }
+/* "what this approves": the run's inputs, the upstream outputs the step receives, the budget rule */
+.approval__ctx { margin: 0 0 0.9rem; padding: 0.7rem 0.9rem; border-radius: var(--radius-sm); background: var(--surface-2); font-size: 0.88rem; }
+.approval__ctx-list { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; }
+.approval__ctx-list dt { color: var(--fg-muted); text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; padding-top: 0.15rem; }
+.approval__ctx-list dd { margin: 0; min-width: 0; }
+.approval__json { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.82rem; }
+.tnum { font-variant-numeric: tabular-nums; }
+.approval__upstream { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.2rem; }
+.inbox--inline { padding: 0.9rem 1.1rem; }
+.inbox--inline .approval { border-left-width: 3px; }
+/* decided approvals: the log's record, one row each */
+.approval-records { list-style: none; margin: 0; padding: 0.35rem 1.1rem 0.6rem; }
+.approval-record { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; padding: 0.5rem 0; border-top: 1px solid var(--line); font-size: 0.9rem; }
+.approval-record:first-child { border-top: 0; }
+.approval-record__why { font-style: italic; }
+.status--approval-granted { color: var(--ok); }
+.status--approval-rejected { color: var(--bad); }
+.status--approval-pending { color: var(--warn); }
+.approvals .outcomes-wrap { margin: 0.5rem 1.1rem 0.8rem; }
 .outcomes-wrap { margin-top: 1.5rem; }
 .outcomes { list-style: none; padding: 0; margin: 0; }
 .outcomes li { padding: 0.4rem 0; border-top: 1px solid var(--line); font-size: 0.9rem; }
