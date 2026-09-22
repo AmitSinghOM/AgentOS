@@ -14,6 +14,7 @@ import { App } from "./App";
 import type { Approval } from "./api";
 import type { RunState, WorkflowDef } from "./graph";
 import { resetPolicyCache } from "./permission";
+import MATRIX from "../../tests/fixtures/agent_approval_matrix.json";
 
 const DEF: WorkflowDef = { name: "payments", version: 1, nodes: [
   { id: "a", agent: "calc", depends_on: [] }, { id: "pay", agent: "payer", depends_on: ["a"] },
@@ -28,7 +29,7 @@ const PENDING: Approval = {
 function base(over: Partial<RunState>): RunState {
   return { id: "run1", workflow: "payments", workflow_version: 1, status: "suspended", steps: [], attempts: {},
     progress: {}, dead_lettered: {}, failed_steps: {}, pending_retries: {}, cancelled_steps: [], approvals: {},
-    total_cost: "0.10", last_seq: 4, started_at: "2026-09-20T00:00:00Z", ...over };
+    total_cost: "0.10", last_seq: 4, sealed_through: 4, started_at: "2026-09-20T00:00:00Z", ...over };
 }
 const SUSPENDED = base({ attempts: { a: 1 },
   steps: [{ node_id: "a", attempt: 1, cost: { amount: "0.10", currency: "USD" }, output: {} }],
@@ -93,6 +94,9 @@ describe("U10 integrity verdict on the run header", () => {
     expect(chip).toHaveTextContent(/verified/);
     expect(chip).toHaveAttribute("title", expect.stringMatching(/4 of 4 events hashed/));
     expect(chip).toHaveAttribute("title", expect.stringMatching(/sealed through 4/));
+    // Four-seat review A4: the verdict subsumes the older `sealed ≤ N` fact chip, so the header
+    // states the seal reach once (in this title), not twice.
+    expect(screen.queryByText(/sealed ≤/)).toBeNull();
     // the run page refetches the fold on control; the verdict is not refetched with it
     expect(gets("/runs/run1/integrity")).toHaveLength(1);
   });
@@ -175,6 +179,27 @@ describe("H5 permission before the click — wording only", () => {
     const note = await screen.findByRole("note", { name: /human-only approval/ });
     await waitFor(() => expect(note).toHaveTextContent(/The API will accept this/));
     expect(note).toHaveTextContent(/agent:bot/);
+  });
+
+  // One truth table, two consumers: tests/test_ui_engine_drift.py drives engine.approve through the
+  // same rows with a non-human principal. If the engine's rule and this wording ever diverge, one of
+  // the two runners goes red -- the UI must not speak for the engine from a copy nobody checks.
+  describe("matches tests/fixtures/agent_approval_matrix.json row for row", () => {
+    for (const row of MATRIX.rows) {
+      const label = `workflow allow=${row.workflow_allow_agent_approval} policy=${String(row.policy_agent_approval_allowed)}`;
+      it(`${label} -> ${row.accept ? "accept" : "refuse"}`, async () => {
+        def = { ...DEF, budget: { ...DEF.budget, allow_agent_approval: row.workflow_allow_agent_approval } };
+        policy = row.policy_agent_approval_allowed === null
+          ? { sha256: null, policy: null }
+          : { sha256: "abc", policy: { agent_approval_allowed: row.policy_agent_approval_allowed } };
+        window.history.pushState(null, "", "/ui/");
+        render(<App />);
+        const note = await screen.findByRole("note", { name: /human-only approval/ });
+        await waitFor(() => expect(note).toHaveTextContent(row.accept ? /The API will accept this/ : /The API will refuse this/));
+        expect(note).toHaveTextContent(row.sentence);
+        expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();   // wording only; the API decides
+      });
+    }
   });
 
   it("does not fetch policy or the definition for a human principal", async () => {

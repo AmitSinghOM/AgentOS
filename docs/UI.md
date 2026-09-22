@@ -63,7 +63,8 @@ Development: `cd ui && npm run dev` serves the app on `:5173` and proxies API pa
   verified` / `unsigned` / `seal unverifiable` / `seal INVALID` / `chain broken`, with the counts
   and the API's problem text in the title. It is read on load and again when the run's status
   changes (seals land at idle/terminal), never per stream frame — the check reads the whole log.
-  The older `sealed ≤ N` chip is the fact; this is the verdict.
+  The older `sealed ≤ N` fact chip is gone: the verdict's title states the seal reach, so the
+  header says it once.
 
 ## Timeline and time travel
 

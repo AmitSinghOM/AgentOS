@@ -1,0 +1,11 @@
+{
+  "_comment": "One truth table, two consumers. pytest (tests/test_ui_engine_drift.py) drives engine.approve with a NON-HUMAN principal through every row; vitest (ui/src/debate2.test.tsx) renders the ApprovalCard's verdict sentence for the same rows. If the engine's rule and the UI's wording ever disagree, one of the two runners goes red. Keys: workflow_allow_agent_approval = Budget.allow_agent_approval on the workflow; policy_agent_approval_allowed = OperatorPolicy.agent_approval_allowed (null = no policy configured); accept = whether engine.approve records the grant for a non-human principal on a human-only gate.",
+  "rows": [
+    {"workflow_allow_agent_approval": false, "policy_agent_approval_allowed": null,  "accept": false, "sentence": "does not allow agent approval"},
+    {"workflow_allow_agent_approval": true,  "policy_agent_approval_allowed": null,  "accept": true,  "sentence": "The API will accept this"},
+    {"workflow_allow_agent_approval": true,  "policy_agent_approval_allowed": false, "accept": false, "sentence": "operator policy forbids agent approval"},
+    {"workflow_allow_agent_approval": true,  "policy_agent_approval_allowed": true,  "accept": true,  "sentence": "The API will accept this"},
+    {"workflow_allow_agent_approval": false, "policy_agent_approval_allowed": true,  "accept": false, "sentence": "does not allow agent approval"},
+    {"workflow_allow_agent_approval": false, "policy_agent_approval_allowed": false, "accept": false, "sentence": "operator policy forbids it too"}
+  ]
+}
