@@ -31,7 +31,8 @@ ROWS = json.loads(MATRIX.read_text())["rows"]
 
 def test_ui_human_only_effects_equal_the_engines():
     src = CARD.read_text()
-    m = re.search(r"export const HUMAN_ONLY_EFFECTS = new Set\(\[(.*?)\]\);", src)
+    # re.S: a formatter may break the literal across lines; that is not drift and must not fail.
+    m = re.search(r"export const HUMAN_ONLY_EFFECTS = new Set\(\[(.*?)\]\);", src, re.S)
     assert m, "ApprovalCard.tsx no longer declares HUMAN_ONLY_EFFECTS as a Set literal"
     ui = {s.strip().strip("\"'") for s in m.group(1).split(",") if s.strip()}
     assert ui == {c.value for c in HUMAN_ONLY_EFFECTS}, (
