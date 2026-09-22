@@ -20,6 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
+
+pytest.importorskip("agentos_provider_pydantic_ai")   # pyproject testpaths: skip when not installed
 from agentos_provider_pydantic_ai import (
     BUILTIN_TOOLS,
     AuthenticationFailed,

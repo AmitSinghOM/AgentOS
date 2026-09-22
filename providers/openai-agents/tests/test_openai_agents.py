@@ -15,6 +15,8 @@ Boundaries under test:
 from __future__ import annotations
 
 import pytest
+
+pytest.importorskip("agentos_provider_openai_agents")   # pyproject testpaths: skip when not installed
 from agentos_provider_openai_agents import (
     BUILTIN_TOOLS,
     BadResponse,
