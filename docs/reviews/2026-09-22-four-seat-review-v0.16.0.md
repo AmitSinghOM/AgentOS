@@ -16,7 +16,7 @@ the repo in the reviewer's workspace; this file is the durable summary.
 | | before | after |
 |---|---|---|
 | Findings ≥ 80% on the range | 3 (0 critical, 0 high, 1 medium, 2 low) | 0 open |
-| Debate items | 14 raised | 4 accepted + fixed, 9 declined with evidence, 1 deferred |
+| Debate items | 14 raised | 4 accepted + fixed, 9 declined with evidence, 1 deferred; +1 accepted from the closing gate (A5) |
 | CQA (`cqa-analyzer` 3.4.1, offline) | 8.8 / Excellent, 85 findings, 0 errors | 8.8 / Excellent, **83** findings, 0 new |
 | Self-review over the fix commits | — | 1 finding (R1), fixed |
 
@@ -32,6 +32,7 @@ stale-invariant fix in the store, and one redundant control.
 | A2 | P + C | `docs/tutorial.md` prints absolute numbers (gate at `seq 5`, `?at=5`, `202`, `422`, the 17-row table) while `tests/test_tutorial.py` pinned only relative order, so the page could go stale with the test green. CQA also flagged the one 62-line test (PY-MAINT-001/003). | Split into fixtures + 9 tests; the seq table is a literal `TUTORIAL_LOG` compared row by row; a prose-pin test asserts the page still quotes each number; the engine is advanced in-process where the page says "the worker" (same `engine.advance` the worker calls; the lease adds no event type). | `tests/test_tutorial.py` (9 tests) | Changing the doc's `run.suspended` row from seq 9 to 8 → the prose test fails; restore → 9 passed. Both CQA hits on the file gone. |
 | A3 | S | `SqliteStore.migrate()` ran its SELECT, scripts and INSERTs on the raw connection outside the lock, and the lock was created *after* the constructor's `migrate()`, while the class comment added in #94 promised "every statement goes through the lock". `migrate()` is public and idempotent, so a re-run on a live store can overlap a read. | Lock created before the first `migrate()`; `migrate()` holds it end to end. | `test_migrate_is_serialised_with_reads` (8-thread barrier: half re-run `migrate()`, half read; memory adapter skipped, no schema) | Fails 3/3 on the old code on both SQLite adapters (`IndexError` at `r[0]` from another statement's rows, or a non-empty applied list on an idempotent re-run); passes 3/3 after. |
 | A4 | C | Two header chips said the seal reach twice: the `sealed ≤ N` fact chip and the #98 verdict chip whose title already states "sealed through N" (DEBATE-3 J4, parked until #98 merged). | Chip removed; `docs/UI.md` updated. | `debate2.test.tsx`: run fixture carries `sealed_through` (so the old chip would render) and the verdict test asserts no `sealed ≤` text while the title still carries the seq. | Fails on the previous commit, passes after; tsc clean. |
+| A5 | S (found by the closing gate; out of range) | `pyproject.toml`'s `testpaths` lists every provider's tests and says they `importorskip` when the provider is not installed. True for `openai-compat` and `anthropic`; the two newest, `openai-agents` and `pydantic-ai`, imported their package at module top, so a root `pytest` on any host without those two distributions aborted at collection. CI never saw it because it installs all four. | `pytest.importorskip(...)` ahead of the import in both files, matching the older two. | The root run itself: it collects on a host without the providers. | Before: `2 errors` at collection, suite never ran. After: 466 passed, 13 skipped. |
 
 ## Declined — with the evidence that cleared each
 
@@ -72,6 +73,18 @@ The two gone are the tutorial test's PY-MAINT-001 and PY-MAINT-003 (A2's split);
 inside the range's files, seven were pre-existing or documented boundary patterns (D7–D9) and two
 were the tutorial test's — the expected shape for a hardened repo, where most in-diff CQA hits are
 documented patterns rather than defects.
+
+## Closing gate (branch tip)
+
+- Python: `pytest -q --ignore=tests/chaos` — **466 passed, 13 skipped**, exit 0 (the skips are the
+  PostgreSQL-only and provider-not-installed cases). `ruff check .` clean at the version CI installs.
+- UI (Node 22): `tsc --noEmit` clean; `vitest run` — **13 files, 99 tests passed**.
+- CQA: 8.8 / Excellent, 83 findings, zero new against the `a413d83` baseline.
+
+Two host-side facts worth recording for whoever runs this locally: a globally installed
+`pytest-asyncio` (not a dependency of this repo) breaks collection under pytest 9.1 (`-p no:asyncio`
+clears it), and a stale local `ruff` (0.8.x) reports E402 on all four providers' tests that the
+version CI installs (0.16.x) does not — match CI's version before trusting a lint result.
 
 ## What this pass did not do
 
