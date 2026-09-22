@@ -77,7 +77,7 @@ export function App() {
           <>
             {route.page === "inbox" && <Inbox session={session} onPending={setPending} />}
             {route.page === "runs" && <RunList navigate={navigate} />}
-            {route.page === "run" && <RunGraph runId={route.id} navigate={navigate} />}
+            {route.page === "run" && <RunGraph runId={route.id} navigate={navigate} session={session} />}
           </>
         )}
       </main>

@@ -83,4 +83,14 @@ export const api = {
   decide: (a: Approval, verb: "approve" | "reject", reason: string, principal?: Principal) =>
     request<unknown>("POST", `/runs/${a.run_id}/approvals/${a.approval_id}/${verb}`,
       principal ? { principal, reason } : { reason }),
+  /** Run controls (C5). Same body rule as `decide`: bearer mode sends only `reason`; asserted
+   *  mode sends the principal the operator typed. The API answers 409 when the fold forbids the
+   *  verb (cancel on a terminal run, resume on a run that is not paused) — shown verbatim. */
+  control: (runId: string, verb: "cancel" | "pause" | "resume", reason: string, principal?: Principal) =>
+    request<unknown>("POST", `/runs/${encodeURIComponent(runId)}/${verb}`,
+      principal ? { principal, reason } : { reason }),
+  /** Reopen a failed or dead-lettered step (C11); 409 unless the fold says it is retryable. */
+  retry: (runId: string, stepId: string, reason: string, principal?: Principal) =>
+    request<unknown>("POST", `/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/retry`,
+      principal ? { principal, reason } : { reason }),
 };
