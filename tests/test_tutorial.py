@@ -172,7 +172,7 @@ def test_tutorial_prose_quotes_the_numbers_the_test_pins():
     for seq, event, step in TUTORIAL_LOG:
         if event.startswith("step."):
             continue                                         # grouped as 2–4 etc. in the table
-        assert re.search(rf"^\| {seq} \| `{re.escape(event)}`", text, re.M), \
+        assert re.search(rf"^\| {seq} \| `{re.escape(event)}`", text, re.MULTILINE), \
             f"tutorial table lacks row seq {seq} {event}"
 
 
