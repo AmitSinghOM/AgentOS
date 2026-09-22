@@ -1,5 +1,5 @@
 // Two routes under /ui; the API serves index.html for any /ui/* so real URLs work on reload.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export type Route = { page: "inbox" } | { page: "runs" } | { page: "run"; id: string };
 
@@ -34,10 +34,10 @@ export function useRoute(): [Route, (r: Route) => void] {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-  const navigate = (r: Route) => {
+  const navigate = useCallback((r: Route) => {
     window.history.pushState(null, "", href(r));
     setRoute(r);
-  };
+  }, []);
   return [route, navigate];
 }
 

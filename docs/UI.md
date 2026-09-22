@@ -59,6 +59,11 @@ Development: `cd ui && npm run dev` serves the app on `:5173` and proxies API pa
   cannot send headers and a token in the URL is not acceptable. Every frame lands in the event
   ticker and schedules one debounced refetch of the folded run. On the server's close the page
   reconnects with `Last-Event-ID` unless the run is terminal.
+- **The integrity verdict** is a chip on the header from `GET /runs/{id}/integrity`: `integrity
+  verified` / `unsigned` / `seal unverifiable` / `seal INVALID` / `chain broken`, with the counts
+  and the API's problem text in the title. It is read on load and again when the run's status
+  changes (seals land at idle/terminal), never per stream frame — the check reads the whole log.
+  The older `sealed ≤ N` chip is the fact; this is the verdict.
 
 ## Timeline and time travel
 
@@ -80,7 +85,14 @@ the UI computes from events rather than from the fold. It follows the time-trave
 
 ## What it deliberately does not do
 
-- No client-side authorization. Whether an agent may approve `spend` is the engine's call.
+- No client-side authorization. Whether an agent may approve `spend` is the engine's call. The
+  card *words* that call when it is knowable — a non-human principal facing a human-only class
+  sees "The API will refuse this: workflow … does not allow agent approval / the operator policy
+  forbids it" from `GET /workflows/{name}` and `GET /policy` (`ui/src/permission.ts`) — but the
+  button stays live, because policy can change between the read and the click.
+- Notifications are opt-in (a switch in the top bar, `localStorage` `agentos.notify`), fire only
+  for a gate that arrived after the page loaded, name the workflow, step and effect class, and
+  open the run on click. They carry no decision: there is no approve in a notification.
 - No token anywhere but `sessionStorage`: not `localStorage` (survives the tab), not a cookie
   (CSRF surface, a second auth path), not a query string (SSE would need one — so the inbox
   polls instead of streaming).

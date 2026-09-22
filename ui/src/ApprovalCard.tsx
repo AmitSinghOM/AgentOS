@@ -8,9 +8,10 @@
  * engine's human-only rule but never disables for it, because `allow_agent_approval` can make
  * the API accept what the UI would have refused (the pass-1 pause lesson).
  */
-import { useState } from "react";
-import { ApiError, Approval, api } from "./api";
+import { useEffect, useState } from "react";
+import { ApiError, Approval, PolicyDoc, api } from "./api";
 import { fmtAgo, fmtDateTime } from "./fmt";
+import { agentApprovalSentence, agentApprovalVerdict, policy } from "./permission";
 import { focusPrincipalInput } from "./Session";
 import type { Session } from "./Session";
 import type { RunState, WorkflowDef } from "./graph";
@@ -144,6 +145,25 @@ export function ApprovalCard({ a, session, context, loadContext, linkToRun, navi
   const warnNonHuman = actor !== null && actor.kind !== "human" && humanOnly.length > 0;
   const ctx = context ?? fetched;
 
+  // H5: only while the warning is on screen (a non-human actor — rare), read what the API will do.
+  // The definition may already be on screen (run page) or fetched for the disclosure; the policy
+  // is one document per deployment, read once per page load.
+  const [verdictDef, setVerdictDef] = useState<WorkflowDef | null>(null);
+  const [verdictPolicy, setVerdictPolicy] = useState<PolicyDoc | null>(null);
+  const knownDef = ctx?.def ?? verdictDef;
+  useEffect(() => {
+    if (!warnNonHuman) return;
+    let alive = true;
+    if (!knownDef) {
+      api.workflow<WorkflowDef>(a.workflow).then((d) => { if (alive) setVerdictDef(d); }).catch(() => { /* wording stays generic */ });
+    }
+    if (!verdictPolicy) {
+      policy().then((p) => { if (alive) setVerdictPolicy(p); }).catch(() => { /* wording stays generic */ });
+    }
+    return () => { alive = false; };
+  }, [warnNonHuman, a.workflow, knownDef, verdictPolicy]);
+  const verdictSentence = warnNonHuman ? agentApprovalSentence(agentApprovalVerdict(knownDef, verdictPolicy), a.workflow) : null;
+
   const toggleContext = async () => {
     const next = !open;
     setOpen(next);
@@ -238,8 +258,9 @@ export function ApprovalCard({ a, session, context, loadContext, linkToRun, navi
       {warnNonHuman && (
         <p role="note" aria-label="human-only approval" className="approval__warn">
           This approval covers {humanOnly.join(", ")} and requires a human principal; you are{" "}
-          <code className="mono">{actor.kind}:{actor.id}</code>. The API will refuse unless the workflow's budget
-          allows agent approval.
+          <code className="mono">{actor.kind}:{actor.id}</code>.{" "}
+          {verdictSentence ?? "The API will refuse unless the workflow's budget allows agent approval."}
+          {" "}Whatever it decides is recorded as <code className="mono">{actor.kind}:{actor.id}</code>.
         </p>
       )}
       {!canDecide && (
