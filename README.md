@@ -181,13 +181,23 @@ agent names anything else; the cost and wall limits are minimums. Each run recor
 narrowing, so the log says which ceiling governed it. No `AGENTOS_POLICY` → no ceiling and a
 startup warning. Tests: `tests/test_policy.py`.
 
-### Operator UI (Phase 9, in progress)
+### Operator UI
 
-The API serves a small React app at `/ui` when `ui/dist` exists — today, the approvals inbox.
-It shows exactly who the log will name before any button is enabled (`GET /me`), keeps the
-bearer token in the tab's `sessionStorage` only, sends the API's own decision bodies, and shows
-the API's errors verbatim. In `asserted` mode the banner says **Unverified** and makes you type
-a principal. Build once: `cd ui && npm ci && npm run build`; details in `docs/UI.md`.
+The API serves a small React app at `/ui` — in the wheel and the image, no Node at runtime —
+with three screens: the **approvals inbox**, the **run list** (status filter held in the URL),
+and the **run page**: the DAG laid out by dagre with each node's state read from the server's
+folded run, the live stream as the trigger for refetches, a timeline with **time travel**
+(`GET /runs/{id}?at=k`, folded on the server, never in the browser), cost and latency per node,
+Pause / Resume / Cancel and per-step retry that mirror the engine's 409 rules, an integrity
+verdict chip from `GET /runs/{id}/integrity`, and decisions in place with the same
+`ApprovalCard` the inbox uses. Every decision control shows exactly who the log will name
+first (`GET /me`; in `asserted` mode the banner says **Unverified** and makes you type a
+principal), keeps the bearer token in the tab's `sessionStorage` only, sends the API's own
+bodies, and shows the API's errors verbatim. Three runtime dependencies, a ~325 kB bundle, a
+strict CSP (`frame-ancestors 'none'`) on every `/ui` response. Building from a checkout:
+`cd ui && npm ci && npm run build`; the contract and what the UI deliberately does not do are
+in [`docs/UI.md`](docs/UI.md), and [`docs/tutorial.md`](docs/tutorial.md) drives all three
+screens in ten minutes.
 
 ### Sealed chains and the `agentos` CLI
 
