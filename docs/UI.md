@@ -134,6 +134,9 @@ from the package version.
 
 ## Not yet
 
-A UI kit (deliberately none while the pages are tables and SVG), a CSP header for `/ui`, a
-store index behind `GET /runs` and `GET /approvals`, and versioned workflow definitions so the
-graph of an old run can be drawn from the definition it pinned.
+A UI kit (deliberately none while the pages are tables and SVG), a store index behind
+`GET /runs` and `GET /approvals`, assignment or routing of a pending decision to a person,
+declared choices or a form at the gate, and versioned workflow definitions so the graph of an
+old run can be drawn from the definition it pinned. The CSP on `/ui` responses (`default-src
+'self'`, `frame-ancestors 'none'`) has shipped since `v0.11.1` and is asserted by
+`tests/test_ui_mount.py`.
