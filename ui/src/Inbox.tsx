@@ -4,6 +4,7 @@ import { ApprovalCard, ApprovalContext, Outcome, OutcomesList, approvalKey } fro
 import type { Session } from "./Session";
 import type { RunState, WorkflowDef } from "./graph";
 import type { Route } from "./router";
+import { TUTORIAL_URL } from "./links";
 
 const POLL_MS = 3000;
 
@@ -51,10 +52,16 @@ export function Inbox({ session, onPending, navigate }: { session: Session; onPe
       {error && <p role="alert" className="error">Could not load approvals: {error}</p>}
       {items === null && !error && <p className="muted">Loading…</p>}
       {items !== null && items.length === 0 && (
-        <div className="empty empty--calm">
-          <p><strong>Nothing is waiting on a decision.</strong></p>
+        <section className="empty empty--calm" aria-labelledby="inbox-empty-heading">
+          <p id="inbox-empty-heading"><strong>Nothing is waiting on a decision.</strong></p>
           <p className="hint">A run appears here the moment one of its steps declares an effect (spend, external write, code execution) or exceeds its cost ceiling.</p>
-        </div>
+          <p className="hint">
+            To cause one: register an agent with <code>"declared_effects": ["spend"]</code>, put it in a workflow, start a run.
+            The run suspends before that step and its approval lands here. The{" "}
+            <a href={TUTORIAL_URL} target="_blank" rel="noopener noreferrer">tutorial</a> walks exactly that run —
+            define, start, watch it suspend, decide, verify the log, time-travel — in about ten minutes.
+          </p>
+        </section>
       )}
       <ul className="inbox">
         {items?.map((a) => (

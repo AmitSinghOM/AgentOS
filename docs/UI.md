@@ -33,6 +33,10 @@ Development: `cd ui && npm run dev` serves the app on `:5173` and proxies API pa
 - In `AGENTOS_AUTH=asserted` the banner says **Unverified**, explains that nothing checks the
   principal, and requires one to be typed before decisions are enabled; it is then sent in the
   body because the API requires it in that mode.
+- Empty, it says how to cause a gate (an agent with `declared_effects: ["spend"]` in a workflow)
+  and links [`docs/tutorial.md`](tutorial.md), which walks exactly that run. The empty runs list
+  links the same page. The link points at the public repo because the bundle ships without the
+  docs tree (`ui/src/links.ts`).
 
 ## The run graph (`/ui/runs/<id>`)
 

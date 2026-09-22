@@ -60,9 +60,11 @@ replay cost and are only a cache of the fold.
 
 ## Quick start
 
-Two paths. **With a real model, no API key** (recommended): [`docs/quickstart-llm.md`](docs/quickstart-llm.md) —
+Three paths. **With a real model, no API key** (recommended): [`docs/quickstart-llm.md`](docs/quickstart-llm.md) —
 Ollama + the `openai-compat` provider, five minutes, a poet and a critic on your laptop.
-**Without any model** (the mechanics only), below.
+**The approval gate, end to end**: [`docs/tutorial.md`](docs/tutorial.md) — a run that suspends
+before a `spend` step, decided as a named human, then the log that proves it and a rewind to the
+moment it stopped; ten minutes, no model. **Without any model** (the mechanics only), below.
 
 ```bash
 cp .env.example .env
