@@ -192,8 +192,9 @@ export function CopyId({ id }: { id: string }) {
   );
 }
 
-/** The integrity VERDICT (U10). The header used to show only `sealed ≤ N` — a fact, not a
- *  verdict; this is `GET /runs/{id}/integrity`'s word on the chain and the seals. Bad states
+/** The integrity VERDICT (U10). The header used to show a `sealed ≤ N` chip — a fact, not a
+ *  verdict; this is `GET /runs/{id}/integrity`'s word on the chain and the seals, and its title
+ *  carries the seal reach, so the fact chip was retired (four-seat review A4). Bad states
  *  (broken chain, INVALID seal) are red; `unsigned` is a note, since it is the documented
  *  default without AGENTOS_SIGNING_KEYS; `unverifiable` (a seal by a key the API does not hold)
  *  is amber. */
@@ -416,7 +417,6 @@ export function RunGraph({ runId, navigate, session }: { runId: string; navigate
           <span className="chip" title="workflow version this run is pinned to">v{run.workflow_version}</span>
           <span className="chip num" title="events in the log">{run.last_seq} events</span>
           <span className="chip num" title="run cost from the fold">cost {run.total_cost}</span>
-          {run.sealed_through != null && <span className="chip num" title="last seq covered by an integrity seal">sealed ≤ {run.sealed_through}</span>}
           {integrity && <IntegrityChip v={integrity} />}
           {run.policy_sha256 && <span className="chip mono" title={`operator policy sha256 ${run.policy_sha256}`}>policy {shortHash(run.policy_sha256)}</span>}
           <span className="muted" title={run.started_at}>started {fmtDateTime(run.started_at)} · {fmtAgo(run.started_at)}</span>

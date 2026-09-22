@@ -29,7 +29,7 @@ const PENDING: Approval = {
 function base(over: Partial<RunState>): RunState {
   return { id: "run1", workflow: "payments", workflow_version: 1, status: "suspended", steps: [], attempts: {},
     progress: {}, dead_lettered: {}, failed_steps: {}, pending_retries: {}, cancelled_steps: [], approvals: {},
-    total_cost: "0.10", last_seq: 4, started_at: "2026-09-20T00:00:00Z", ...over };
+    total_cost: "0.10", last_seq: 4, sealed_through: 4, started_at: "2026-09-20T00:00:00Z", ...over };
 }
 const SUSPENDED = base({ attempts: { a: 1 },
   steps: [{ node_id: "a", attempt: 1, cost: { amount: "0.10", currency: "USD" }, output: {} }],
@@ -94,6 +94,9 @@ describe("U10 integrity verdict on the run header", () => {
     expect(chip).toHaveTextContent(/verified/);
     expect(chip).toHaveAttribute("title", expect.stringMatching(/4 of 4 events hashed/));
     expect(chip).toHaveAttribute("title", expect.stringMatching(/sealed through 4/));
+    // Four-seat review A4: the verdict subsumes the older `sealed ≤ N` fact chip, so the header
+    // states the seal reach once (in this title), not twice.
+    expect(screen.queryByText(/sealed ≤/)).toBeNull();
     // the run page refetches the fold on control; the verdict is not refetched with it
     expect(gets("/runs/run1/integrity")).toHaveLength(1);
   });
