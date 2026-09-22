@@ -1,0 +1,9 @@
+{
+  "name": "diamond",
+  "nodes": [
+    {"id": "a", "agent": "calc", "depends_on": []},
+    {"id": "b", "agent": "calc", "depends_on": ["a"]},
+    {"id": "pay", "agent": "payer", "depends_on": ["a"]},
+    {"id": "d", "agent": "calc", "depends_on": ["b", "pay"]}
+  ]
+}

@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-USER_FACING = [ROOT / "README.md", ROOT / "docs" / "quickstart-llm.md",
+USER_FACING = [ROOT / "README.md", ROOT / "docs" / "quickstart-llm.md", ROOT / "docs" / "tutorial.md",
                ROOT / "providers" / "openai-compat" / "README.md",
                ROOT / "providers" / "anthropic" / "README.md"]
 # Phrases that would mean "you need an account somewhere to follow this page".

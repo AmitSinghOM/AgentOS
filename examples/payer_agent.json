@@ -1,0 +1,1 @@
+{"name": "payer", "type": "echo", "declared_effects": ["compute", "spend"], "config": {"message": "paid"}}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError, RunSummary, api } from "./api";
 import { fmtAgo } from "./fmt";
 import { Link, Route } from "./router";
+import { TUTORIAL_URL } from "./links";
 
 const PAGE = 100;
 /** Display order for the status chips: the ones needing attention first, terminal last. */
@@ -84,11 +85,14 @@ export function RunList({ navigate }: { navigate: (r: Route) => void }) {
       {error && <p role="alert" className="error">Could not load runs: {error}</p>}
       {runs === null && !error && <p className="muted">Loading…</p>}
       {runs !== null && runs.length === 0 && (
-        <div className="empty empty--calm">
-          <p><strong>No runs yet.</strong></p>
+        <section className="empty empty--calm" aria-labelledby="runs-empty-heading">
+          <p id="runs-empty-heading"><strong>No runs yet.</strong></p>
           <p className="hint">Start one with <code>POST /workflows/{"{name}"}/runs</code> or
             {" "}<code>python scripts/quickstart_llm.py</code>; it appears here as soon as <code>run.started</code> is in the log.</p>
-        </div>
+          <p className="hint">First time here? The{" "}
+            <a href={TUTORIAL_URL} target="_blank" rel="noopener noreferrer">tutorial</a> starts a run that suspends on an
+            approval, so both this list and the inbox have something to show.</p>
+        </section>
       )}
       {runs && runs.length > 0 && (
         <>
