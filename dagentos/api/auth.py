@@ -57,6 +57,12 @@ logger = logging.getLogger("agentos.api.auth")
 #: Paths that never require a credential: liveness probes and the metrics scraper. Neither
 #: returns run data.
 OPEN_PATHS: frozenset[str] = frozenset({"/health", "/ready", "/metrics"})
+# Routes that verify their OWN credential and are therefore not bearer-gated. Deliberately a
+# separate name from OPEN_PATHS: these are not open. Today exactly one prefix — webhook
+# deliveries carry an HMAC signature the sender computed with a shared secret
+# (dagentos.triggers.webhook), and the route refuses anything unsigned with 401. The routes
+# only exist when AGENTOS_TRIGGERS is set and every secret variable resolved at startup.
+SELF_AUTHENTICATED_PREFIXES: tuple[str, ...] = ("/triggers/webhooks/",)
 
 #: Routes an `agent`-kind principal may not call: definitions are operator-owned
 #: (docs/TRUST_BOUNDARY.md — declared effects are what the gate trusts).
@@ -204,9 +210,11 @@ async def auth_middleware(request: Request, call_next, *, config: AuthConfig):
     `request.state.principal` and definition routes refuse `agent`-kind principals."""
     request.state.principal = None
     if not config.enforced or request.url.path in OPEN_PATHS \
-            or is_ui_asset_path(request.method, request.url.path):
+            or is_ui_asset_path(request.method, request.url.path) \
+            or request.url.path.startswith(SELF_AUTHENTICATED_PREFIXES):
         # /ui serves the operator UI's static files only (dagentos.api.ui); the app shell must
         # load before the user can present a token. No data lives under that prefix.
+        # SELF_AUTHENTICATED_PREFIXES verify an HMAC credential in the handler and fail closed.
         return await call_next(request)
     header = request.headers.get("authorization", "")
     scheme, _, token = header.partition(" ")
@@ -238,7 +246,7 @@ def openapi_security(schema: dict, *, config: AuthConfig) -> dict:
         "description": "Token from the operator's AGENTOS_AUTH_TOKENS file (dagentos/api/auth.py)."}
     schema["security"] = [{"bearerAuth": []}]
     for path, ops in schema.get("paths", {}).items():
-        if path in OPEN_PATHS:
+        if path in OPEN_PATHS or path.startswith(SELF_AUTHENTICATED_PREFIXES):
             for op in ops.values():
                 if isinstance(op, dict):
                     op["security"] = []

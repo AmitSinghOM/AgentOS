@@ -1,0 +1,8 @@
+{
+  "triggers": [
+    {"name": "nightly-haiku", "kind": "cron", "schedule": "0 9 * * 1-5", "tz": "Asia/Kolkata",
+     "workflow": "haiku", "inputs": {"topic": "yesterday's event log"}},
+    {"name": "gh", "kind": "webhook", "workflow": "diamond",
+     "secret_env": "AGENTOS_WEBHOOK_SECRET_GH", "max_body_bytes": 262144}
+  ]
+}

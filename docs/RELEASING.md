@@ -85,7 +85,7 @@ non-root user `agentos` (uid 10001); `/var/lib/agentos` volume for the default S
 
 ```bash
 docker run --rm ghcr.io/amitsinghom/agentos:0.11.0 agentos --help
-docker run --rm -p 8000:8000 -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.11.0
+docker run --rm -p 127.0.0.1:8000:8000 -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.11.0
 docker run --rm -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.11.0 python -m dagentos.worker
 ```
 

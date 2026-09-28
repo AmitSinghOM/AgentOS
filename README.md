@@ -82,7 +82,7 @@ same wheels — verification in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ```bash
 pip install "dagentos[providerkit]" agentos-provider-openai-compat
-docker run --rm -p 8000:8000 ghcr.io/amitsinghom/agentos        # API; python -m dagentos.worker for the worker
+docker run --rm -p 127.0.0.1:8000:8000 ghcr.io/amitsinghom/agentos   # API on loopback; python -m dagentos.worker for the worker
 ```
 
 A whole coding agent as a step: [`providers/acp`](providers/acp/README.md) runs one
@@ -204,6 +204,24 @@ strict CSP (`frame-ancestors 'none'`) on every `/ui` response. Building from a c
 `cd ui && npm ci && npm run build`; the contract and what the UI deliberately does not do are
 in [`docs/UI.md`](docs/UI.md), and [`docs/tutorial.md`](docs/tutorial.md) drives all three
 screens in ten minutes.
+
+### Triggers: cron and webhooks
+
+Runs can start without a person at a terminal, through the same `POST /workflows/{name}/runs`
+everything else uses — no second door into the engine:
+
+```bash
+AGENTOS_TRIGGERS=triggers.json uvicorn dagentos.api.main:app     # mounts POST /triggers/webhooks/{name}
+AGENTOS_TRIGGERS=triggers.json python -m dagentos.triggers       # fires the cron triggers
+```
+
+A cron slot becomes `Idempotency-Key: cron:{name}:{slot}`, a webhook delivery becomes
+`webhook:{name}:{delivery-id}`, so a restarted runner or a redelivered webhook lands on the
+same run. Webhooks are signed Stripe-style (`X-AgentOS-Timestamp` + HMAC-SHA256
+`X-AgentOS-Signature`, ±300 s), the secret comes from an environment variable the file
+names, and an unset secret stops the API at startup rather than mounting an unsignable
+route. Missed cron slots are never backfilled. Contract, file format and every fail mode in
+[`docs/triggers.md`](docs/triggers.md).
 
 ### Sealed chains and the `agentos` CLI
 

@@ -14,6 +14,7 @@ Configuration (env):
   AGENTOS_AUTH_TOKENS     token file (SHA-256 hashes → principals), required for bearer
   AGENTOS_POLICY          operator policy ceiling file (see dagentos.core.policy); unset → warns
   AGENTOS_SIGNING_KEYS    HMAC keyring file that seals idle/terminal events (dagentos.core.seal)
+  AGENTOS_TRIGGERS        triggers file: webhook routes mounted here, cron fired by dagentos.triggers
 """
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ from dagentos.agents.echo import EchoExecutor
 from dagentos.agents.tool import ToolExecutor
 from dagentos.api.auth import AuthConfig, auth_middleware, openapi_security, principal_for
 from dagentos.api.stream import MEDIA_TYPE, StreamConfig, parse_after, stream_run
+from dagentos.api.triggers import build_router as build_trigger_router
 from dagentos.api.ui import mount_ui
 from dagentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
 from dagentos.core.fold import FoldError, fold
@@ -41,6 +43,7 @@ from dagentos.core.seal import keyring_from_env, verify_seals
 from dagentos.observability import build_observers, store_resolver
 from dagentos.plugins import describe, discover_executors, store_pricing_snapshots
 from dagentos.store.factory import store_from_env
+from dagentos.triggers.config import triggers_from_env
 
 store = store_from_env()
 observers, prometheus = build_observers(resolve=store_resolver(store))
@@ -283,13 +286,16 @@ logger = logging.getLogger("agentos.api")
 
 class RunStartBody(BaseModel):
     """Optional body for `POST /workflows/{name}/runs`. `inputs` reach every step under
-    the reserved key `run`, so an agent's prompt template can say `{run.topic}`."""
+    the reserved key `run`, so an agent's prompt template can say `{run.topic}`.
+    `principal` names who started the run on `run.started` (asserted mode; in bearer mode
+    the token names it and a body principal is a 422, like every other route)."""
 
     inputs: dict = {}
+    principal: Principal | None = None
 
 
 @app.post("/workflows/{name}/runs", status_code=202)
-def start_run(name: str, response: Response, sync: bool = False,
+def start_run(name: str, request: Request, response: Response, sync: bool = False,
               body: RunStartBody | None = None,
               idempotency_key: str | None = Header(default=None,
                                                    alias="Idempotency-Key")) -> dict:
@@ -298,12 +304,15 @@ def start_run(name: str, response: Response, sync: bool = False,
     (the Phase 0 behaviour, kept for the quick start and tests). Repeating the call with
     the same `Idempotency-Key` header returns the same run (DESIGN §6)."""
     inputs = body.inputs if body is not None else None
+    principal = principal_for(request, body.principal if body is not None else None,
+                              config=auth_config, required=False)
     try:
         if sync:
             response.status_code = 201
-            return engine.start_run(name, request_id=idempotency_key,
+            return engine.start_run(name, request_id=idempotency_key, principal=principal,
                                     inputs=inputs).model_dump()
-        run_id = engine.create_run(name, request_id=idempotency_key, inputs=inputs)
+        run_id = engine.create_run(name, request_id=idempotency_key, principal=principal,
+                                   inputs=inputs)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -568,3 +577,13 @@ def reject(run_id: str, approval_id: str, body: DecisionBody, request: Request) 
 
 # Operator UI (Phase 9): static bundle at /ui when built; see dagentos/api/ui.py.
 mount_ui(app)
+
+# Triggers: one `POST /triggers/webhooks/{name}` per webhook trigger in AGENTOS_TRIGGERS. The
+# file is loaded here so a bad file or an unset secret variable stops the process at startup
+# (dagentos.triggers.config); cron triggers are fired by `python -m dagentos.triggers`.
+triggers_config = triggers_from_env()
+if triggers_config is not None:
+    app.include_router(build_trigger_router(triggers_config, engine=engine, store=store))
+    logging.getLogger("agentos.api").info(
+        "triggers: %d webhook route(s), %d cron trigger(s) (fired by dagentos.triggers) from %s",
+        len(triggers_config.webhooks), len(triggers_config.crons), triggers_config.path)
