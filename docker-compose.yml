@@ -1,3 +1,8 @@
+# Local development stack. Every published port carries the `127.0.0.1:` host prefix: a bare
+# `HOST:CONTAINER` binds 0.0.0.0 and would expose Postgres (fixed dev password), the OTLP
+# intake and three unauthenticated UIs to whatever network the laptop is on. Reach the stack
+# from another machine with an SSH local port-forward, not a wider publish
+# (tests/test_c13_mit_and_compose.py locks this).
 services:
   postgres:
     image: postgres:16
@@ -5,7 +10,7 @@ services:
       POSTGRES_USER: agentos
       POSTGRES_PASSWORD: agentos
       POSTGRES_DB: agentos
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agentos"]
       interval: 5s
@@ -19,8 +24,8 @@ services:
   jaeger:
     image: jaegertracing/jaeger:2.9.0
     ports:
-      - "16686:16686"   # UI
-      - "4318:4318"     # OTLP/HTTP in
+      - "127.0.0.1:16686:16686"   # UI
+      - "127.0.0.1:4318:4318"     # OTLP/HTTP in
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:16686/"]
       interval: 5s
@@ -29,13 +34,13 @@ services:
 
   prometheus:
     image: prom/prometheus:v3.6.0
-    ports: ["9090:9090"]
+    ports: ["127.0.0.1:9090:9090"]
     volumes: ["./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
     extra_hosts: ["host.docker.internal:host-gateway"]
 
   grafana:
     image: grafana/grafana:12.2.0
-    ports: ["3000:3000"]
+    ports: ["127.0.0.1:3000:3000"]
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin

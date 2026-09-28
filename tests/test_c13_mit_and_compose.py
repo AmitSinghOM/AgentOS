@@ -41,3 +41,20 @@ def test_compose_is_only_open_source_images():
     compose = (ROOT / "docker-compose.yml").read_text()
     images = {m.group(1).split(":")[0] for m in re.finditer(r"image:\s*(\S+)", compose)}
     assert images <= OSS_IMAGES, images - OSS_IMAGES
+
+
+# Every quoted `host:container` (or `ip:host:container`) port mapping in the compose file.
+# Volume mounts and healthcheck argv never match `\d+:\d+`, so this is exactly the publishes.
+PORT_MAPPING = re.compile(r'"((?:[\d.]+:)?\d+:\d+)"')
+
+
+def test_compose_publishes_every_port_on_loopback_only():
+    """A bare `HOST:CONTAINER` publish binds 0.0.0.0, so `docker compose up` on a laptop on
+    a shared network exposes Postgres (a fixed dev password), the OTLP intake and three
+    unauthenticated UIs to the whole segment. Local dev is the only audience: every publish
+    carries the `127.0.0.1:` host prefix. Someone on another machine gets an SSH tunnel."""
+    compose = (ROOT / "docker-compose.yml").read_text()
+    mappings = PORT_MAPPING.findall(compose)
+    assert len(mappings) == 5, mappings           # guard: the parse found the real entries
+    exposed = [m for m in mappings if not m.startswith("127.0.0.1:")]
+    assert not exposed, f"published beyond loopback: {exposed}"
