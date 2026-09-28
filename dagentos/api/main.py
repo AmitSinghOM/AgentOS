@@ -15,6 +15,8 @@ Configuration (env):
   AGENTOS_POLICY          operator policy ceiling file (see dagentos.core.policy); unset → warns
   AGENTOS_SIGNING_KEYS    HMAC keyring file that seals idle/terminal events (dagentos.core.seal)
   AGENTOS_TRIGGERS        triggers file: webhook routes mounted here, cron fired by dagentos.triggers
+  AGENTOS_SLACK_WEBHOOK   Slack incoming webhook: approval notices with a link to the UI (dagentos.notify)
+  AGENTOS_UI_URL          base of that link (default http://127.0.0.1:8000/ui)
 """
 from __future__ import annotations
 

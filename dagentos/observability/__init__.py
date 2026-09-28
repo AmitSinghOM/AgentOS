@@ -56,6 +56,15 @@ def build_observers(resolve: Callable[[str], object] | None = None
                 log.warning("unknown AGENTOS_OTEL_EXPORTER %r", exporter)
         except ImportError:
             log.info("opentelemetry not installed; tracing disabled")
+
+    # Slack approval notifier (dagentos.notify.slack): opt-in via AGENTOS_SLACK_WEBHOOK. A
+    # malformed URL raises here so the process refuses to start naming the variable — the
+    # same closed-at-startup shape as AGENTOS_AUTH_TOKENS / AGENTOS_POLICY.
+    from dagentos.notify.slack import notifier_from_env
+    slack = notifier_from_env(resolve=resolve)
+    if slack is not None:
+        observers.append(slack)
+        log.info("slack approval notifier enabled; deep links to %s", slack.ui_url)
     return observers, prom
 
 
