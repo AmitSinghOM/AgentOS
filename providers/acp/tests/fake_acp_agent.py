@@ -117,6 +117,15 @@ def prompt_turn(session_id: str, req_id, params: dict) -> None:
                             "title": "Edit main.py", "kind": "edit", "status": "completed",
                             "rawInput": {"path": "/tmp/main.py"}, "rawOutput": {"ok": True}})
         chunk(session_id, "Edited.")
+    elif SCENARIO == "tool_failed":
+        # The agent RAN an edit (no permission asked) and the tool reported failure — a
+        # half-applied change is still a change. The executor must report it as an effect.
+        notify(session_id, {"sessionUpdate": "tool_call", "toolCallId": "call_f",
+                            "title": "Edit main.py", "kind": "edit", "status": "in_progress",
+                            "rawInput": {"path": "/tmp/main.py"}})
+        notify(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call_f",
+                            "status": "failed", "rawOutput": {"error": "disk full after 3 of 5 hunks"}})
+        chunk(session_id, "The edit failed partway.")
     elif SCENARIO == "usage":
         chunk(session_id, "Done.")
         notify(session_id, {"sessionUpdate": "usage_update", "used": 1234, "size": 200000,
@@ -126,6 +135,12 @@ def prompt_turn(session_id: str, req_id, params: dict) -> None:
     elif SCENARIO == "hang":
         while True:
             time.sleep(1)
+    elif SCENARIO == "answer_then_exit":
+        # Final response written and the process gone in the same instant: the client
+        # must deliver the response, not report a crash.
+        chunk(session_id, "Bye.")
+        send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": "end_turn"}})
+        os._exit(0)
     send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": stop}})
 
 
