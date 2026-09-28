@@ -223,6 +223,19 @@ names, and an unset secret stops the API at startup rather than mounting an unsi
 route. Missed cron slots are never backfilled. Contract, file format and every fail mode in
 [`docs/triggers.md`](docs/triggers.md).
 
+### Approval notices in Slack
+
+```bash
+AGENTOS_SLACK_WEBHOOK=https://hooks.slack.com/services/T…/B…/… python -m dagentos.worker
+```
+
+When a run suspends for a human, the channel gets the workflow, step, effect class, reason
+and a link to the run page; when someone decides, it gets who and why. The message carries
+**no authority** — no approve button, no token — because an incoming webhook can verify
+nobody; the decision stays in the UI or API where the principal is. Posts happen off the
+engine's thread on a bounded queue, and Slack being down is a warning, never a failed run.
+[`docs/notifications.md`](docs/notifications.md).
+
 ### Sealed chains and the `agentos` CLI
 
 The hash chain makes edits visible; it cannot stop someone with database access from

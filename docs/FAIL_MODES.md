@@ -11,7 +11,7 @@ policy, no keyring) and **not detectable in-log** (the one gap no in-log scheme 
 truncation after the last seal; the tool reports the uncovered tail). A chokepoint in none
 of these is a bug.
 
-Each row names the test that pins the direction (71 rows). `tests/test_fail_modes.py` checks that
+Each row names the test that pins the direction (79 rows). `tests/test_fail_modes.py` checks that
 every cited test exists, so this table cannot quietly outlive the code. Phase 8 #11;
 the operator policy ceiling (#2) is scoped against this table.
 
@@ -61,6 +61,10 @@ the operator policy ceiling (#2) is scoped against this table.
 | Snapshot read | Snapshot does not anchor to the log (tampered, stale, beyond the tail) | **closed for the snapshot, open for the read** | Ignored; the full log is folded | `tests/test_store_typed_and_bounded.py::test_a_snapshot_that_does_not_chain_to_the_log_is_ignored_not_trusted` |
 | Snapshot write ordering | Stale worker writes an older snapshot | **closed** | Monotonic per run; the older one is dropped | `tests/test_store_typed_and_bounded.py::test_put_snapshot_is_monotonic_per_run` |
 | Observer | An observer raises | **open** | Logged, swallowed; telemetry is derived and rebuildable | `tests/test_observability.py::test_observer_failure_never_breaks_the_engine` |
+| Slack notifier | Slack unreachable, slow, or non-2xx | **open** | `observe()` returned before the post; the pump logs a WARNING naming the approval (never the URL); the inbox still shows the gate | `tests/test_slack_notifier.py::test_transport_failure_is_logged_not_raised` |
+| Slack notifier | Post blocks | **open, off-thread** | The engine's append path is not held; the post happens on the notifier's own thread | `tests/test_slack_notifier.py::test_observe_returns_immediately_even_when_slack_blocks` |
+| Slack notifier | More pending notices than the queue holds | **open, bounded** | Oldest dropped with a WARNING; the newest (unseen) notice is kept | `tests/test_slack_notifier.py::test_queue_is_bounded_and_drops_oldest_with_one_warning` |
+| Slack notifier startup | `AGENTOS_SLACK_WEBHOOK` set but not an `https://hooks.slack.com/services/…` URL | **closed** | Process refuses to start naming the variable; the path is never echoed | `tests/test_slack_notifier.py::test_bad_webhook_url_is_a_config_error_naming_the_variable` |
 | Log integrity on read | Hash chain broken | **closed** | Does not fold; the API returns 500 and says so | `tests/test_trust_boundary.py::test_a_tampered_log_does_not_fold_and_the_api_says_so` |
 | Seal, rewrite-and-rechain | Prefix rewritten and every hash recomputed | **closed** | The seal after the edit points at a hash the log no longer carries → `INVALID`; `agentos verify` exits 1 | `tests/test_seal_and_cli.py::test_rewrite_and_rechain_is_caught_by_the_seal` |
 | Seal, forged signature | Seal over the right hash with a wrong signature | **closed** | `INVALID`, names the seal and key | `tests/test_seal_and_cli.py::test_forged_seal_over_the_right_hash_fails_the_signature` |

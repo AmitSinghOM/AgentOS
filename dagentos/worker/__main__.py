@@ -107,6 +107,15 @@ def main(argv: list[str] | None = None) -> int:
     worker.run_forever(stop=stop)
     log.info("worker stopped cleanly (%d run(s) processed, %d loop error(s))",
              worker.processed, worker.errors)
+    # Observers that buffer (the Slack notifier's post queue) get a bounded drain, so the
+    # approval notice for the last delivery is not lost to the very SIGTERM that ended it.
+    for obs in observers:
+        close = getattr(obs, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # shutdown must complete
+                log.exception("observer %s failed to close", type(obs).__name__)
     return 0
 
 

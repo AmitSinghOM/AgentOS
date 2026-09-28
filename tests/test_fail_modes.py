@@ -56,3 +56,13 @@ def test_unpinned_rows_are_named_here():
     assert named == UNPINNED, f"rows citing the placeholder: {named}; declared: {UNPINNED}"
     for r in rows:
         assert "**Unpinned**" in r, f"placeholder row must say Unpinned: {r[:80]}"
+
+
+def test_the_stated_row_count_matches_the_table():
+    """The preamble says how many rows the table has. It had drifted to 61 against 65 real
+    rows before the triggers/notifier work added 14 more; pin it so the number is honest."""
+    import re
+    text = DOC.read_text(encoding="utf-8")
+    m = re.search(r"\((\d+) rows\)", text)
+    assert m, "preamble no longer states a row count"
+    assert int(m.group(1)) == len(_rows()), f"preamble says {m.group(1)}, table has {len(_rows())}"
