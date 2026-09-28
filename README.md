@@ -140,6 +140,77 @@ curl -X POST 'localhost:8000/workflows/hello/runs?sync=true'
 
 Or run the same walkthrough as a test: `pytest tests/test_quickstart.py`.
 
+## What people use it for
+
+AgentOS is for the agent work that has to be **accountable**: it spends money, writes to a
+system someone else depends on, or has to be explained afterwards to a person who was not
+there. Each use case below is one declared workflow; the files named are in
+[`examples/`](examples/) and run against the quick start.
+
+| Use case | The shape | Where the ledger earns its keep |
+|---|---|---|
+| **Content pipeline with a reviewer** — write, then critique, then ship | two `llm` steps: `poet` writes, `critic` reviews with `depends_on: ["write"]` and a `retry` policy ([`haiku_workflow.json`](examples/haiku_workflow.json)); `critic_typed_agent.json` makes the review a typed `{score, reason}` via `output_schema` | `budget.max_run_cost` caps the whole run; a flaky model is retried per node and dead-lettered with the cause, not silently dropped |
+| **Research, then write** — pull facts from an API, hand them to a model | a `tool` step (`kind: http`, effect `read`) feeding an `llm` step ([`research_workflow.json`](examples/research_workflow.json)); the URL is the operator's and inputs reach the tool as values only, never as URL or argv | the response body (capped at 1 MiB, header values redacted) is the step's recorded output, so the writer's prompt is reproducible after the API changes |
+| **Anything that spends or ships** — payment, deploy, outbound email | any node whose agent declares `spend`, `write_external`, `send_message` or `execute_code` ([`diamond_workflow.json`](examples/diamond_workflow.json) with `payer_agent.json`) | the run **suspends before the step runs**; a named human approves from the inbox or the API; who, when and why are in the hash-chained log; the step's completion is then committed once |
+| **A coding agent as one step** — fix a failing test, open a change | one `llm` step with `executor: acp` declaring `[compute, read, execute_code]` ([`providers/acp`](providers/acp/README.md)); the agent's permission prompts are answered from that declaration | an unasked edit outside the declaration dead-letters the step; every tool call is recorded by SHA-256; no `allow_always` ever |
+| **Scheduled and event-driven runs** — nightly reports, "on every push" | `python -m dagentos.triggers` with cron slots (IANA time zones) and HMAC-signed webhooks ([`triggers.json`](examples/triggers.json)) | every trigger goes through the public run-start API with a derived `Idempotency-Key`, so a redelivered webhook or a retried slot is one run |
+| **Comparing models or harnesses** — same task, different backend | one workflow, `executor` swapped between `openai-compat`, `anthropic`, `openai-agents`, `pydantic-ai` and `acp`; the two API providers share one output shape and the two SDK harnesses another, each pinned by a test | the cost panel and `provenance.model_id` make the comparison a query over runs, not a spreadsheet |
+
+If the work is a conversation with an agent that should remember you, that is a workspace
+product (Kiro CLI, Kiro Crew) — AgentOS runs *its* agent as a step when the step needs the
+ledger, and stays out of the way otherwise.
+
+## Using it with popular models
+
+Every model touches the core through one seam, the `Executor` port, so the choice of model
+is an agent-definition field plus environment variables — never a code change. Two agents in
+the same workflow can use two vendors.
+
+| Backend | `executor` | Environment | `config.model` |
+|---|---|---|---|
+| **Ollama** (local, the default) | `openai-compat` | none — `ollama serve` on `127.0.0.1:11434`, `ollama pull qwen2.5:0.5b` | alias `chat.fast` → `qwen2.5:0.5b`, `chat.default` → `llama3.2:3b` |
+| **OpenAI** (`gpt-4.1`, `gpt-4o`, `o3-mini`, …) | `openai-compat` | `AGENTOS_OPENAI_BASE_URL=https://api.openai.com/v1` and `OPENAI_API_KEY` | a concrete id, or re-point the aliases: `AGENTOS_OPENAI_ALIASES='{"chat.fast":"gpt-4o-mini","chat.default":"gpt-4.1"}'` |
+| **Anthropic** (`claude-sonnet-4`, `claude-3-5-haiku-latest`, …) | `anthropic` | `AGENTOS_ANTHROPIC_BASE_URL=https://api.anthropic.com` (no `/v1`) and `ANTHROPIC_API_KEY` | `AGENTOS_ANTHROPIC_ALIASES='{"chat.fast":"claude-3-5-haiku-latest","chat.default":"claude-sonnet-4"}'` |
+| **Google Gemini** | `openai-compat` | `AGENTOS_OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai` and `AGENTOS_OPENAI_API_KEY=<Gemini key>` | e.g. `gemini-2.5-flash` — any id the endpoint lists |
+| **OpenRouter** (hundreds of models behind one key) | `openai-compat` | `AGENTOS_OPENAI_BASE_URL=https://openrouter.ai/api/v1` and `AGENTOS_OPENAI_API_KEY` | the router's `vendor/model` id, as its `GET /models` lists it |
+| **vLLM / LM Studio / any OpenAI-compatible server** | `openai-compat` | `AGENTOS_OPENAI_BASE_URL=http://host:8000/v1` (vLLM) or `http://127.0.0.1:1234/v1` (LM Studio) | whatever the server reports at `GET /models` |
+| **An agent SDK with tools** (OpenAI Agents SDK, PydanticAI) | `openai-agents` / `pydantic-ai` | same shape with the `AGENTOS_OPENAI_AGENTS_*` / `AGENTOS_PYDANTIC_AI_*` prefix; both default to local Ollama | alias or id; `tools` names registered operator functions, each with an effect class |
+| **A whole coding agent** (Kiro CLI, Gemini CLI, Claude Code via its ACP adapter, …) | `acp` | `AGENTOS_ACP_COMMAND='["kiro-cli","acp"]'` (default) plus the agent's own login | ignored — the agent brings its model |
+
+The same poet, three ways. Only `executor` (and the environment above) changes:
+
+```json
+{"name": "poet", "type": "llm", "executor": "openai-compat",
+ "config": {"model": "chat.fast", "system": "You are a terse poet.",
+            "prompt": "Write a haiku about {run.topic}."}}
+```
+
+```json
+{"name": "poet", "type": "llm", "executor": "anthropic",
+ "config": {"model": "claude-3-5-haiku-latest", "system": "You are a terse poet.",
+            "prompt": "Write a haiku about {run.topic}."}}
+```
+
+```json
+{"name": "poet", "type": "llm", "executor": "pydantic-ai", "declared_effects": ["compute"],
+ "config": {"model": "gpt-4o-mini", "instructions": "You are a terse poet.",
+            "prompt": "Write a haiku about {run.topic}.", "tools": ["utc_now"]}}
+```
+
+Mixing vendors in one run is the same file twice: register the Anthropic poet and an OpenAI
+critic, and `haiku_workflow.json` runs unchanged. `GET /executors` shows each backend's health
+(server reachable, aliases resolvable to models it actually has) before you start a run.
+
+What the log records is the same for all of them: the concrete `model_id` the server reported
+(not the alias you asked for), token usage, and a `cost` metered through a content-addressed
+pricing table whose hash is on every step. OpenAI and Anthropic ids in the bundled tables are
+priced; anything else (Gemini, OpenRouter, a local model) is recorded with its meters and
+`priced: false` until you point `AGENTOS_OPENAI_PRICING` / `AGENTOS_ANTHROPIC_PRICING` at your own
+table — the amount is never guessed. A misconfiguration is a `ConfigError` naming the variable;
+an unreachable server, a missing model or a bad key is a `step.failed` whose message says what
+to do (`ollama pull …`, set the key), then the node's retry policy, then a dead-letter with that
+message as the cause. Full per-provider tables: [`providers/*/README.md`](providers/).
+
 ### Authentication
 
 The quick start runs with `AGENTOS_AUTH=asserted` (the default): the `principal` in a
