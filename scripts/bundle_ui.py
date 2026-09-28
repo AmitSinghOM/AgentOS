@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import filecmp
+import gzip
 import json
 import re
 import shutil
@@ -33,6 +34,30 @@ def _validate(src: Path) -> list[str]:
                 if not (src / r).is_file()]
     if not any(r.endswith(".js") for r in refs):
         problems.append("index.html references no script — not a Vite production build")
+    # Every referenced asset ships with .br and .gz siblings (ui/scripts/precompress.mjs runs
+    # as the last step of `npm run build`). A bundle without them would still work but would
+    # silently serve 4x the bytes, so a partial build is refused rather than shipped. The gzip
+    # sibling is round-tripped with the stdlib; brotli is checked for presence and for being
+    # smaller than the original (the server picks it blindly, so a bloated one is a regression).
+    for r in refs:
+        asset = src / r
+        if not asset.is_file():
+            continue
+        raw = asset.read_bytes()
+        for ext in (".br", ".gz"):
+            sib = asset.with_name(asset.name + ext)
+            if not sib.is_file():
+                problems.append(f"{r}{ext} missing — `npm run build` did not run precompress.mjs")
+                continue
+            if sib.stat().st_size >= len(raw):
+                problems.append(f"{r}{ext} is not smaller than {r}")
+        gz = asset.with_name(asset.name + ".gz")
+        if gz.is_file():
+            try:
+                if gzip.decompress(gz.read_bytes()) != raw:
+                    problems.append(f"{r}.gz does not decompress to {r}")
+            except (OSError, EOFError) as exc:
+                problems.append(f"{r}.gz is not valid gzip: {exc}")
     return problems
 
 
