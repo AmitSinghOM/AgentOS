@@ -206,9 +206,12 @@ class AcpExecutor:
                               f"partial text: {turn.text[:120]!r}")
 
         calls = turn.calls()
+        # A call is an effect unless the client REJECTED its permission request (it never
+        # ran). `status: failed` is not exempt: the tool ran and did not finish, and a
+        # half-applied edit is still an edit — reporting the attempt is the conservative
+        # direction (the pydantic-ai harness makes the same call for rejected arguments).
         ran_classes = sorted({c["effect_class"] for c in calls
-                              if c.get("permission") != "rejected"
-                              and c.get("status") != "failed"})
+                              if c.get("permission") != "rejected"})
         cost = turn.cost(len(calls))
         progress(1.0, f"acp end_turn: {len(calls)} tool call(s), "
                       f"{turn.context_used or 0} context tokens, {cost.amount} {cost.currency}")

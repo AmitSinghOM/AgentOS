@@ -1,11 +1,11 @@
 """`POST /triggers/webhooks/{name}` — one route per webhook trigger in `AGENTOS_TRIGGERS`.
 
 The route authenticates the DELIVERY, not a person: `X-AgentOS-Timestamp` and
-`X-AgentOS-Signature: v1=<hmac>` over `{timestamp}.{body}` with the trigger's shared secret
-(dagentos.triggers.webhook). It is listed in `auth.SELF_AUTHENTICATED_PREFIXES`, so the bearer
-middleware lets it through to this check; there is no path to the engine without a valid
-signature. Order, all before the engine is touched: 404 unknown trigger → 413 over the
-trigger's body cap → 415 not JSON → 401 missing/stale/invalid signature.
+`X-AgentOS-Signature: v1=<hmac>` over `{timestamp}.{delivery}.{body}` with the trigger's
+shared secret (dagentos.triggers.webhook). It is listed in `auth.SELF_AUTHENTICATED_PREFIXES`,
+so the bearer middleware lets it through to this check; there is no path to the engine
+without a valid signature. Order, all before the engine is touched: 404 unknown trigger → 413
+over the trigger's body cap → 415 not JSON → 401 missing/stale/invalid signature.
 
 The run it starts records a `system` principal `webhook:{name}` with attestation
 `hmac-sha256:v1` on `run.started`, and its inputs carry the delivery under `trigger`
@@ -36,9 +36,10 @@ def build_router(cfg: TriggersConfig, *, engine, store) -> APIRouter:
     @router.post("/triggers/webhooks/{name}", status_code=202,
                  summary="Start a run from a signed webhook delivery",
                  description=("Authenticated by `X-AgentOS-Timestamp` + `X-AgentOS-Signature` "
-                              "(HMAC-SHA256 over `{timestamp}.{body}` with the trigger's shared "
-                              "secret), not by a bearer token. Optional `X-AgentOS-Delivery` is the "
-                              "idempotency key; otherwise the body hash is. Responds 202 with the run."),
+                              "(HMAC-SHA256 over `{timestamp}.{delivery}.{body}` with the trigger's "
+                              "shared secret), not by a bearer token. Optional `X-AgentOS-Delivery` is "
+                              "the idempotency key and is inside the signed string; otherwise the body "
+                              "hash is the key. Responds 202 with the run."),
                  responses={401: {"description": "missing, stale or invalid signature"},
                             404: {"description": "no such trigger or workflow"},
                             413: {"description": "body over the trigger's max_body_bytes"},
@@ -61,10 +62,11 @@ def build_router(cfg: TriggersConfig, *, engine, store) -> APIRouter:
 
         ts = request.headers.get("x-agentos-timestamp", "")
         sig = request.headers.get("x-agentos-signature", "")
+        delivery = request.headers.get("x-agentos-delivery") or None
         if not ts or not sig:
             return _unauthorized(name, "missing webhook signature (X-AgentOS-Timestamp and "
                                        "X-AgentOS-Signature are required)")
-        if not verify(trigger.secret, ts, body, sig, now=time.time()):
+        if not verify(trigger.secret, ts, body, sig, delivery=delivery, now=time.time()):
             reason = "stale timestamp" if _stale(ts) else "invalid signature"
             return _unauthorized(name, f"{reason} for webhook {name!r}")
 
@@ -72,7 +74,6 @@ def build_router(cfg: TriggersConfig, *, engine, store) -> APIRouter:
             payload = json.loads(body)
         except ValueError as exc:
             raise HTTPException(status_code=415, detail=f"webhook body is not valid JSON: {exc}") from exc
-        delivery = request.headers.get("x-agentos-delivery") or None
         key = delivery_key(name, delivery, body)
         inputs = {**trigger.inputs, "trigger": {"kind": "webhook", "name": name,
                                                 "delivery": delivery, "body": payload}}
