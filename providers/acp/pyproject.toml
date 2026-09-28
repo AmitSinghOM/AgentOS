@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentos-provider-acp"
+version = "0.16.0"
+description = "AgentOS executor that runs one Agent Client Protocol (ACP) agent turn — kiro-cli acp or any ACP harness — as one governed step"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+# No SDK: ACP is newline-delimited JSON-RPC 2.0 over the agent's stdio, spoken with the
+# standard library. The only dependency is the kit the other providers share.
+dependencies = [
+    "dagentos[providerkit]>=0.11,<1.0",
+]
+
+[project.urls]
+Repository = "https://github.com/AmitSinghOM/AgentOS"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.entry-points."agentos.executors"]
+acp = "agentos_provider_acp:load"
+
+[tool.setuptools]
+packages = ["agentos_provider_acp"]

@@ -156,6 +156,9 @@ def test_installed_providers_are_discovered_through_their_entry_points():
         if "openai-agents" in found:                         # one registry serves both
             assert by_name["pydantic-ai"]["describe"]["tools"] == \
                 by_name["openai-agents"]["describe"]["tools"]
+    if "acp" in found:                                       # ACP harness (kiro-cli acp), same seam
+        assert by_name["acp"]["describe"]["wire_format"] == "acp"
+        assert by_name["acp"]["describe"]["client_capabilities"]["terminal"] is False
 
 
 def test_pricing_snapshot_is_stored_as_a_blob():
