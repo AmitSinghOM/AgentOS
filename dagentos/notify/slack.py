@@ -69,8 +69,17 @@ class SlackNotifier:
         self._timeout = timeout
         self._queue: queue.Queue = queue.Queue(maxsize=max(1, max_pending))
         self._closed = threading.Event()
-        self._thread = threading.Thread(target=self._pump, name="agentos-slack-notifier", daemon=True)
-        self._thread.start()
+        self._thread: threading.Thread | None = None      # started on the first enqueue
+        self._lock = threading.Lock()
+
+    def _ensure_pump(self) -> None:
+        """Start the posting thread lazily: an API process that reloads the module in tests,
+        or a worker that never sees an approval, owns no idle thread (self-review R5)."""
+        with self._lock:
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._pump, name="agentos-slack-notifier",
+                                                daemon=True)
+                self._thread.start()
 
     # -- the port -----------------------------------------------------------------------
     def observe(self, event: Event, run: WorkflowRun | None = None) -> None:
@@ -84,6 +93,7 @@ class SlackNotifier:
         if payload is None:
             return
         item = (payload, f"{type(event).event_type} {getattr(event, 'approval_id', '')} run={event.run_id}")
+        self._ensure_pump()
         try:
             self._queue.put_nowait(item)
         except queue.Full:
@@ -99,13 +109,18 @@ class SlackNotifier:
                 log.warning("slack notifier queue still full; dropping %s", item[1])
 
     def close(self, timeout: float = 10.0) -> None:
-        """Drain pending posts (bounded) and stop the thread."""
+        """Drain pending posts (bounded) and stop the thread. Safe to call more than once and
+        when nothing was ever enqueued."""
         self._closed.set()
+        t = self._thread
+        if t is None or not t.is_alive():
+            return
         self._queue.put((None, "stop"))
-        self._thread.join(timeout=timeout)
+        t.join(timeout=timeout)
 
     def describe(self) -> dict:
-        return {"webhook": "set", "ui_url": self.ui_url, "pending": self._queue.qsize()}
+        return {"webhook": "set", "ui_url": self.ui_url, "pending": self._queue.qsize(),
+                "thread": bool(self._thread and self._thread.is_alive())}
 
     def __repr__(self) -> str:
         return f"SlackNotifier(webhook=set, ui_url={self.ui_url!r})"

@@ -11,6 +11,7 @@ Configuration (env), read by `build_observers()`:
 """
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 from collections.abc import Callable, Iterable
@@ -64,6 +65,9 @@ def build_observers(resolve: Callable[[str], object] | None = None
     slack = notifier_from_env(resolve=resolve)
     if slack is not None:
         observers.append(slack)
+        # The worker closes observers explicitly on clean stop; the API has no shutdown hook
+        # of its own, so drain at interpreter exit there too (bounded by close()'s timeout).
+        atexit.register(slack.close)
         log.info("slack approval notifier enabled; deep links to %s", slack.ui_url)
     return observers, prom
 

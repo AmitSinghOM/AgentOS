@@ -11,7 +11,7 @@ policy, no keyring) and **not detectable in-log** (the one gap no in-log scheme 
 truncation after the last seal; the tool reports the uncovered tail). A chokepoint in none
 of these is a bug.
 
-Each row names the test that pins the direction (75 rows). `tests/test_fail_modes.py` checks that
+Each row names the test that pins the direction (79 rows). `tests/test_fail_modes.py` checks that
 every cited test exists, so this table cannot quietly outlive the code. Phase 8 #11;
 the operator policy ceiling (#2) is scoped against this table.
 

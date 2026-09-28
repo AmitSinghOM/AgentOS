@@ -314,3 +314,20 @@ def test_through_the_engine_with_the_store_resolver_names_the_workflow():
     assert len(texts) == 2 and all("payments" in x for x in texts)
     assert "(unknown workflow)" not in json.dumps(t.posts)
     assert f"{UI}/runs/{r.id}" in texts[0] and "approved by human amit" in texts[1]
+
+
+def test_an_idle_notifier_owns_no_thread_and_close_is_safe_before_use():
+    """Self-review R5: the API composes observers at import, and tests reload that module
+    many times. A thread per idle notifier would leak; the pump starts on first use."""
+    import threading
+    before = {t.name for t in threading.enumerate()}
+    t = FakeTransport()
+    n = notifier(t)
+    assert n.describe()["thread"] is False
+    assert "agentos-slack-notifier" not in {x.name for x in threading.enumerate()} - before
+    n.close()                                               # never started: no-op, no error
+    n.observe(requested(), run())
+    assert n.describe()["thread"] is True
+    wait_for(lambda: len(t.posts) == 1)
+    n.close()
+    n.close()                                               # idempotent
