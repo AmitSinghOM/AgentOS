@@ -91,7 +91,8 @@ ACP agent by config) under the same gate — the agent's permission prompts are 
 the step's declared effect classes, never `allow_always`, and an unasked undeclared tool
 dead-letters the step.
 
-No Docker needed for the default SQLite store. For Postgres:
+No Docker needed for the default SQLite store. For Postgres (needs the `.env` from above —
+the compose file reads `POSTGRES_PASSWORD` from it and refuses to start without one):
 `docker compose up -d`, then `AGENTOS_STORE=postgres AGENTOS_PG_DSN=postgresql://agentos:agentos@localhost/agentos`
 for both processes.
 

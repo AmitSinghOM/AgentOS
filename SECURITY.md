@@ -42,8 +42,10 @@ Out of scope, by design and documented:
 - Model or tool output content: the core hashes executor output and never interprets it.
 - Denial of service against a deployment with no ingress rate limiting; rate limiting belongs
   at the ingress for this shape of service (see `docs/FAIL_MODES.md`).
-- The development `docker-compose.yml` (dev credentials, anonymous Grafana) — it is a local
-  stack, not a deployment.
+- The development `docker-compose.yml` — it is a local stack, not a deployment. Every port is
+  published on `127.0.0.1` only, the Postgres password comes from `.env` (the file carries no
+  credential), and Grafana is anonymous **Viewer** over read-only provisioned dashboards
+  (`tests/test_c13_mit_and_compose.py` locks all three). Do not publish it wider.
 
 ## Dependencies
 

@@ -58,3 +58,65 @@ def test_compose_publishes_every_port_on_loopback_only():
     assert len(mappings) == 5, mappings           # guard: the parse found the real entries
     exposed = [m for m in mappings if not m.startswith("127.0.0.1:")]
     assert not exposed, f"published beyond loopback: {exposed}"
+
+
+# `${VAR:?message}` references in the compose file: compose fails fast at `up` if VAR is unset.
+REQUIRED_VAR = re.compile(r"\$\{([A-Z_][A-Z0-9_]*):\?")
+
+
+def _env_example() -> dict[str, str]:
+    """Uncommented KEY=VALUE lines of .env.example — what `cp .env.example .env` gives compose."""
+    out: dict[str, str] = {}
+    for line in (ROOT / ".env.example").read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            out[k.strip()] = v.strip()
+    return out
+
+
+def test_compose_carries_no_literal_credential():
+    """The delivered compose file names the variable, never the value: a literal
+    POSTGRES_PASSWORD in a committed file is a credential in the repo even for a dev stack."""
+    compose = (ROOT / "docker-compose.yml").read_text()
+    m = re.search(r"POSTGRES_PASSWORD:\s*(\S+)", compose)
+    assert m, "postgres service must still set POSTGRES_PASSWORD"
+    assert m.group(1).startswith("${POSTGRES_PASSWORD:?"), m.group(1)
+
+
+def test_every_required_compose_var_is_set_by_env_example():
+    """`cp .env.example .env && docker compose up` (README, CI compose job) must work, so every
+    fail-fast `${VAR:?}` the compose file demands is an uncommented line in .env.example."""
+    compose = (ROOT / "docker-compose.yml").read_text()
+    required = set(REQUIRED_VAR.findall(compose))
+    assert required, "expected at least one fail-fast ${VAR:?} reference"
+    env = _env_example()
+    missing = sorted(v for v in required if not env.get(v))
+    assert not missing, f"compose requires {missing} but .env.example does not set them"
+
+
+def test_env_example_dsn_matches_its_own_postgres_password():
+    """The commented AGENTOS_PG_DSN in .env.example (and README) must use the same dev password
+    the compose stack is started with, or the documented quick start cannot connect."""
+    text = (ROOT / ".env.example").read_text()
+    password = _env_example()["POSTGRES_PASSWORD"]
+    dsn = re.search(r"AGENTOS_PG_DSN=postgresql://agentos:([^@]+)@", text)
+    assert dsn and dsn.group(1) == password, (dsn and dsn.group(1), password)
+    readme = (ROOT / "README.md").read_text()
+    assert f"postgresql://agentos:{password}@" in readme
+
+
+def test_grafana_anonymous_role_is_not_admin():
+    """Anonymous Grafana is fine on loopback for viewing the provisioned dashboard; anonymous
+    *Admin* lets any local process rewrite datasources and dashboards. Viewer is enough:
+    the dashboards are provisioned read-only from files."""
+    compose = (ROOT / "docker-compose.yml").read_text()
+    m = re.search(r"GF_AUTH_ANONYMOUS_ORG_ROLE:\s*(\S+)", compose)
+    assert m and m.group(1) == "Viewer", m and m.group(1)
+
+
+def test_docs_do_not_advertise_grafana_admin_login():
+    """The stack runs Grafana anonymous with the login form disabled, so a doc telling the
+    reader to log in as admin/admin describes a screen that does not exist."""
+    for page in (ROOT / "docs" / "quickstart-llm.md", ROOT / "README.md", ROOT / "SECURITY.md"):
+        assert "admin/admin" not in page.read_text(), page.relative_to(ROOT)

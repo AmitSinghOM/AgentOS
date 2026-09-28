@@ -2,13 +2,14 @@
 # `HOST:CONTAINER` binds 0.0.0.0 and would expose Postgres (fixed dev password), the OTLP
 # intake and three unauthenticated UIs to whatever network the laptop is on. Reach the stack
 # from another machine with an SSH local port-forward, not a wider publish
-# (tests/test_c13_mit_and_compose.py locks this).
+# (tests/test_c13_mit_and_compose.py locks this). The file carries no credential value:
+# POSTGRES_PASSWORD comes from .env (`cp .env.example .env`); compose refuses to start without it.
 services:
   postgres:
     image: postgres:16
     environment:
       POSTGRES_USER: agentos
-      POSTGRES_PASSWORD: agentos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (cp .env.example .env)}
       POSTGRES_DB: agentos
     ports: ["127.0.0.1:5432:5432"]
     healthcheck:
@@ -41,9 +42,11 @@ services:
   grafana:
     image: grafana/grafana:12.2.0
     ports: ["127.0.0.1:3000:3000"]
+    # Anonymous Viewer: the dashboard and datasource are provisioned read-only from files
+    # below, so nobody needs to edit anything in the UI. Viewer cannot rewrite them; Admin could.
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
     volumes:
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
