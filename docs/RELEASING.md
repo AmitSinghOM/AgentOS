@@ -10,7 +10,7 @@ commit SHA because it holds `id-token: write`.
 | --- | --- | --- |
 | PyPI distribution (core) | `dagentos` | `agentos` on PyPI belongs to agentos.org and `agenticos` to another project — both with the same import names, both checked live on 2026-09-20. `dagentos` was free on PyPI and npm |
 | Import package | `dagentos` | same as the distribution since v0.11.0 (`pip install dagentos` → `import dagentos`). v0.9.0–v0.10.0 shipped as `agentos-durable` with import package `agentos`; those releases stay as published |
-| PyPI distributions (providers) | `agentos-provider-openai-compat`, `-anthropic`, `-openai-agents`, `-pydantic-ai` | each depends on `dagentos[providerkit]` |
+| PyPI distributions (providers) | `agentos-provider-openai-compat`, `-anthropic`, `-openai-agents`, `-pydantic-ai`, `-acp` | each depends on `dagentos[providerkit]` |
 | Image | `ghcr.io/amitsinghom/agentos:{version,latest}` | GitHub namespace; multi-arch (amd64, arm64) |
 | Console script | `agentos` | `verify` / `doctor` / `policy explain` |
 

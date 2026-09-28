@@ -18,7 +18,7 @@ import subprocess
 import sys
 from importlib import metadata
 
-EXPECTED_EXECUTORS = {"openai-compat", "anthropic", "openai-agents", "pydantic-ai"}
+EXPECTED_EXECUTORS = {"openai-compat", "anthropic", "openai-agents", "pydantic-ai", "acp"}
 
 
 def main(argv: list[str]) -> int:

@@ -46,7 +46,7 @@ flowchart TD
     API -->|append run.started, enqueue| PG[(PostgreSQL or SQLite<br/>event log · queue · leases · blobs)]
     PG --> W[Worker<br/>fenced lease, wave scheduler]
     W --> EXEC[Executors]
-    EXEC --> PROV[Provider plugins<br/>openai-compat · anthropic · openai-agents · pydantic-ai]
+    EXEC --> PROV[Provider plugins<br/>openai-compat · anthropic · openai-agents · pydantic-ai · acp]
     EXEC --> TOOL[tool<br/>HTTP · subprocess]
     W -->|append events| PG
     PG -.observers derive.-> OTEL[OpenTelemetry → Jaeger]
@@ -84,6 +84,12 @@ same wheels — verification in [`docs/RELEASING.md`](docs/RELEASING.md).
 pip install "dagentos[providerkit]" agentos-provider-openai-compat
 docker run --rm -p 8000:8000 ghcr.io/amitsinghom/agentos        # API; python -m dagentos.worker for the worker
 ```
+
+A whole coding agent as a step: [`providers/acp`](providers/acp/README.md) runs one
+[Agent Client Protocol](https://agentclientprotocol.com) turn (`kiro-cli acp` by default, any
+ACP agent by config) under the same gate — the agent's permission prompts are answered from
+the step's declared effect classes, never `allow_always`, and an unasked undeclared tool
+dead-letters the step.
 
 No Docker needed for the default SQLite store. For Postgres:
 `docker compose up -d`, then `AGENTOS_STORE=postgres AGENTOS_PG_DSN=postgresql://agentos:agentos@localhost/agentos`
