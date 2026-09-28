@@ -11,7 +11,7 @@ policy, no keyring) and **not detectable in-log** (the one gap no in-log scheme 
 truncation after the last seal; the tool reports the uncovered tail). A chokepoint in none
 of these is a bug.
 
-Each row names the test that pins the direction (69 rows). `tests/test_fail_modes.py` checks that
+Each row names the test that pins the direction (71 rows). `tests/test_fail_modes.py` checks that
 every cited test exists, so this table cannot quietly outlive the code. Phase 8 #11;
 the operator policy ceiling (#2) is scoped against this table.
 
@@ -101,7 +101,9 @@ the operator policy ceiling (#2) is scoped against this table.
 | Webhook trigger | Redelivery of the same `X-AgentOS-Delivery` (or same body) | **closed to duplicates** | Same run id, no new log; the delivery is the `Idempotency-Key` | `tests/test_triggers.py::test_webhook_starts_a_run_replay_safe_with_a_system_principal` |
 | Webhook trigger | Body over the trigger's `max_body_bytes` / unknown trigger name | **closed** | 413 / 404 before the signature is even checked | `tests/test_triggers.py::test_webhook_unknown_trigger_is_404_and_oversized_body_is_413` |
 | Triggers startup | `AGENTOS_TRIGGERS` set but missing / malformed, or a webhook's `secret_env` unset or short | **closed** | API refuses to start naming the variable, trigger and field; no route is ever mounted without a secret | `tests/test_triggers.py::test_bad_triggers_file_fails_api_startup_naming_the_variable` |
-| Cron runner | API unreachable when a slot is due | **closed, bounded** | Retried with backoff (1…60 s) inside the slot, then given up with an ERROR naming the slot; never fired late into the next slot | `tests/test_triggers.py::test_runner_gives_up_a_slot_at_the_next_slot_and_reports_it` |
+| Cron runner | API unreachable when a slot is due | **closed, bounded** | Retried with backoff (1…60 s) for at most 10 min and never past the next slot, then given up with an ERROR naming the slot; one trigger's outage cannot hold the runner for the others | `tests/test_triggers.py::test_runner_gives_up_a_slot_at_the_retry_horizon_and_reports_it` |
+| Cron runner | A trigger's whole slot window passed while the runner was stalled | **closed (no backfill)** | The slot is logged as missed and the trigger skips to its next future slot; never fired late | `tests/test_triggers.py::test_a_slot_whose_window_passed_during_a_stall_is_missed_not_fired_late` |
+| Webhook trigger | A captured valid request replayed inside the window with a new `X-AgentOS-Delivery` | **closed** | 401: the delivery id is inside the signed string, so a replay can only reproduce the same key (same run) | `tests/test_triggers.py::test_a_captured_signature_cannot_be_replayed_under_a_new_delivery_id` |
 | Cron runner | Runner was down over one or more slots | **closed (no backfill)** | Missed slots stay unfired; the operator starts them by hand with the same key | `tests/test_triggers.py::test_runner_never_backfills_slots_missed_while_it_was_down` |
 | Cron runner | Restart, duplicate runner, or retried post for one slot | **closed to duplicates** | `cron:{name}:{slot}` is the `Idempotency-Key`, so the API answers with the same run | `tests/test_triggers.py::test_runner_fires_each_slot_once_with_slot_key_inputs_and_principal` |
 

@@ -25,6 +25,7 @@ import hashlib
 import hmac
 import importlib
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -109,8 +110,8 @@ def test_sign_and_verify_round_trip_and_reject_tampering():
     ts, body = 1_790_000_000, b'{"event":"push"}'
     sig = sign(SECRET, ts, body)
     assert sig.startswith("v1=") and len(sig) == 3 + 64
-    expected = hmac.new(SECRET.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
-    assert sig == f"v1={expected}"
+    expected = hmac.new(SECRET.encode(), f"{ts}.0..".encode() + body, hashlib.sha256).hexdigest()
+    assert sig == f"v1={expected}"                                # no delivery: length 0, empty
     now = ts + 10
     assert verify(SECRET, str(ts), body, sig, now=now) is True
     assert verify("other-secret", str(ts), body, sig, now=now) is False
@@ -121,6 +122,19 @@ def test_sign_and_verify_round_trip_and_reject_tampering():
     assert verify(SECRET, "soon", body, sig, now=now) is False                # malformed ts
     assert verify(SECRET, "", body, sig, now=now) is False
     assert verify(SECRET, str(ts), body, "", now=now) is False
+
+
+def test_the_delivery_id_is_inside_the_signed_string():
+    ts, body = 1_790_000_000, b"{}"
+    with_id = sign(SECRET, ts, body, "d-1")
+    assert with_id == "v1=" + hmac.new(SECRET.encode(), f"{ts}.3.d-1.".encode() + body,
+                                       hashlib.sha256).hexdigest()
+    assert with_id != sign(SECRET, ts, body, "d-2") != sign(SECRET, ts, body)
+    assert verify(SECRET, str(ts), body, with_id, now=ts, delivery="d-1") is True
+    assert verify(SECRET, str(ts), body, with_id, now=ts, delivery="d-2") is False
+    assert verify(SECRET, str(ts), body, with_id, now=ts, delivery=None) is False
+    # A delivery id containing the separator cannot collide with a shifted body.
+    assert sign(SECRET, ts, b"x", "a.b") != sign(SECRET, ts, b"b.x", "a")
 
 
 def test_verify_enforces_the_replay_window_both_ways():
@@ -288,18 +302,55 @@ def test_runner_retries_a_failed_post_with_bounded_backoff_inside_the_slot(tmp_p
     assert slept == [1.0, 2.0]                                        # 1, 2, 4, ... capped
 
 
-def test_runner_gives_up_a_slot_at_the_next_slot_and_reports_it(tmp_path, caplog):
+def test_runner_gives_up_a_slot_at_the_retry_horizon_and_reports_it(tmp_path, caplog):
+    """Self-review R2. Retrying until the NEXT slot meant a daily cron could hold the
+    single-threaded runner for 24 h, starving every other trigger. The horizon is bounded
+    (RETRY_HORIZON_SECONDS) and never past the next slot."""
+    from dagentos.triggers.runner import RETRY_HORIZON_SECONDS
     poster = FakePoster()
     poster.fail_next = 10_000
-    r, clock, slept = _runner(tmp_path, poster, now=datetime(2026, 9, 28, 9, 0, tzinfo=IST))
+    start = datetime(2026, 9, 28, 9, 0, tzinfo=IST)
+    r, clock, slept = _runner(tmp_path, poster, now=start)
     r.tick()
     assert poster.calls == []
-    assert sum(slept) < 24 * 3600 and slept[-1] == 60.0             # capped at 60 s per retry
-    next_slot = datetime(2026, 9, 29, 9, 0, tzinfo=IST)
-    assert next_slot - timedelta(seconds=60) <= clock["now"] < next_slot   # gave up just before it
-    assert r.next_fire_times() == {"nightly": next_slot}              # the next slot is intact
+    assert slept[-1] == 60.0                                          # capped at 60 s per retry
+    assert timedelta(seconds=RETRY_HORIZON_SECONDS - 60) <= clock["now"] - start \
+        <= timedelta(seconds=RETRY_HORIZON_SECONDS)                   # gave up at the horizon
+    assert RETRY_HORIZON_SECONDS <= 15 * 60                           # not "until tomorrow"
+    assert r.next_fire_times() == {"nightly": datetime(2026, 9, 29, 9, 0, tzinfo=IST)}
     assert any("nightly" in rec.getMessage() and "gave up" in rec.getMessage()
                for rec in caplog.records)
+
+
+def test_a_slot_whose_window_passed_during_a_stall_is_missed_not_fired_late(tmp_path, caplog):
+    """Two triggers; the first stalls (API down) long enough that the second's slot AND the
+    slot after it both pass. The second trigger must not fire two stale slots when the
+    runner comes back — that is backfill through the back door. It skips to the next
+    future slot and logs what it missed."""
+    doc = {"triggers": [
+        {"name": "slow", "kind": "cron", "schedule": "0 9 * * *", "tz": "UTC", "workflow": "a"},
+        {"name": "fast", "kind": "cron", "schedule": "*/2 * * * *", "tz": "UTC", "workflow": "b"},
+    ]}
+    cfg = load_triggers(_write(tmp_path, doc), env={})
+    poster = FakePoster()
+    clock = {"now": utc(2026, 9, 28, 9, 0)}
+    slept: list[float] = []
+
+    def sleep(s: float) -> None:
+        slept.append(s)
+        clock["now"] = clock["now"] + timedelta(seconds=s)
+
+    r = Runner(cfg.crons, post=poster, now=lambda: clock["now"], sleep=sleep)
+    poster.fail_next = 10_000                                         # `slow` stalls to its horizon
+    with caplog.at_level(logging.WARNING, logger="agentos.triggers"):
+        r.tick()
+    # `fast` had slots at 09:00, 09:02, 09:04 … while `slow` was retrying. At most one
+    # `fast` run may have started (the slot current when the runner reached it); the
+    # others are reported as missed, never fired.
+    fast_keys = [c["key"] for c in poster.calls if c["workflow"] == "b"]
+    assert len(fast_keys) <= 1
+    assert any("fast" in rec.getMessage() and "missed" in rec.getMessage() for rec in caplog.records)
+    assert r.next_fire_times()["fast"] > clock["now"]
 
 
 def test_runner_dry_run_lists_the_next_fire_times(tmp_path, capsys):
@@ -355,7 +406,7 @@ def _signed(body: bytes, *, ts: int | None = None, secret: str = SECRET, deliver
             now: int | None = None) -> dict:
     ts = int(datetime.now(UTC).timestamp()) if ts is None else ts
     h = {"Content-Type": "application/json", "X-AgentOS-Timestamp": str(ts),
-         "X-AgentOS-Signature": sign(secret, ts, body)}
+         "X-AgentOS-Signature": sign(secret, ts, body, delivery)}
     if delivery is not None:
         h["X-AgentOS-Delivery"] = delivery
     return h
@@ -394,6 +445,24 @@ def test_webhook_without_a_delivery_id_is_idempotent_on_the_body(monkeypatch, tm
     b = c.post("/triggers/webhooks/gh", content=body, headers=_signed(body, delivery=None))
     assert a.status_code == 202 and a.json()["id"] == b.json()["id"]
     assert a.json()["request_id"] == f"webhook:gh:sha256:{hashlib.sha256(body).hexdigest()}"
+
+
+def test_a_captured_signature_cannot_be_replayed_under_a_new_delivery_id(monkeypatch, tmp_path):
+    """Self-review R1. The delivery id is the idempotency key; if it were outside the signed
+    string, an attacker holding one valid request could replay it inside the window with a
+    fresh X-AgentOS-Delivery each time and start a run per replay. The id is signed."""
+    main = _app(monkeypatch, tmp_path)
+    c = TestClient(main.app)
+    _define_review(c)
+    body = b'{"x":1}'
+    good = _signed(body, delivery="d-1")
+    assert c.post("/triggers/webhooks/gh", content=body, headers=good).status_code == 202
+    replay = {**good, "X-AgentOS-Delivery": "d-2"}            # same ts + signature, new id
+    r = c.post("/triggers/webhooks/gh", content=body, headers=replay)
+    assert r.status_code == 401 and "signature" in r.json()["detail"]
+    dropped = {k: v for k, v in good.items() if k != "X-AgentOS-Delivery"}   # id removed
+    assert c.post("/triggers/webhooks/gh", content=body, headers=dropped).status_code == 401
+    assert len(c.get("/runs").json()["data"]) == 1
 
 
 @pytest.mark.parametrize("headers_fn,status,needle", [

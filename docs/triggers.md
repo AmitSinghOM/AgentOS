@@ -68,8 +68,11 @@ Semantics, each pinned in `tests/test_triggers.py`:
 - **No backfill.** Slots missed while the runner was down stay unfired — a scheduler whose
   runs can spend money must not surprise anyone with three catch-up runs at 11:00. Start a
   missed run by hand with the same key if you want it.
-- A failed post is retried with bounded backoff (1, 2, 4 … 60 s) **inside its slot**, then
-  given up with one ERROR line naming the slot; it is never fired late into the next slot.
+- A failed post is retried with bounded backoff (1, 2, 4 … 60 s) for at most ten minutes
+  and never past the trigger's next slot, then given up with one ERROR line naming the slot.
+  One trigger's outage cannot hold the runner for the others, and a slot is never fired late
+  into the next one: if a stall lasted across a trigger's whole window, that slot is logged
+  as **missed** and the trigger skips to its next future slot.
 - `404` from the API (workflow not defined) is reported, not retried forever.
 
 ## Webhook route
@@ -79,10 +82,16 @@ per webhook trigger. The sender signs like Stripe / Slack:
 
 ```
 X-AgentOS-Timestamp: 1790000000
-X-AgentOS-Signature: v1=<hex HMAC-SHA256(secret, "1790000000." + raw body)>
-X-AgentOS-Delivery:  <sender's delivery id>          # optional but recommended
+X-AgentOS-Delivery:  d-1                                # optional but recommended
+X-AgentOS-Signature: v1=<hex HMAC-SHA256(secret, "1790000000.3.d-1." + raw body)>
 Content-Type: application/json
 ```
+
+The signed string is `{timestamp}.{len(delivery)}.{delivery}.{body}` — with no delivery
+header, `{timestamp}.0..{body}`. The delivery id is **inside** the signature because it is
+the idempotency key: were it outside, one captured request could be replayed inside the
+window under a fresh id each time and start a run per replay. The length prefix keeps the
+encoding unambiguous for ids that contain `.`.
 
 Checks, in order, all before the engine is touched: 404 unknown trigger → 413 over
 `max_body_bytes` (default 256 KiB, inside the global `AGENTOS_MAX_BODY_BYTES`) → 415 not
@@ -101,11 +110,12 @@ Signing from Python (what a sender does):
 ```python
 import hmac, hashlib, time, json, httpx
 body = json.dumps({"pull_request": {"number": 7}}).encode()
-ts = int(time.time())
-sig = "v1=" + hmac.new(SECRET.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+ts, delivery = int(time.time()), "d-1"
+msg = f"{ts}.{len(delivery.encode())}.".encode() + delivery.encode() + b"." + body
+sig = "v1=" + hmac.new(SECRET.encode(), msg, hashlib.sha256).hexdigest()
 httpx.post("http://127.0.0.1:8000/triggers/webhooks/gh", content=body,
            headers={"Content-Type": "application/json", "X-AgentOS-Timestamp": str(ts),
-                    "X-AgentOS-Signature": sig, "X-AgentOS-Delivery": "d-1"})
+                    "X-AgentOS-Signature": sig, "X-AgentOS-Delivery": delivery})
 ```
 
 ## Not here, on purpose

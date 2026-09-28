@@ -4,11 +4,13 @@ For each cron trigger it holds the next slot. On every `tick()` a slot at or bef
 is fired as `POST /workflows/{workflow}/runs` with `Idempotency-Key: cron:{name}:{slot}`;
 the key is what makes a restart, a duplicate runner or a retried post harmless — the API
 answers with the same run. A failed post is retried with bounded exponential backoff
-(1, 2, 4 … 60 s) until the NEXT slot of that trigger is due, at which point the slot is given
-up with one ERROR line naming it — a slot is never fired late into the following one.
+(1, 2, 4 … 60 s) for at most `RETRY_HORIZON_SECONDS` and never past the trigger's next slot,
+then the slot is given up with one ERROR line naming it — a slot is never fired late into the
+following one, and one trigger's outage cannot hold the runner for the others.
 
-Missed slots are not backfilled: a runner started at 11:00 does not fire 09:00. That is a
-deliberate choice for a scheduler whose runs can spend money; an operator who wants the
+Missed slots are not backfilled: a runner started at 11:00 does not fire 09:00, and a slot
+whose whole window passed while the runner was stalled is logged as missed, not fired. That
+is a deliberate choice for a scheduler whose runs can spend money; an operator who wants the
 missed run starts it by hand with the same key.
 """
 from __future__ import annotations
@@ -26,6 +28,10 @@ log = logging.getLogger("agentos.triggers")
 # (workflow, *, idempotency_key, inputs, principal) -> the run as the API returned it
 PostFn = Callable[..., dict]
 BACKOFF_START, BACKOFF_CAP = 1.0, 60.0
+# How long one slot may keep retrying a failed post. Bounded so a daily trigger whose API is
+# down cannot hold the single-threaded runner for a day and starve every other trigger
+# (self-review R2); also never past the trigger's next slot.
+RETRY_HORIZON_SECONDS = 10 * 60
 
 
 class Runner:
@@ -52,15 +58,30 @@ class Runner:
         return dict(self._next)
 
     def tick(self) -> int:
-        """Fire every slot that is due. Returns how many runs were started."""
+        """Fire every slot that is due AND still current. A slot whose successor is also in
+        the past (the runner stalled or was paused across it) is reported as missed and
+        skipped — firing it late would be backfill by another name. Returns how many runs
+        were started."""
         started = 0
         for c in self._crons:
             slot = self._next[c.name]
-            if self._now().astimezone(c.tz) < slot:
+            now = self._now().astimezone(c.tz)
+            if now < slot:
                 continue
             following = next_fire(c.spec, slot, tz=c.tz)
+            if now >= following:
+                # Advance to the first slot still in the future, counting what was skipped.
+                missed = [slot]
+                while now >= following:
+                    missed.append(following)
+                    following = next_fire(c.spec, following, tz=c.tz)
+                current = missed.pop()                      # the slot whose window we are in
+                log.warning("trigger %r: missed %d slot(s) while stalled (%s .. %s); not backfilled",
+                            c.name, len(missed), slot_key(c.name, missed[0]),
+                            slot_key(c.name, missed[-1]))
+                slot = current
             self._next[c.name] = following
-            if self._fire(c, slot, give_up_at=following):
+            if self._fire(c, slot, give_up_at=min(following, now + timedelta(seconds=RETRY_HORIZON_SECONDS))):
                 started += 1
         return started
 

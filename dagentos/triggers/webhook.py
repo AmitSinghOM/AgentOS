@@ -1,15 +1,21 @@
-"""Webhook authentication: the scheme Stripe, Slack and GitHub-style senders use.
+"""Webhook authentication: the scheme Stripe, Slack and GitHub-style senders use, with one
+addition — the delivery id is inside the signed string.
 
     X-AgentOS-Timestamp: <unix seconds>
-    X-AgentOS-Signature: v1=<hex HMAC-SHA256 over "{timestamp}.{raw body}">
     X-AgentOS-Delivery:  <sender's delivery id>          (optional)
+    X-AgentOS-Signature: v1=<hex HMAC-SHA256 over "{timestamp}.{len(delivery)}.{delivery}.{raw body}">
 
-The timestamp is inside the signed string, so a captured request cannot be replayed after
-the window (default 300 s either side of the receiver's clock) — and a replay *inside* the
-window is harmless because the delivery id (or, failing that, the body hash) is the run's
-`Idempotency-Key`, so the same delivery maps to the same run. Comparison is constant-time.
-The secret is a shared credential the operator mints once and gives the sender; it lives in
-an environment variable named by the triggers file, never in the file.
+`{delivery}` is the header's value (UTF-8) or empty when absent, and `{len(delivery)}` is its
+byte length, so the signed string is `"{ts}.0..{body}"` with no id and, say,
+`"{ts}.3.d-1.{body}"` with `d-1`. The length prefix makes the encoding injective (an id
+containing "." cannot be re-split against the body). The timestamp is signed, so a captured
+request cannot be replayed after the window (default 300 s either side of the receiver's
+clock). The delivery id is signed because it is the run's `Idempotency-Key`: if it were
+outside the signature, one captured request could be replayed inside the window under a
+fresh id each time and start a run per replay (self-review R1). With it signed, a replay
+inside the window can only reproduce the SAME key, which maps to the same run. Comparison is
+constant-time. The secret is a shared credential the operator mints once and gives the
+sender; it lives in an environment variable named by the triggers file, never in the file.
 """
 from __future__ import annotations
 
@@ -22,15 +28,25 @@ DEFAULT_TOLERANCE_SECONDS = 300
 MIN_SECRET_LENGTH = 16
 
 
-def sign(secret: str, timestamp: int, body: bytes) -> str:
-    mac = hmac.new(secret.encode(), f"{timestamp}.".encode() + body, hashlib.sha256)
+def _message(timestamp: int, delivery: str | None, body: bytes) -> bytes:
+    # Injective: the delivery id is length-prefixed, so an id containing "." (or anything)
+    # can never be re-split against the body. The self-review's first cut used a bare
+    # "{ts}.{delivery}.{body}" and the lock test found the collision
+    # ("a.b" + "x" == "a" + "b.x").
+    d = (delivery or "").encode()
+    return f"{timestamp}.{len(d)}.".encode() + d + b"." + body
+
+
+def sign(secret: str, timestamp: int, body: bytes, delivery: str | None = None) -> str:
+    mac = hmac.new(secret.encode(), _message(timestamp, delivery, body), hashlib.sha256)
     return f"{SCHEME}={mac.hexdigest()}"
 
 
 def verify(secret: str, timestamp: str, body: bytes, signature: str, *,
-           now: float | None = None, tolerance: int = DEFAULT_TOLERANCE_SECONDS) -> bool:
+           delivery: str | None = None, now: float | None = None,
+           tolerance: int = DEFAULT_TOLERANCE_SECONDS) -> bool:
     """True only when the timestamp parses, sits within `tolerance` of `now`, and the
-    signature is this scheme's HMAC over `{timestamp}.{body}`. Never raises."""
+    signature is this scheme's HMAC over `{timestamp}.{delivery}.{body}`. Never raises."""
     try:
         ts = int(timestamp)
     except (TypeError, ValueError):
@@ -41,7 +57,7 @@ def verify(secret: str, timestamp: str, body: bytes, signature: str, *,
     scheme, _, digest = (signature or "").partition("=")
     if scheme != SCHEME or not digest:
         return False
-    expected = sign(secret, ts, body)
+    expected = sign(secret, ts, body, delivery)
     return hmac.compare_digest(expected.encode(), signature.encode())
 
 
