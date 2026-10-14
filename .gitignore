@@ -16,3 +16,6 @@ dagentos/_ui/
 agentos.db
 agentos.db-wal
 agentos.db-shm
+
+# uv lockfile: no job verifies it (CI installs with pip), so a stray `uv lock` must not be committed
+uv.lock
