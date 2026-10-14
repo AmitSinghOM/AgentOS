@@ -109,6 +109,15 @@ the UI computes from events rather than from the fold. It follows the time-trave
 - Traversal (`/ui/../…`) cannot escape the bundle directory.
 - `/ui/<client route>` returns `index.html` (single-page routing); `/ui/assets/*` are plain
   files; `index.html` is `Cache-Control: no-cache` so a new build is picked up on reload.
+- **Assets are precompressed at build time, negotiated at request time.** `npm run build` ends
+  with `ui/scripts/precompress.mjs`, which writes `<asset>.br` (brotli 11) and `<asset>.gz`
+  (gzip 9) beside every text asset over 1 KiB using Node's own zlib (no dependency). The mount
+  reads `Accept-Encoding` and serves the `.br` sibling, else `.gz`, else the plain file, with
+  `Content-Encoding`, `Vary: Accept-Encoding` and the *original* media type; a direct request
+  for `app.js.br` is typed `application/octet-stream` so a browser never executes an encoded
+  blob. Nothing is compressed per request, so the API and the SSE stream are untouched, and
+  `scripts/bundle_ui.py` refuses to ship a bundle whose siblings are missing, bloated, or do
+  not round-trip. On the v0.16 bundle the main script goes 325 KB → 87 KB (br) / 101 KB (gz).
 
 ## Tests
 

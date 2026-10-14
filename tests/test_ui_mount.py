@@ -133,3 +133,122 @@ def test_every_ui_response_carries_the_security_headers(monkeypatch, bundle, tmp
             assert r.headers.get(k) == v, (path, k, r.headers.get(k))
     r = c.get("/health")
     assert "Content-Security-Policy" not in r.headers
+
+
+# ---- precompressed assets (v0.17): negotiated at request time, compressed at build time ----
+
+def _gz(data: bytes) -> bytes:
+    import gzip
+    return gzip.compress(data, mtime=0)
+
+
+@pytest.fixture
+def compressed_bundle(bundle):
+    js = (bundle / "assets" / "app.js").read_bytes()
+    (bundle / "assets" / "app.js.gz").write_bytes(_gz(js))
+    # A fake brotli sibling: the server never decodes it, it only needs to serve the bytes
+    # with the right headers, so any distinguishable payload proves which file was picked.
+    (bundle / "assets" / "app.js.br").write_bytes(b"BR-PAYLOAD")
+    (bundle / "assets" / "plain.css").write_text("body{}")           # no siblings at all
+    return bundle
+
+
+def _get(c, path, accept):
+    # httpx adds its own `Accept-Encoding: gzip, deflate, br` when none is given, so "no
+    # preference" is spelled as an explicit empty header here. It also decodes gzip bodies
+    # transparently, which the gzip assertions below rely on.
+    return c.get(path, headers={"Accept-Encoding": accept if accept is not None else ""})
+
+
+def test_asset_negotiation_prefers_br_then_gzip_then_identity(monkeypatch, tmp_path, compressed_bundle):
+    main = _app(monkeypatch, mode="asserted", ui_dir=compressed_bundle, tmp_path=tmp_path)
+    c = TestClient(main.app)
+    r = _get(c, "/ui/assets/app.js", "gzip, deflate, br, zstd")
+    assert r.headers.get("content-encoding") == "br" and r.content == b"BR-PAYLOAD"
+    r = _get(c, "/ui/assets/app.js", "gzip, deflate")
+    assert r.headers.get("content-encoding") == "gzip"
+    assert r.content == b"console.log('ui')"          # httpx decoded it: the bytes were valid gzip
+    r = _get(c, "/ui/assets/app.js", "identity")
+    assert "content-encoding" not in r.headers and r.content == b"console.log('ui')"
+    r = _get(c, "/ui/assets/app.js", None)
+    assert "content-encoding" not in r.headers
+
+
+def test_compressed_variant_keeps_the_original_media_type_and_security_headers(
+        monkeypatch, tmp_path, compressed_bundle):
+    from dagentos.api.ui import UI_HEADERS
+    main = _app(monkeypatch, mode="asserted", ui_dir=compressed_bundle, tmp_path=tmp_path)
+    c = TestClient(main.app)
+    r = _get(c, "/ui/assets/app.js", "br")
+    assert r.headers["content-type"].startswith("text/javascript")   # not octet-stream for .br
+    assert r.headers["vary"] == "Accept-Encoding"
+    for k, v in UI_HEADERS.items():
+        assert r.headers.get(k) == v, k
+    # identity responses of a file that HAS variants must also say Vary, or a shared cache
+    # could hand the plain bytes to a br client or vice versa
+    assert _get(c, "/ui/assets/app.js", "identity").headers.get("vary") == "Accept-Encoding"
+
+
+def test_asset_without_siblings_is_served_plain_regardless_of_accept(monkeypatch, tmp_path, compressed_bundle):
+    main = _app(monkeypatch, mode="asserted", ui_dir=compressed_bundle, tmp_path=tmp_path)
+    c = TestClient(main.app)
+    r = _get(c, "/ui/assets/plain.css", "br, gzip")
+    assert r.status_code == 200 and "content-encoding" not in r.headers and r.text == "body{}"
+
+
+def test_sibling_files_are_not_addressable_by_their_own_name_with_wrong_type(
+        monkeypatch, tmp_path, compressed_bundle):
+    """Asking for app.js.br directly is allowed (it is a file in the bundle) but must come back
+    as what it is - an opaque encoded blob - not as text/javascript without Content-Encoding,
+    which a browser would try to execute."""
+    main = _app(monkeypatch, mode="asserted", ui_dir=compressed_bundle, tmp_path=tmp_path)
+    c = TestClient(main.app)
+    r = _get(c, "/ui/assets/app.js.br", "br")
+    assert r.status_code == 200
+    assert not r.headers["content-type"].startswith("text/javascript")
+
+
+def test_conditional_requests_still_work_on_compressed_variants(monkeypatch, tmp_path, compressed_bundle):
+    main = _app(monkeypatch, mode="asserted", ui_dir=compressed_bundle, tmp_path=tmp_path)
+    c = TestClient(main.app)
+    first = _get(c, "/ui/assets/app.js", "br")
+    etag = first.headers["etag"]
+    again = c.get("/ui/assets/app.js", headers={"Accept-Encoding": "br", "If-None-Match": etag})
+    assert again.status_code == 304
+    # the gzip variant is a different file, so its ETag differs and the br ETag must not match it
+    other = c.get("/ui/assets/app.js", headers={"Accept-Encoding": "gzip", "If-None-Match": etag})
+    assert other.status_code == 200
+
+
+# ---- the release bundler refuses a build whose precompressed siblings are missing or wrong ----
+
+def _fake_dist(tmp_path, *, br=True, gz=True, gz_ok=True, br_small=True):
+    import gzip
+    d = tmp_path / "dist"
+    (d / "assets").mkdir(parents=True)
+    js = ("console.log('x');\n" * 200).encode()      # compressible, > 1 KiB
+    (d / "assets" / "index-abc.js").write_bytes(js)
+    (d / "index.html").write_text('<script src="/ui/assets/index-abc.js"></script>')
+    if br:
+        (d / "assets" / "index-abc.js.br").write_bytes(b"x" * (10 if br_small else len(js) + 1))
+    if gz:
+        (d / "assets" / "index-abc.js.gz").write_bytes(
+            gzip.compress(js) if gz_ok else gzip.compress(js + b"tampered"))
+    return d
+
+
+def test_bundler_accepts_a_complete_build(tmp_path):
+    from scripts.bundle_ui import _validate
+    assert _validate(_fake_dist(tmp_path)) == []
+
+
+@pytest.mark.parametrize("kw,needle", [
+    ({"br": False}, ".br missing"),
+    ({"gz": False}, ".gz missing"),
+    ({"gz_ok": False}, "does not decompress to"),
+    ({"br_small": False}, "is not smaller than"),
+])
+def test_bundler_refuses_bad_siblings(tmp_path, kw, needle):
+    from scripts.bundle_ui import _validate
+    problems = _validate(_fake_dist(tmp_path, **kw))
+    assert any(needle in p for p in problems), problems
