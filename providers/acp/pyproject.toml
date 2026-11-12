@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentos-provider-acp"
-version = "0.16.0"
+version = "0.17.0"
 description = "AgentOS executor that runs one Agent Client Protocol (ACP) agent turn — kiro-cli acp or any ACP harness — as one governed step"
 readme = "README.md"
 requires-python = ">=3.11"

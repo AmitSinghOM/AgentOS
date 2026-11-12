@@ -510,8 +510,10 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   from the import package; the sdist shipped the whole tree incl. a linter cache (193 files →
   ~65); providers had no README metadata so `twine check --strict` failed. Deferred: import
   package rename; PyPI Trusted Publisher setup (Amit's account); `agentos snapshot`.
-- [ ] ⏭ Triggers (#5), Slack approval adapter (#6), redaction (#7), sensitive paths (#9),
-  sandbox (#8), `agentos snapshot` — after the items above, in that order.
+- [x] Triggers (#5), Slack approval adapter (#6) — shipped in `v0.17.0` as PRs #106 and #107
+  (Phase 10, below).
+- [ ] ⏭ Redaction (#7), sensitive paths (#9), sandbox (#8), `agentos snapshot` — after the
+  items above, in that order.
 
 **Tag:** `v0.9.0-pilot`. **Post:** "A Human Said Yes — Prove It."
 
@@ -636,6 +638,100 @@ the five UI majors closed with reasons, then lifted here. No majors are currentl
 time under our `>=` floors, so two builds of the same tag can differ and the attestation
 covers floating inputs. The fix is a constraints file used by the image and CI only (a
 library must not pin), with a refresh process — its own slice.
+
+---
+
+## Phase 10 — Triggers, notifier, ACP, hardening  ·  ✅ shipped `v0.17.0` (2026-11-13)
+**Goal:** runs that start with nobody at a terminal, a channel that hears about a gate without
+being able to open it, a whole coding agent as one governed step, and the delivered examples
+(compose, image, asserted mode) safe to copy as written. Closes Phase 8 #5 and #6. First release
+that uploads to PyPI.
+
+- [x] **ACP provider** ([#105](https://github.com/AmitSinghOM/AgentOS/pull/105)).
+  `agentos-provider-acp` (`providers/acp/`): one Agent Client Protocol turn — `kiro-cli acp` by
+  default, any ACP agent via `AGENTOS_ACP_COMMAND` — as one step, standard library only (ACP is
+  newline-delimited JSON-RPC 2.0 over stdio). The agent's `session/request_permission` is answered
+  from the step's declared effect classes (ACP `ToolKind` → `EffectClass`): declared →
+  `allow_once`, undeclared → `reject_once`, never `allow_always`; a tool the agent ran without
+  asking is reported by class so an undeclared one dead-letters the step through the existing
+  `_settle`; a rejected request never ran and is recorded as `permission: rejected`. Tool calls
+  are recorded by title/kind/status/class and SHA-256 of input and output, never inlined. One
+  process per step, `session/cancel` + SIGTERM/SIGKILL on timeout or cancel. 43 tests drive a
+  real fake agent over real stdio (`providers/acp/tests/fake_acp_agent.py`).
+- [x] **Triggers** ([#106](https://github.com/AmitSinghOM/AgentOS/pull/106); Phase 8 #5).
+  `dagentos/triggers/`: a cron runner (`python -m dagentos.triggers`, five-field stdlib parser,
+  IANA `tz`, missed slots never backfilled, retry with backoff for at most 10 min and never past
+  the next slot) and `POST /triggers/webhooks/{name}` (mounted only when `AGENTOS_TRIGGERS` is
+  set; HMAC-SHA256 over `{timestamp}.{len(delivery)}.{delivery}.{body}`, ±300 s, constant-time
+  compare; the secret is an env var the file names, never a value). Both go through
+  `POST /workflows/{name}/runs` with a derived `Idempotency-Key` — no second door into the
+  engine, same auth, same policy ceiling, same log. The route is the only entry in
+  `auth.SELF_AUTHENTICATED_PREFIXES`. `docs/triggers.md`; ten FAIL_MODES rows.
+- [x] **Slack approval notifier** ([#107](https://github.com/AmitSinghOM/AgentOS/pull/107);
+  Phase 8 #6). `dagentos/notify/slack.py`, an `Observer` composed in `build_observers`: posts on
+  `approval.requested` and on `approval.granted|rejected` (kind and id of the principal, the
+  reason) with a link to `/ui/runs/{id}` and nothing that acts — an incoming webhook can verify
+  nobody, so the decision stays where the bearer principal is. Off the engine's path: `observe()`
+  enqueues, one daemon thread posts with a 5 s timeout, bounded queue (100) drops the oldest with
+  a warning; the URL is a credential and is never logged. `AGENTOS_SLACK_WEBHOOK` must be
+  `https://hooks.slack.com/services/…`. `docs/notifications.md`; four FAIL_MODES rows.
+- [x] **Compose hardening** ([#108](https://github.com/AmitSinghOM/AgentOS/pull/108),
+  [#109](https://github.com/AmitSinghOM/AgentOS/pull/109)). Every `ports:` entry in
+  `docker-compose.yml` carries `127.0.0.1:` (Postgres, Jaeger ×2, Prometheus, Grafana were on
+  every interface); `POSTGRES_PASSWORD` is `${POSTGRES_PASSWORD:?…}` with the development value
+  set in `.env.example`; Grafana anonymous role Admin → Viewer. Six locks in
+  `tests/test_c13_mit_and_compose.py`, each red on the prior file.
+- [x] **README use cases + popular-models guide** ([#110](https://github.com/AmitSinghOM/AgentOS/pull/110)):
+  six shapes mapped to `examples/`, and one table of backend → `executor` → environment →
+  `config.model` for Ollama, OpenAI, Anthropic, Gemini, OpenRouter, vLLM / LM Studio, the two
+  SDK harnesses and ACP agents.
+- [x] **Precompressed UI assets** ([#111](https://github.com/AmitSinghOM/AgentOS/pull/111)):
+  brotli/gzip siblings built once (`ui/scripts/precompress.mjs`, Node's zlib), served by the
+  `/ui/assets` mount on `Accept-Encoding` with `Content-Encoding`, `Vary` and per-variant 304s;
+  a direct request for a sibling is `application/octet-stream` so a browser never executes
+  compressed bytes. `bundle_ui.py` refuses a build whose siblings are missing or fail a round-trip.
+- [x] **Self-review of #105–#107**
+  ([`docs/reviews/2026-09-28-self-review-acp-triggers-slack.md`](docs/reviews/2026-09-28-self-review-acp-triggers-slack.md)):
+  the webhook's delivery id was outside the signed string, so one captured request replayed with
+  fresh ids started a run per replay — fixed by the length-prefixed string above; the cron runner
+  retried until the next slot and starved every other trigger; ACP excluded failed tool calls
+  from `ran_classes`; the notifier leaked a thread per import. One withdrawn finding and six
+  declined candidates kept on record. The FAIL_MODES preamble count is now pinned by a test.
+- [x] **Dependencies** ([#113](https://github.com/AmitSinghOM/AgentOS/pull/113)–[#116](https://github.com/AmitSinghOM/AgentOS/pull/116),
+  [#118](https://github.com/AmitSinghOM/AgentOS/pull/118)): npm minor/patch group, `setup-node`
+  7.1.0, `download-artifact` 8.0.2, `uv.lock` ignored, `gh-action-pypi-publish` 1.14.3
+  (GHSA-5xjx-3w67-w9x9, critical, merged before the first PyPI upload).
+- [x] **CI green again** ([#126](https://github.com/AmitSinghOM/AgentOS/pull/126); audit I-01,
+  I-02). pydantic-ai 2.60 answers an argument-validation failure with
+  `ToolReturnPart(outcome="retried")` instead of `RetryPromptPart`, so since 2026-10-26 the
+  refused call was logged as a normal return and `test (3.11|3.14)` was red on every PR;
+  `_trajectory` now records both shapes as `rejected: true`. `npm audit --audit-level=high` was
+  red on undici 8.11.2 under jsdom; lockfile moved to 8.12.4.
+- [x] **Audit fixes** ([#128](https://github.com/AmitSinghOM/AgentOS/pull/128); I-05, I-06,
+  I-07). In asserted mode `POST /agents` refuses (403, before the store) a `tool` agent that is
+  `kind: subprocess`, has a `${NAME}` reference in `headers`/`env`, or sets
+  `allow_private_networks: true`, unless `AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS=1`; the
+  Dockerfile's own example publishes on `127.0.0.1:8000`; the served OpenAPI description names
+  the length-prefixed signed string the verifier actually checks; the egress guard refuses
+  100.64.0.0/10 (RFC 6598, a metadata home) with no opt-in. One FAIL_MODES row.
+- [x] **First PyPI release.** Trusted Publishers registered for `dagentos` and the five
+  `agentos-provider-*` distributions; `v0.17.0` is the first tag whose `publish.yml` run uploads
+  (`docs/RELEASING.md`). The documented install line resolves from PyPI from this release on.
+
+**What this changes in the plan.** Phase 8 #5 and #6 are closed. The 2026-11-12 audit (held
+outside the repository) is what ordered this release: its blocker rows — the red CI, nothing on
+PyPI, the deployment examples and the asserted-mode blast radius, the webhook contract text —
+are fixed above or closed by the tag; its remaining rows (streaming byte caps on tool output,
+the D6 reconnect, scheduled CI on `main`, repository security settings, a redaction pass,
+`agentos.db` permissions, documentation drift, tooling debt) are queued as its Waves 1–3, not
+dropped. Still open, unchanged: A7 `KeyStore` / erasure, A8 `protocols/` + MCP, A11
+`agentos export-run`, A12 global pause, redaction (#7), sandbox (#8), sensitive paths (#9),
+`agentos snapshot`, the Ed25519 signer through the seal seam, mid-step suspension (ACP
+`session/load`, SDK `needs_approval`), D6 (stream reconnect after one failed refetch), D10
+(types-only OpenAPI codegen with a drift test), D2 (constraints file for the image build).
+Every ⏭ item remains a checkbox, not a deletion.
+
+**Tag:** `v0.17.0`.
 
 ---
 
