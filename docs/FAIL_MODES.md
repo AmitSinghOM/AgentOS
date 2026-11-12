@@ -11,7 +11,7 @@ policy, no keyring) and **not detectable in-log** (the one gap no in-log scheme 
 truncation after the last seal; the tool reports the uncovered tail). A chokepoint in none
 of these is a bug.
 
-Each row names the test that pins the direction (79 rows). `tests/test_fail_modes.py` checks that
+Each row names the test that pins the direction (80 rows). `tests/test_fail_modes.py` checks that
 every cited test exists, so this table cannot quietly outlive the code. Phase 8 #11;
 the operator policy ceiling (#2) is scoped against this table.
 
@@ -85,6 +85,7 @@ the operator policy ceiling (#2) is scoped against this table.
 | Authentication (bearer mode) | Route added without a `Depends` | **closed** | Middleware covers it | `tests/test_auth.py::test_every_route_is_covered_by_the_middleware_not_a_dependency` |
 | Authentication startup | `bearer` with no token file / plaintext token in the file | **closed** | Process refuses to start, naming the variable or entry and the fix | `tests/test_auth.py::test_bearer_without_a_token_file_fails_startup_naming_the_variable` |
 | Authentication (asserted mode) | — | **not a boundary** | Body principal recorded unverified; one WARNING at startup | `tests/test_auth.py::test_default_mode_is_asserted_and_warns_once` |
+| Authentication (asserted mode) | `POST /agents` with a `tool` agent that is `kind: subprocess`, has a `${NAME}` reference in `headers`/`env`, or sets `allow_private_networks` | **closed** | 403 before the store, naming the shape and the opt-in `AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS=1`; the quickstart's http tool with literal headers still registers | `tests/test_auth.py::test_asserted_mode_refuses_unsafe_tool_agents_unless_opted_in` |
 | Authorization | Non-human approves `spend` / `write_external` | **closed** | 403 from the engine; nothing appended | `tests/test_approvals.py::test_spend_requires_human_unless_workflow_allows_agent_approval` |
 | Authorization | `agent`-kind token registers an agent / defines a workflow | **closed** | 403 before the store | `tests/test_auth.py::test_agent_token_cannot_register_agents_or_define_workflows` |
 | Operator policy, gate | Workflow allows a class outside `effect_ceiling` | **closed** | Refused before dispatch; `governance.policy_applied` records the narrowing | `tests/test_policy.py::test_free_spend_outside_the_ceiling_is_refused_before_dispatch_and_audited` |

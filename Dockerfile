@@ -3,7 +3,7 @@
 # bytes. Base pinned by digest; runs as a non-root user; no build tools in the final stage.
 #
 #   docker run --rm ghcr.io/amitsinghom/agentos agentos --help
-#   docker run --rm -p 8000:8000 -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos
+#   docker run --rm -p 127.0.0.1:8000:8000 -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos
 #   docker run --rm -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos python -m dagentos.worker
 #
 # Local build: `python -m build` (core) and each provider into ./dist first, then
