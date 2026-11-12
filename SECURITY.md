@@ -38,7 +38,10 @@ Out of scope, by design and documented:
 
 - `AGENTOS_AUTH=asserted` (the default for the quickstart) records principals **unverified**;
   the API logs a warning at startup and `GET /me` says so. Exposing an `asserted` API is a
-  deployment mistake, not a vulnerability. Use `bearer` mode.
+  deployment mistake, not a vulnerability. Use `bearer` mode. To limit the blast radius of
+  that mistake, asserted mode refuses (403) a `tool` agent that is `kind: subprocess`, reads
+  `${NAME}` from the environment in `headers`/`env`, or sets `allow_private_networks`, unless
+  `AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS=1` is set deliberately.
 - Model or tool output content: the core hashes executor output and never interprets it.
 - Denial of service against a deployment with no ingress rate limiting; rate limiting belongs
   at the ingress for this shape of service (see `docs/FAIL_MODES.md`).

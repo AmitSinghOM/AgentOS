@@ -63,6 +63,9 @@ from dagentos.providerkit.prompt import render_prompt
 VERSION = "0.7.0"
 DEFAULT_MAX_BYTES = 1 << 20
 _ENV_REF = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
+# RFC 6598 shared address space: not private to Python (`is_private` is False) and not
+# global either; some clouds serve their metadata service from it (100.100.100.200).
+_SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
 
 
 class ToolError(RuntimeError):
@@ -225,8 +228,9 @@ def _check_egress(url: str, *, allow_private: bool) -> None:
     """Defence in depth for the one SSRF vector an operator-fixed URL leaves open: the
     operator's hostname resolving — by mistake, or by a hostile/rebinding DNS answer — to a
     cloud metadata service, a link-local or loopback address, or a private network.
-    Link-local (169.254.0.0/16, fe80::/10 — where every cloud metadata endpoint lives) is
-    always refused. Loopback and RFC 1918 need `config.allow_private_networks: true`, so a
+    Link-local (169.254.0.0/16, fe80::/10 — where every cloud metadata endpoint lives) and
+    the shared address space 100.64.0.0/10 (another metadata home) are always refused.
+    Loopback and RFC 1918 need `config.allow_private_networks: true`, so a
     laptop calling its own services opts in once, per agent version. Residual: the check
     resolves the name once and httpx resolves it again to connect (a TOCTOU window);
     pinning egress at the network layer is the complete answer and this does not replace it."""
@@ -237,7 +241,9 @@ def _check_egress(url: str, *, allow_private: bool) -> None:
         raise ToolError(f"cannot resolve {host!r}: {exc}") from exc
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
-        if ip.is_link_local or ip.is_unspecified or ip.is_multicast or ip.is_reserved:
+        v4 = ip if ip.version == 4 else ip.ipv4_mapped
+        if ip.is_link_local or ip.is_unspecified or ip.is_multicast or ip.is_reserved \
+                or (v4 is not None and v4 in _SHARED_ADDRESS_SPACE):
             raise ToolError(f"refusing {url}: {host!r} resolves to {ip}, a link-local/reserved "
                             f"address (cloud metadata lives there); this is never allowed")
         if (ip.is_loopback or ip.is_private) and not allow_private:

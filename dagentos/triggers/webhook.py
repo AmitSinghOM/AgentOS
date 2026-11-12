@@ -46,7 +46,8 @@ def verify(secret: str, timestamp: str, body: bytes, signature: str, *,
            delivery: str | None = None, now: float | None = None,
            tolerance: int = DEFAULT_TOLERANCE_SECONDS) -> bool:
     """True only when the timestamp parses, sits within `tolerance` of `now`, and the
-    signature is this scheme's HMAC over `{timestamp}.{delivery}.{body}`. Never raises."""
+    signature is this scheme's HMAC over `{timestamp}.{len(delivery)}.{delivery}.{body}`
+    (`_message`). Never raises."""
     try:
         ts = int(timestamp)
     except (TypeError, ValueError):

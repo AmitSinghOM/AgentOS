@@ -215,6 +215,15 @@ def test_egress_guard_refuses_metadata_and_private_addresses_unless_opted_in(mon
     fake_resolve("169.254.169.254")
     with pytest.raises(ToolError, match="link-local/reserved.*never allowed"):
         t._check_egress("http://metadata.internal/latest", allow_private=True)   # no opt-in exists
+    # Audit I-07: 100.64.0.0/10 (RFC 6598 shared address space) is where some clouds put
+    # their metadata service (100.100.100.200); Python's is_private excludes it, so it must
+    # be refused by name, and the opt-in must not open it.
+    fake_resolve("100.100.100.200")
+    with pytest.raises(ToolError, match="link-local/reserved.*never allowed"):
+        t._check_egress("http://metadata.internal/latest", allow_private=True)
+    fake_resolve("::ffff:100.100.100.200")                                        # v4-mapped v6
+    with pytest.raises(ToolError, match="link-local/reserved.*never allowed"):
+        t._check_egress("http://metadata.internal/latest", allow_private=True)
     fake_resolve("10.0.0.7")
     with pytest.raises(ToolError, match="allow_private_networks"):
         t._check_egress("http://db.internal/", allow_private=False)

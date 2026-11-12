@@ -1,8 +1,8 @@
 """`POST /triggers/webhooks/{name}` — one route per webhook trigger in `AGENTOS_TRIGGERS`.
 
 The route authenticates the DELIVERY, not a person: `X-AgentOS-Timestamp` and
-`X-AgentOS-Signature: v1=<hmac>` over `{timestamp}.{delivery}.{body}` with the trigger's
-shared secret (dagentos.triggers.webhook). It is listed in `auth.SELF_AUTHENTICATED_PREFIXES`,
+`X-AgentOS-Signature: v1=<hmac>` over `{timestamp}.{len(delivery)}.{delivery}.{body}` with the
+trigger's shared secret (dagentos.triggers.webhook). It is listed in `auth.SELF_AUTHENTICATED_PREFIXES`,
 so the bearer middleware lets it through to this check; there is no path to the engine
 without a valid signature. Order, all before the engine is touched: 404 unknown trigger → 413
 over the trigger's body cap → 415 not JSON → 401 missing/stale/invalid signature.
@@ -36,10 +36,12 @@ def build_router(cfg: TriggersConfig, *, engine, store) -> APIRouter:
     @router.post("/triggers/webhooks/{name}", status_code=202,
                  summary="Start a run from a signed webhook delivery",
                  description=("Authenticated by `X-AgentOS-Timestamp` + `X-AgentOS-Signature` "
-                              "(HMAC-SHA256 over `{timestamp}.{delivery}.{body}` with the trigger's "
-                              "shared secret), not by a bearer token. Optional `X-AgentOS-Delivery` is "
-                              "the idempotency key and is inside the signed string; otherwise the body "
-                              "hash is the key. Responds 202 with the run."),
+                              "(HMAC-SHA256 over `{timestamp}.{len(delivery)}.{delivery}.{body}` "
+                              "with the trigger's shared secret, `{delivery}` empty and `len` 0 "
+                              "when the header is absent), not by a bearer token. Optional "
+                              "`X-AgentOS-Delivery` is the idempotency key and is inside the "
+                              "signed string; otherwise the body hash is the key. Responds 202 "
+                              "with the run."),
                  responses={401: {"description": "missing, stale or invalid signature"},
                             404: {"description": "no such trigger or workflow"},
                             413: {"description": "body over the trigger's max_body_bytes"},

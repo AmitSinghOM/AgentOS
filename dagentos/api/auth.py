@@ -15,6 +15,11 @@ Two modes, selected by `AGENTOS_AUTH`:
              rejected 422. Unknown or missing token → 401. An `agent`-kind principal may
              not register agents or define workflows → 403.
 
+In asserted mode `POST /agents` also refuses (403) a `tool` agent that would let the
+unverified caller run code or read this process's environment — `kind: subprocess`, a
+`${NAME}` reference in `headers`/`env`, or `allow_private_networks: true` — unless
+`AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS=1` (`refuse_unsafe_tool_definition`).
+
 The token file holds SHA-256 hashes, never tokens:
 
     {"principals": [{"sha256": "<hex of the token>", "kind": "human", "id": "amit"}]}
@@ -50,7 +55,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from dagentos.api.ui import is_ui_asset_path
-from dagentos.core.models import Principal, PrincipalKind
+from dagentos.core.models import Agent, AgentType, Principal, PrincipalKind
 
 logger = logging.getLogger("agentos.api.auth")
 
@@ -67,6 +72,11 @@ SELF_AUTHENTICATED_PREFIXES: tuple[str, ...] = ("/triggers/webhooks/",)
 #: Routes an `agent`-kind principal may not call: definitions are operator-owned
 #: (docs/TRUST_BOUNDARY.md — declared effects are what the gate trusts).
 DEFINITION_PATHS: frozenset[str] = frozenset({"/agents", "/workflows"})
+
+#: Asserted-mode opt-in (`refuse_unsafe_tool_definition`): "1" lets unverified callers
+#: register subprocess / `${NAME}` / private-network tool agents. Purpose-named so it is
+#: never set by accident; bearer mode ignores it.
+UNSAFE_TOOLS_VAR = "AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS"
 
 _ATTESTATION_HEX = 12
 
@@ -171,6 +181,9 @@ class StaticTokenAuthenticator:
 class AuthConfig:
     mode: AuthMode
     authenticator: Authenticator | None
+    # Asserted mode only: AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS=1 lets UNVERIFIED callers
+    # register the tool shapes `unsafe_tool_reason` names. Off by default; see there.
+    allow_unsafe_tools: bool = False
 
     @classmethod
     def from_env(cls) -> AuthConfig:
@@ -184,7 +197,12 @@ class AuthConfig:
                 "AGENTOS_AUTH=asserted: principals are taken from request bodies and are NOT "
                 "verified. Set AGENTOS_AUTH=bearer and AGENTOS_AUTH_TOKENS=<file> before "
                 "exposing this API.")
-            return cls(mode, None)
+            allow_unsafe = os.environ.get(UNSAFE_TOOLS_VAR, "").strip() == "1"
+            if allow_unsafe:
+                logger.warning("%s=1: unverified callers may register subprocess, ${NAME} and "
+                               "private-network tool agents and run them in this process.",
+                               UNSAFE_TOOLS_VAR)
+            return cls(mode, None, allow_unsafe_tools=allow_unsafe)
         path = os.environ.get("AGENTOS_AUTH_TOKENS")
         if not path:
             raise AuthError("AGENTOS_AUTH=bearer requires AGENTOS_AUTH_TOKENS=<path to the "
@@ -194,6 +212,40 @@ class AuthConfig:
     @property
     def enforced(self) -> bool:
         return self.mode is AuthMode.bearer
+
+
+def unsafe_tool_reason(config: dict) -> str | None:
+    """Why a `tool` agent definition must not be accepted from a caller nobody verified, or
+    None. Each shape lets whoever can reach the API run it with `?sync=true` in the API
+    process: `kind: subprocess` runs arbitrary argv; `${NAME}` in `headers`/`env` is
+    substituted from the process environment at call time (dagentos.agents.tool) and sent
+    to the URL; `allow_private_networks` opens the egress guard to loopback / RFC 1918.
+    `examples/repo_facts_agent.json` (http, literal headers) uses none of them."""
+    if config.get("kind") == "subprocess":
+        return "config.kind 'subprocess' (arbitrary argv runs as the API's user)"
+    for field in ("headers", "env"):
+        values = config.get(field)
+        if isinstance(values, dict) and any("${" in str(v) for v in values.values()):
+            return f"a ${{NAME}} reference in config.{field} (reads the API's environment)"
+    if config.get("allow_private_networks"):
+        return "config.allow_private_networks true (opens the egress guard)"
+    return None
+
+
+def refuse_unsafe_tool_definition(agent: Agent, *, config: AuthConfig) -> None:
+    """Called by `POST /agents` before the store. In asserted mode (no credential) a `tool`
+    agent with an unsafe shape is 403 unless AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS=1; bearer
+    mode is unchanged (the token already names an operator)."""
+    if config.enforced or config.allow_unsafe_tools or agent.type is not AgentType.tool:
+        return
+    reason = unsafe_tool_reason(agent.config)
+    if reason is None:
+        return
+    logger.warning("auth 403 on POST /agents %r: AGENTOS_AUTH=asserted refuses %s; set %s=1 "
+                   "to allow it, or use AGENTOS_AUTH=bearer", agent.name, reason, UNSAFE_TOOLS_VAR)
+    raise HTTPException(status_code=403, detail=(
+        f"in AGENTOS_AUTH=asserted mode a tool agent may not use {reason}: nobody verified "
+        f"the caller. Set AGENTOS_AUTH=bearer, or {UNSAFE_TOOLS_VAR}=1 to allow it anyway."))
 
 
 def _reject(request: Request, status: int, detail: str, digest: str | None) -> JSONResponse:

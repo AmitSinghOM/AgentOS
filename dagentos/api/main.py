@@ -31,7 +31,13 @@ from pydantic import BaseModel, ConfigDict
 
 from dagentos.agents.echo import EchoExecutor
 from dagentos.agents.tool import ToolExecutor
-from dagentos.api.auth import AuthConfig, auth_middleware, openapi_security, principal_for
+from dagentos.api.auth import (
+    AuthConfig,
+    auth_middleware,
+    openapi_security,
+    principal_for,
+    refuse_unsafe_tool_definition,
+)
 from dagentos.api.stream import MEDIA_TYPE, StreamConfig, parse_after, stream_run
 from dagentos.api.triggers import build_router as build_trigger_router
 from dagentos.api.ui import mount_ui
@@ -235,7 +241,9 @@ def metrics() -> Response:
 @app.post("/agents", status_code=201)
 def register_agent(agent: Agent) -> Agent:
     """Register an immutable agent version. Re-posting the identical definition is a
-    no-op; a different body under an existing (name, version) is 409 — bump the version."""
+    no-op; a different body under an existing (name, version) is 409 — bump the version.
+    In asserted mode an unsafe `tool` shape is 403 first (dagentos.api.auth)."""
+    refuse_unsafe_tool_definition(agent, config=auth_config)
     try:
         store.put_agent(agent)
     except ConflictError as exc:
