@@ -17,6 +17,8 @@ Boundaries under test:
 """
 from __future__ import annotations
 
+import hashlib
+import warnings
 from dataclasses import dataclass
 
 import pytest
@@ -38,9 +40,22 @@ from agentos_provider_pydantic_ai import (
     from_env,
 )
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
-from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+)
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.usage import RequestUsage
+
+try:   # pydantic-ai >= 2.60: a retried tool call is its own ToolReturnPart(outcome="retried")
+    from pydantic_ai.messages import RetryInfo
+except ImportError:   # pragma: no cover - 2.46-2.59 only have RetryPromptPart
+    RetryInfo = None
 
 from dagentos.core.engine import Engine
 from dagentos.core.models import (
@@ -206,6 +221,42 @@ def test_a_call_whose_arguments_fail_validation_is_recorded_as_rejected():
     # The attempt is still an effect on word_count, once (distinct tool), same as a success.
     assert [(e.effect_class, e.description) for e in res.effects][1:] == \
         [(EffectClass.compute, "tool word_count")]
+
+
+VALIDATION_ERRORS = [{"type": "missing", "loc": ("text",), "msg": "Field required", "input": {}}]
+
+
+def _trajectory_of(answer) -> dict:
+    """Run `_trajectory` over one call answered by `answer`, independent of the installed
+    pydantic-ai: the part shape is built here, not by the SDK."""
+    history = [ModelResponse(parts=[ToolCallPart("word_count", {"txt": "a b c"}, tool_call_id="bad")],
+                             usage=USAGE),
+               ModelRequest(parts=[answer])]
+    [rec], classes = PydanticAIExecutor._trajectory(history, {"word_count": REGISTRY.get("word_count")})
+    assert classes == [("word_count", EffectClass.compute)]
+    return rec
+
+
+@pytest.mark.skipif(RetryInfo is None, reason="ToolReturnPart.outcome needs pydantic-ai >= 2.60")
+def test_a_retried_tool_return_part_is_recorded_as_rejected():
+    """pydantic-ai >= 2.60 shape: the refused call's own ToolReturnPart, outcome='retried'."""
+    answer = ToolReturnPart(tool_name="word_count", content=VALIDATION_ERRORS, tool_call_id="bad",
+                            outcome="retried",
+                            retry=RetryInfo(cause="validation_error", attempt=1, max_retries=1))
+    rec = _trajectory_of(answer)
+    assert rec["rejected"] is True
+    assert rec["output_sha256"] == hashlib.sha256(answer.model_response_str().encode()).hexdigest()
+
+
+def test_a_legacy_retry_prompt_part_is_recorded_as_rejected():
+    """pydantic-ai 2.46-2.59 shape: a RetryPromptPart tied to the call (deprecated since 2.60,
+    constructing one warns there; it must still be read as a rejection)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        answer = RetryPromptPart(content=VALIDATION_ERRORS, tool_name="word_count", tool_call_id="bad")
+    rec = _trajectory_of(answer)
+    assert rec["rejected"] is True
+    assert rec["output_sha256"] == hashlib.sha256(answer.model_response().encode()).hexdigest()
 
 
 def test_deferred_results_raise_instead_of_auto_resolving():

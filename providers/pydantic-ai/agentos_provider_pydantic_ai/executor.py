@@ -298,18 +298,25 @@ class PydanticAIExecutor:
         DISTINCT tool called, for the effects list.
 
         A call whose arguments failed validation never ran the tool: PydanticAI answers it
-        with a `RetryPromptPart` and lets the model try again (bounded by `max_turns`).
-        Such a call is recorded with `rejected: true` and the hash of the retry message,
-        so the log distinguishes "tool returned X" from "tool refused the arguments"
-        (seen live: a 0.5B model called `word_count` with the wrong key). It still counts
-        as an attempted effect — reporting the attempt is the conservative direction."""
+        with a retry and lets the model try again (bounded by `max_turns`). Since
+        pydantic-ai 2.60 that answer is the call's own `ToolReturnPart` with
+        `outcome == "retried"`; 2.46-2.59 send a `RetryPromptPart` instead (deprecated,
+        still accepted). Such a call is recorded with `rejected: true` and the hash of the
+        retry message, so the log distinguishes "tool returned X" from "tool refused the
+        arguments" (seen live: a 0.5B model called `word_count` with the wrong key). It
+        still counts as an attempted effect — reporting the attempt is the conservative
+        direction."""
         calls: list[dict[str, Any]] = []
         outputs: dict[str, str] = {}
         rejected: dict[str, str] = {}
         for msg in messages:
             for part in msg.parts:
                 if isinstance(part, ToolReturnPart):
-                    outputs[part.tool_call_id] = _sha(part.model_response_str())
+                    # `outcome` is absent before 2.60, where every return is a real one.
+                    if getattr(part, "outcome", None) == "retried":
+                        rejected[part.tool_call_id] = _sha(part.model_response_str())
+                    else:
+                        outputs[part.tool_call_id] = _sha(part.model_response_str())
                 elif isinstance(part, RetryPromptPart) and part.tool_call_id:
                     rejected[part.tool_call_id] = _sha(part.model_response())
         for msg in messages:
