@@ -551,6 +551,17 @@ def test_webhook_route_is_declared_self_authenticated_in_openapi(monkeypatch, tm
     assert "security" not in paths["/runs"]["get"]          # inherits the global bearer requirement
 
 
+def test_openapi_description_states_the_length_prefixed_signed_string(monkeypatch, tmp_path):
+    """Audit I-06: the served description is the contract an integrator builds a sender
+    from. It must name the SAME string the verifier signs — `_message` length-prefixes the
+    delivery id (docs/triggers.md) — or every delivery built from `/docs` is 401."""
+    main = _app(monkeypatch, tmp_path)
+    c = TestClient(main.app)
+    op = c.get("/openapi.json").json()["paths"]["/triggers/webhooks/{name}"]["post"]
+    assert "`{timestamp}.{len(delivery)}.{delivery}.{body}`" in op["description"]
+    assert "`{timestamp}.{delivery}.{body}`" not in op["description"]
+
+
 def test_bad_triggers_file_fails_api_startup_naming_the_variable(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTOS_STORE", "memory")
     monkeypatch.setenv("AGENTOS_AUTH", "asserted")
