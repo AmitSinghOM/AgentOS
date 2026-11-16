@@ -170,9 +170,10 @@ def test_cancel_request_appended_by_api_is_adopted_by_worker_log_not_a_conflict(
     t = threading.Thread(target=worker.run_once, kwargs={"timeout": 1.0})
     t.start()
     assert ex.started["n1"].wait(5)
-    # Append directly (as the API would) while n1 is executing.
-    run = eng.get_run(run_id, hydrate=False)
-    store.append_events(run_id, run.last_seq, [RunCancelRequested(run_id=run_id, reason="api")])
+    # The API path: engine.request_cancel chains the event onto the worker's hashed log
+    # while n1 is executing (an unchained raw append would crash the worker's fold —
+    # audit I-10). The worker holds the lease, so this does not finalize here.
+    eng.request_cancel(run_id, principal=HUMAN, reason="api")
     t.join(timeout=10)
     ev = types(store, run_id)
     # n1's completion landed AFTER the foreign request, i.e. the worker adopted the seq.

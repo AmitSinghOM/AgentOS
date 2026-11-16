@@ -71,6 +71,10 @@ testpaths = ["tests", "providers/openai-compat/tests", "providers/anthropic/test
 markers = [
     "network: needs real Postgres + Toxiproxy (tests/chaos/network); skipped without AGENTOS_TEST_PG_DSN",
 ]
+# A worker thread that dies mid-test fails the test instead of printing a warning the
+# store-only asserts never see (audit I-10: test_control.py once appended an unchained
+# event, the worker crashed with FoldError, and the test stayed green).
+filterwarnings = ["error::pytest.PytestUnhandledThreadExceptionWarning"]
 
 # Layering contract (docs/DEVELOPMENT_STRUCTURE.md §1). `lint-imports` runs in CI;
 # a PR that makes the core depend on an adapter or an SDK fails.
