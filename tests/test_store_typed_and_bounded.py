@@ -399,6 +399,24 @@ def test_snapshot_every_env_is_validated_and_names_the_variable(monkeypatch):
             snapshot_every_from_env()
 
 
+def test_pg_schema_env_is_validated_as_an_identifier_and_names_the_variable(monkeypatch):
+    """Audit I-18: AGENTOS_PG_SCHEMA is interpolated into `CREATE SCHEMA IF NOT EXISTS "{s}"`
+    and `search_path`. The factory refuses anything that is not a plain lowercase identifier
+    before a connection is attempted (no Postgres needed here), naming the variable and the
+    rule; a good value and an unset one pass validation."""
+    from dagentos.store.factory import PG_SCHEMA_RE, store_from_env, validate_pg_schema
+    monkeypatch.setenv("AGENTOS_STORE", "postgres")
+    monkeypatch.setenv("AGENTOS_PG_DSN", "postgresql://127.0.0.1:1/nope")
+    for bad in ('x"; DROP SCHEMA public; --', "Agentos", "1abc", "a-b", "a" * 64, " agentos"):
+        monkeypatch.setenv("AGENTOS_PG_SCHEMA", bad)
+        with pytest.raises(RuntimeError, match=r"AGENTOS_PG_SCHEMA.*\^\[a-z_\]") as e:
+            store_from_env()
+        assert PG_SCHEMA_RE.pattern in str(e.value)
+    for good in ("agentos", "_t1", "a" * 63):
+        assert validate_pg_schema(good) == good
+    assert validate_pg_schema(None) is None and validate_pg_schema("") is None   # unset
+
+
 def test_concurrent_reads_on_one_store_never_raise(store):
     """UI polish pass (v0.15.0 baseline): the run page's first paint fires GET /runs/{id}, the
     stream's read_events and the badge's GET /approvals together, and the API runs sync store
