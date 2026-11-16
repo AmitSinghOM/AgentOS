@@ -717,6 +717,11 @@ that uploads to PyPI.
 - [x] **First PyPI release.** Trusted Publishers registered for `dagentos` and the five
   `agentos-provider-*` distributions; `v0.17.0` is the first tag whose `publish.yml` run uploads
   (`docs/RELEASING.md`). The documented install line resolves from PyPI from this release on.
+- [x] **`v0.17.1` — PyPI matrix fix** ([#132](https://github.com/AmitSinghOM/AgentOS/pull/132)).
+  The `v0.17.0` publish run uploaded `dagentos` and four providers but `publish.yml`'s `pypi`
+  matrix never named `agentos_provider_acp`; the matrix now lists all six and
+  `tests/test_packaging.py` derives the expected set from `providers/*/pyproject.toml`. All six
+  distributions are on PyPI from `v0.17.1`; no engine, API or UI change.
 
 **What this changes in the plan.** Phase 8 #5 and #6 are closed. The 2026-11-12 audit (held
 outside the repository) is what ordered this release: its blocker rows — the red CI, nothing on
