@@ -58,6 +58,19 @@ def test_publish_workflow_is_sha_pinned_and_pypi_is_an_explicit_switch():
     assert "attest-build-provenance" in wf and "subject-digest" in wf
 
 
+def test_pypi_matrix_lists_every_distribution_the_build_job_builds():
+    """`build` builds core plus every `providers/*`; the `pypi` matrix must name each of
+    them, or a provider is attested and attached to the release yet never uploaded (the
+    v0.17.0 run shipped four providers and silently left `agentos_provider_acp` behind)."""
+    wf = (ROOT / ".github" / "workflows" / "publish.yml").read_text()
+    m = re.search(r"dist:\s*\[([^\]]*)\]", wf)
+    assert m, "pypi matrix `dist:` list not found in publish.yml"
+    listed = {d.strip() for d in m.group(1).replace("\n", " ").split(",") if d.strip()}
+    expected = {"dagentos"} | {
+        tomllib.loads(p.read_text())["project"]["name"].replace("-", "_") for p in PROVIDERS}
+    assert listed == expected, (sorted(expected - listed), sorted(listed - expected))
+
+
 def test_dockerfile_pins_base_by_digest_and_drops_root():
     df = (ROOT / "Dockerfile").read_text()
     froms = re.findall(r"^FROM (\S+)", df, re.MULTILINE)
