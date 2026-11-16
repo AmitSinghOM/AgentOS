@@ -471,3 +471,22 @@ def test_migrate_is_serialised_with_reads(store):
         results = list(pool.map(burst, range(8)))     # any InterfaceError propagates here
     assert [r for r in results[1::2]] == [25 * 1] * 4
     assert [r for r in results[0::2]] == [25 * (n + 1)] * 4
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes only")
+def test_sqlite_file_is_created_owner_only(tmp_path):
+    """Audit I-15: the database holds run inputs, tool outputs and stderr tails. sqlite3.connect
+    created it with the process umask (0644 in a checkout), readable by every local user. The
+    main file and the WAL/shm sidecars must be 0600; ':memory:' is untouched."""
+    import stat
+    path = tmp_path / "agentos.db"
+    store = SqliteStore(path)
+    store.put_workflow(WorkflowDefinition(name="w", version=1, nodes=[{"id": "s1", "agent": "a"}]))
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    sidecars = [tmp_path / f"agentos.db{s}" for s in ("-wal", "-shm")]
+    assert all(p.exists() for p in sidecars), "WAL mode: a write creates both sidecars"
+    assert [stat.S_IMODE(p.stat().st_mode) for p in sidecars] == [0o600, 0o600]
+    # Reopening an existing file must not fail or widen it.
+    assert SqliteStore(path).schema_version() > 0
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert SqliteStore(":memory:").schema_version() > 0
