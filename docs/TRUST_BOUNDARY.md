@@ -40,8 +40,13 @@ is rejected 422, not ignored, so a client can never believe it decided as someon
 does not name. The recorded principal carries `attestation = "token:sha256:<12 hex>"`, so a
 reader can tell which credential decided. An `agent`-kind principal may not register agents
 or define workflows (403): definitions are what the gate trusts, so an agent that could
-author one could declare its own effects. Every request outside `/health` and `/metrics`
-needs a token (reads carry step inputs and outputs). The check is a middleware, so a route
+author one could declare its own effects. Every request outside `/health`, `/ready` and
+`/metrics`, `GET`/`HEAD` of the UI's static files under `/ui`, and the self-authenticated
+`/triggers/webhooks/*` (HMAC checked in the handler, fail closed) needs a token (reads carry
+step inputs and outputs). Open `/metrics` reveals workflow names, step ids, agent names and
+summed cost per workflow — never inputs, outputs or principals; an operator who considers
+those names sensitive fronts it with a scrape token or binds the API on loopback
+(`SECURITY.md`). The check is a middleware, so a route
 added tomorrow is protected without remembering a dependency. Rejections are logged with the
 method, path and hash prefix — never the token; accepted calls are not logged, the event is
 the record.
