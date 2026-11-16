@@ -281,3 +281,59 @@ def test_subprocess_stdout_over_cap_is_refused():
     with pytest.raises(ToolError, match="bytes to stdout, over config.max_bytes=100"):
         ex.execute(_req({"kind": "subprocess", "max_bytes": 100,
                          "argv": [sys.executable, "-c", "print('x' * 500)"]}), _p)
+
+
+# ------------------------------------------------------------------ audit I-08: streaming caps
+
+class _Firehose(httpx.SyncByteStream):
+    """A response body with no Content-Length that keeps coming: `total` bytes in 1 KiB
+    chunks, counting how many the executor actually pulled before it stopped."""
+
+    def __init__(self, total: int) -> None:
+        self.total, self.pulled, self.closed = total, 0, False
+
+    def __iter__(self):
+        while self.pulled < self.total:
+            self.pulled += 1024
+            yield b"x" * 1024
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_http_body_over_cap_is_refused_while_streaming_and_memory_stays_bounded():
+    """Audit I-08: `max_bytes` used to be checked after `r.content` had buffered the whole
+    body, so a hostile endpoint could push gigabytes into the worker (or the API under
+    `?sync=true`). The body is now read in chunks and abandoned at the cap."""
+    cap = 10_000
+    hose = _Firehose(total=50 * cap)                      # far past the cap, no Content-Length
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, stream=hose))
+    ex = ToolExecutor(transport=transport)
+    with pytest.raises(ToolError, match=f"over config.max_bytes={cap}"):
+        ex.execute(_req({"kind": "http", "url": "https://api.example/firehose", "max_bytes": cap}), _p)
+    assert hose.pulled < 2 * cap, f"pulled {hose.pulled} bytes: the body was buffered, not streamed"
+    assert hose.closed                                      # the connection was released
+
+
+def test_subprocess_endless_stdout_is_cut_at_the_cap_not_at_the_timeout(tmp_path):
+    """Audit I-08: `proc.communicate()` buffered stdout without limit until the timeout.
+    An endless writer must now be stopped at `max_bytes`, its process group killed, well
+    before the wall-clock budget."""
+    import os
+    import time
+    marker = tmp_path / "child.pid"
+    # The 1 ms pause per 64 KiB (~64 MB/s) only bounds the memory a regression could eat
+    # before the timeout; with the cap enforced the first chunk already ends the step.
+    flood = ("import os, sys, time\n"
+             f"open({str(marker)!r}, 'w').write(str(os.getpid()))\n"
+             "while True:\n"
+             "    sys.stdout.write('x' * 65536); sys.stdout.flush(); time.sleep(0.001)\n")
+    ex = ToolExecutor()
+    started = time.monotonic()
+    with pytest.raises(ToolError, match="bytes to stdout, over config.max_bytes=1000"):
+        ex.execute(_req({"kind": "subprocess", "max_bytes": 1000, "timeout": 3.0,
+                         "argv": [sys.executable, "-c", flood]}), _p)
+    assert time.monotonic() - started < 1.5                # cut at the cap, not the timeout
+    pid = int(marker.read_text())
+    with pytest.raises(ProcessLookupError):                # the process group is gone
+        os.killpg(pid, 0)

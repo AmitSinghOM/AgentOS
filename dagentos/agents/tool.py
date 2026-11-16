@@ -28,7 +28,8 @@ The boundaries (docs/TRUST_BOUNDARY.md §4), fixed by construction rather than b
   refused) governs a tool step with no new mechanism.
 - **Results are data.** A response body or stdout becomes the next step's inputs and is
   wrapped as `<input>` by every provider like any other output. Bodies are capped at
-  `max_bytes` (default 1 MiB) so a hostile endpoint cannot flood the blob store.
+  `max_bytes` (default 1 MiB) so a hostile endpoint cannot flood the blob store; the cap is
+  enforced while streaming, so it cannot flood the worker's memory either.
 
 Failures raise `ToolError`; the engine records `step.failed` and the node's retry policy
 decides. There is no "do not retry" signal in the port yet — a 4xx retries like a 5xx.
@@ -40,9 +41,12 @@ import ipaddress
 import json
 import os
 import re
+import select
+import selectors
 import signal
 import socket
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +66,7 @@ from dagentos.providerkit.prompt import render_prompt
 
 VERSION = "0.7.0"
 DEFAULT_MAX_BYTES = 1 << 20
+_STDERR_TAIL_BYTES = 64 << 10        # stderr is kept only as a tail: it is a flood vector too
 _ENV_REF = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
 # RFC 6598 shared address space: not private to Python (`is_private` is False) and not
 # global either; some clouds serve their metadata service from it (100.100.100.200).
@@ -70,6 +75,14 @@ _SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
 
 class ToolError(RuntimeError):
     """The message says what failed and what to do; the engine records it as step.failed."""
+
+
+class _OverCap(Exception):
+    """Internal: the subprocess wrote past `max_bytes`; `size` is how much was read."""
+
+    def __init__(self, size: int) -> None:
+        super().__init__(size)
+        self.size = size
 
 
 class ToolExecutor:
@@ -121,20 +134,29 @@ class ToolExecutor:
         progress(0.0, f"{method} {url}")
         try:
             with httpx.Client(timeout=timeout, transport=self._transport,
-                              follow_redirects=False) as c:
-                r = c.request(method, url, params=query or None, json=body, headers=headers)
+                              follow_redirects=False) as c, \
+                    c.stream(method, url, params=query or None, json=body, headers=headers) as r:
+                # Read in chunks and stop at the cap: a hostile endpoint must not be able to
+                # buffer gigabytes into the worker (audit I-08). Counted after decompression,
+                # so a compressed body cannot slip under the cap either.
+                chunks: list[bytes] = []
+                size = 0
+                for chunk in r.iter_bytes():
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise ToolError(f"{method} {url} returned at least {size} bytes, over "
+                                        f"config.max_bytes={max_bytes}; reading stopped there")
+                    chunks.append(chunk)
         except httpx.ConnectError as exc:
             raise ToolError(f"cannot reach {url}: {exc}") from exc
         except httpx.TimeoutException as exc:
             raise ToolError(f"{method} {url} did not answer within {timeout}s "
                             f"(raise config.timeout; the step's retry policy applies)") from exc
-        if len(r.content) > max_bytes:
-            raise ToolError(f"{method} {url} returned {len(r.content)} bytes, over "
-                            f"config.max_bytes={max_bytes}")
+        text = b"".join(chunks).decode(r.encoding or "utf-8", "replace")
         if r.status_code >= 400:
-            raise ToolError(f"{method} {url} → HTTP {r.status_code}: {r.text[:200]!r} "
+            raise ToolError(f"{method} {url} → HTTP {r.status_code}: {text[:200]!r} "
                             f"(the step's retry policy applies)")
-        progress(1.0, f"HTTP {r.status_code}, {len(r.content)} bytes")
+        progress(1.0, f"HTTP {r.status_code}, {size} bytes")
 
         output: dict[str, Any] = {
             "status": r.status_code, "url": str(r.url),
@@ -144,11 +166,11 @@ class ToolExecutor:
         ctype = r.headers.get("content-type", "")
         if "json" in ctype:
             try:
-                output["json"] = r.json()
+                output["json"] = json.loads(text)
             except ValueError:
-                output["text"] = r.text
+                output["text"] = text
         else:
-            output["text"] = r.text
+            output["text"] = text
         if method in ("GET", "HEAD"):
             effects = [Effect(effect_class=EffectClass.read, description=f"{method} {url}")]
         else:
@@ -184,21 +206,22 @@ class ToolExecutor:
             raise ToolError(f"program {argv[0]!r} not found on the worker "
                             f"(PATH={env['PATH']!r})") from exc
         try:
-            out, err = proc.communicate(stdin, timeout=timeout)
-        except subprocess.TimeoutExpired as exc:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
+            out, err = _pump(proc, stdin, max_bytes=max_bytes,
+                             deadline=time.monotonic() + timeout)
+        except (TimeoutError, subprocess.TimeoutExpired) as exc:
+            _kill_group(proc)
             raise ToolError(f"{argv[0]} did not exit within {timeout}s; its process group was "
                             f"killed (raise config.timeout; the step's retry policy applies)"
                             ) from exc
+        except _OverCap as exc:
+            _kill_group(proc)
+            raise ToolError(f"{argv[0]} wrote at least {exc.size} bytes to stdout, over "
+                            f"config.max_bytes={max_bytes}; reading stopped there and its "
+                            f"process group was killed") from None
         stderr = err.decode("utf-8", "replace")[-2000:]
         if proc.returncode != 0:
             raise ToolError(f"{argv[0]} exited {proc.returncode}: {stderr.strip()[:300]!r} "
                             f"(the step's retry policy applies)")
-        if len(out) > max_bytes:
-            raise ToolError(f"{argv[0]} wrote {len(out)} bytes to stdout, over "
-                            f"config.max_bytes={max_bytes}")
         progress(1.0, f"exit 0, {len(out)} bytes")
         text = out.decode("utf-8", "replace")
         output: dict[str, Any] = {"exit_code": 0, "stderr": stderr}
@@ -222,6 +245,59 @@ class ToolExecutor:
                                 f"worker's environment")
             return env[name]
         return _ENV_REF.sub(repl, str(value))
+
+
+def _pump(proc: subprocess.Popen, stdin: bytes, *, max_bytes: int,
+          deadline: float) -> tuple[bytes, bytes]:
+    """`communicate()` with a byte cap (audit I-08): stdin is written as the pipe drains,
+    stdout is read in chunks and counted, stderr keeps only its tail. Returns
+    `(stdout, stderr_tail)` once both pipes hit EOF and the process has exited. Raises
+    `_OverCap` the moment stdout passes `max_bytes` and `TimeoutError` when the deadline
+    passes, in both cases with the process still running: the caller kills the group."""
+    out, err, offset = bytearray(), bytearray(), 0
+    with selectors.DefaultSelector() as sel:
+        if stdin:
+            sel.register(proc.stdin, selectors.EVENT_WRITE)
+        else:
+            proc.stdin.close()
+        sel.register(proc.stdout, selectors.EVENT_READ)
+        sel.register(proc.stderr, selectors.EVENT_READ)
+        while sel.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            for key, _ in sel.select(remaining):
+                if key.fileobj is proc.stdin:
+                    try:                      # <= PIPE_BUF bytes to a writable pipe never block
+                        offset += os.write(key.fd, stdin[offset:offset + select.PIPE_BUF])
+                    except BrokenPipeError:   # the program closed stdin early; its choice
+                        offset = len(stdin)
+                    if offset >= len(stdin):
+                        sel.unregister(key.fileobj)
+                        key.fileobj.close()
+                    continue
+                data = os.read(key.fd, 65536)
+                if not data:
+                    sel.unregister(key.fileobj)
+                    key.fileobj.close()
+                elif key.fileobj is proc.stdout:
+                    out += data
+                    if len(out) > max_bytes:
+                        raise _OverCap(len(out))
+                else:
+                    err += data
+                    del err[:-_STDERR_TAIL_BYTES]
+    proc.wait(timeout=max(deadline - time.monotonic(), 0))
+    return bytes(out), bytes(err)
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
+    for pipe in (proc.stdin, proc.stdout, proc.stderr):
+        if pipe is not None and not pipe.closed:
+            pipe.close()
 
 
 def _check_egress(url: str, *, allow_private: bool) -> None:
