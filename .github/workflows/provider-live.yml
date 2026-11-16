@@ -15,6 +15,9 @@ on:
         description: "Ollama model to record against"
         default: "qwen2.5:0.5b"
 
+permissions:
+  contents: read
+
 jobs:
   record:
     runs-on: ubuntu-latest
@@ -24,7 +27,9 @@ jobs:
       - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev,providerkit]" -e providers/openai-compat -e providers/anthropic -e providers/openai-agents -e providers/pydantic-ai
+      # Same install line as ci.yml's `test` job: every provider, so the replay step below
+      # exercises all five suites (each importorskips when its distribution is absent).
+      - run: pip install -e ".[dev,observability,providerkit]" -e providers/openai-compat -e providers/anthropic -e providers/openai-agents -e providers/pydantic-ai -e providers/acp
       - name: Install and start Ollama
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
@@ -38,8 +43,10 @@ jobs:
         run: |
           python providers/openai-compat/scripts/record_cassettes.py --live
           python providers/anthropic/scripts/record_cassettes.py --live
-      - name: Replay tests pass on the fresh recordings
-        run: pytest -q providers/openai-compat/tests providers/anthropic/tests tests/test_quickstart_llm.py -p no:cacheprovider
+      - name: Replay tests pass on the fresh recordings; every other provider suite runs too
+        # Audit I-11: this job used to replay only openai-compat and anthropic, so a floor
+        # drift in pydantic-ai, openai-agents or acp had no nightly to fail.
+        run: pytest -q providers tests/test_quickstart_llm.py -p no:cacheprovider
       - name: Show what changed
         run: git -P diff --stat -- providers/*/tests/cassettes
       - uses: actions/upload-artifact@v7

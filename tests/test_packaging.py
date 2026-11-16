@@ -6,6 +6,7 @@
   * every action in publish.yml is pinned by a 40-hex commit SHA (it holds id-token: write)
   * the Dockerfile pins its base by digest and runs as a non-root user
   * the sdist selection excludes tests, providers, CI and the compose stack
+  * CI runs on `main` daily and the nightly provider job replays every provider suite
 """
 from __future__ import annotations
 
@@ -86,3 +87,26 @@ def test_dockerfile_pins_base_by_digest_and_drops_root():
 def test_ci_runs_the_package_gate_on_every_pr():
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     assert "  package:" in ci and "scripts/release_smoke.py" in ci and "twine check --strict" in ci
+
+
+def test_main_is_checked_daily_and_the_nightly_replays_every_provider():
+    """Audit I-11: floors-not-pins plus a gitignored uv.lock mean a dependency floor drift
+    only ever surfaced as red checks on unrelated Dependabot PRs (pydantic-ai >=2.61 broke
+    `rejected: true` for three weeks unseen). The full CI must run on `main` on a schedule,
+    in its own concurrency group so a push to main cannot cancel it, and the nightly
+    provider job must install and replay EVERY provider suite, not a hand-picked subset."""
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    cron = re.search(r"^  schedule:\n(?:    #[^\n]*\n)*    - cron: \"(\d+) (\d+) \* \* \*\"", ci, re.MULTILINE)
+    assert cron, "ci.yml has no daily schedule trigger"
+    assert cron.group(1) != "0", "schedule on the hour is queued behind everyone else's"
+    group = re.search(r"^  group: (.+)$", ci, re.MULTILINE)
+    assert group and "github.event_name" in group.group(1), "scheduled run shares a group with push"
+
+    live = (ROOT / ".github" / "workflows" / "provider-live.yml").read_text()
+    assert "permissions:\n  contents: read" in live
+    assert re.search(r"pytest -q providers tests/test_quickstart_llm\.py", live), \
+        "provider-live replays a subset of the provider suites"
+    install = re.search(r"pip install -e \"\.\[[^\]]*\]\"[^\n]*", live)
+    assert install, "provider-live install line not found"
+    for p in PROVIDERS:
+        assert f"-e providers/{p.parent.name}" in install.group(0), p.parent.name
