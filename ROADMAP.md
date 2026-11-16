@@ -125,7 +125,7 @@ cancel/pause, agent versioning. Items marked ⏭ carried forward — see the dat
   - [ ] ⏭ `pg_latency_under_fanout` → fan-in waits, no branch output lost (C4)
 - [ ] ⏭ **A7** crypto-shredding: per-run data key in a `KeyStore` port; erasure = destroy key + `RunErased` event; log stays append-only
 - [ ] ⏭ **A8** `agentos/protocols/`: tools described by JSON Schema; MCP / A2A / vendor function-calling are adapters; tool results are data, never prompt
-- [x] **A12** global pause (shipped 2026-11-16, [PR-H](PR_H_URL)): `agentos pause --all` / `resume --all` / `pause --status`. Not `SchedulerPaused` run events as first sketched — a deployment-wide fact in a run log would break per-run replay — but a store-level append-only `scheduler_state` history (migration 3; who / why / when; newest row is the state). The engine reads it before every wave, so in-flight steps finish and nothing new dispatches (`?sync=true` included); the worker pulls nothing and the sweep re-enqueues nothing; runs are neither cancelled nor individually paused; an unreadable flag counts as paused (fail-closed); `GET /scheduler` is read-only
+- [x] **A12** global pause (shipped 2026-11-16, [#138](https://github.com/AmitSinghOM/AgentOS/pull/138)): `agentos pause --all` / `resume --all` / `pause --status`. Not `SchedulerPaused` run events as first sketched — a deployment-wide fact in a run log would break per-run replay — but a store-level append-only `scheduler_state` history (migration 3; who / why / when; newest row is the state). The engine reads it before every wave, so in-flight steps finish and nothing new dispatches (`?sync=true` included); the worker pulls nothing and the sweep re-enqueues nothing; runs are neither cancelled nor individually paused; an unreadable flag counts as paused (fail-closed); `GET /scheduler` is read-only
 
 **Demo:** a fan-out/fan-in workflow (1 → [2,3,4 parallel] → 5) with one branch failing
 and retrying.
@@ -229,7 +229,7 @@ from a real two-process run, which also exposed and fixed cross-process observab
 
 - [x] Real `tool` agent (HTTP/subprocess) in core (`dagentos/agents/tool.py`, v0.7.0 slice): operator-fixed url/argv, inputs only as query/json values or stdin JSON, `${ENV}` secrets redacted, effects by method/kind so the existing gate governs it, 1 MiB cap, egress guard (link-local never; private opt-in), process-group kill on timeout; results flow through `wrap_input`. Reviewed by the code-reviewer + security-reviewer pipeline (WARNING → fixed). ⏭ `protocols/` function-calling round trip (A8) still open
 - [ ] ⏭ A11 `agentos export-run --format jsonl`
-- [x] A12 global pause — shipped 2026-11-16 as the store-level `scheduler_state` flag ([PR-H](PR_H_URL); Phase 2 row has the design)
+- [x] A12 global pause — shipped 2026-11-16 as the store-level `scheduler_state` flag ([#138](https://github.com/AmitSinghOM/AgentOS/pull/138); Phase 2 row has the design)
 
 **Tag:** `v0.6.0-trusted`. **Post:** "Three Doors: Where Untrusted Bytes Meet an Agent Engine."
 
@@ -261,7 +261,7 @@ locking test.
 - [x] Four-seat review (Staff / Product / Security / CTO) + code-reviewer skill + cqa-analyzer on the snapshot PR: 10 findings, 9 fixed each with a test, 1 cosmetic declined with reason; Design score 8.96 → 8.98
 - [ ] ⏭ A8 `protocols/` function-calling round trip
 - [ ] ⏭ A11 `agentos export-run --format jsonl`
-- [x] A12 global pause — shipped 2026-11-16 as the store-level `scheduler_state` flag ([PR-H](PR_H_URL); Phase 2 row has the design)
+- [x] A12 global pause — shipped 2026-11-16 as the store-level `scheduler_state` flag ([#138](https://github.com/AmitSinghOM/AgentOS/pull/138); Phase 2 row has the design)
 - [ ] ⏭ A7 KeyStore + signed chain tail
 - [ ] ⏭ `advance()` cognitive complexity (cqa PY-MAINT-002) — a refactor PR, behaviour pinned by the golden corpus and chaos suite
 
