@@ -79,7 +79,7 @@ pip download --no-deps dagentos==0.11.0 -d /tmp/dl && (cd /tmp/dl && sha256sum *
 ## What the image is
 
 `python:3.12-slim` pinned by digest; a venv with the core (`[providerkit,observability]`) and all
-four providers installed **from the wheels the same run built** (by path, never from an index);
+five providers installed **from the wheels the same run built** (by path, never from an index);
 non-root user `agentos` (uid 10001); `/var/lib/agentos` volume for the default SQLite store;
 `CMD` is the API; `python -m dagentos.worker` is the worker; the `agentos` CLI is on `PATH`.
 

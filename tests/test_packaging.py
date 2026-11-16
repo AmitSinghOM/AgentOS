@@ -83,6 +83,19 @@ def test_dockerfile_pins_base_by_digest_and_drops_root():
     assert ignore[:2] == ["*", "!dist/"]
 
 
+def test_dockerfile_installs_every_provider_wheel():
+    """The image is 'core plus every provider' (docs/RELEASING.md); publish.yml builds a
+    wheel for each `providers/*`, so each must appear on the Dockerfile's install line or
+    the image silently ships without it (v0.17.1 omitted `agentos_provider_acp`, audit I-42)."""
+    df = (ROOT / "Dockerfile").read_text()
+    for p in PROVIDERS:
+        dist = tomllib.loads(p.read_text())["project"]["name"].replace("-", "_")
+        assert f"./dist/{dist}-*.whl" in df, dist
+    words = {3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight"}
+    releasing = " ".join((ROOT / "docs" / "RELEASING.md").read_text().split())
+    assert f"all {words[len(PROVIDERS)]} providers" in releasing, len(PROVIDERS)
+
+
 def test_ci_runs_the_package_gate_on_every_pr():
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     assert "  package:" in ci and "scripts/release_smoke.py" in ci and "twine check --strict" in ci
