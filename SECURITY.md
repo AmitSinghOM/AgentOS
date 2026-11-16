@@ -42,6 +42,15 @@ Out of scope, by design and documented:
   that mistake, asserted mode refuses (403) a `tool` agent that is `kind: subprocess`, reads
   `${NAME}` from the environment in `headers`/`env`, or sets `allow_private_networks`, unless
   `AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS=1` is set deliberately.
+- The open paths. In `bearer` mode every request needs a token except `/health`, `/ready` and
+  `/metrics`, `GET`/`HEAD` of the UI's static files under `/ui` (no data lives there), and
+  `/triggers/webhooks/*`, which verify their own HMAC credential and fail closed. `/metrics`
+  is open so a Prometheus scraper needs no token, and that is a deliberate disclosure: its
+  labels carry workflow names, step ids, agent names, meter names, currencies and summed
+  cost per workflow — no inputs, outputs or principals, but aggregates with names are run
+  data to an outsider. An operator who considers those names sensitive should front
+  `/metrics` with a scrape token at the ingress or bind the API on loopback and scrape it
+  from the same host.
 - Model or tool output content: the core hashes executor output and never interprets it.
 - Denial of service against a deployment with no ingress rate limiting; rate limiting belongs
   at the ingress for this shape of service (see `docs/FAIL_MODES.md`).

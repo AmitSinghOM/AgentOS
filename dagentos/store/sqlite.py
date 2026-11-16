@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -76,9 +77,21 @@ CREATE TABLE IF NOT EXISTS blobs (
 """
 
 
+def _create_owner_only(path: str) -> None:
+    """Create the database file 0600 before SQLite does it with the process umask (audit I-15):
+    the file holds run inputs, tool outputs and stderr tails. Only a plain path that does not
+    exist yet is touched — ':memory:' and 'file:' URIs are left to SQLite, and an existing file
+    keeps the mode its operator gave it. SQLite copies the main file's mode onto the `-wal` and
+    `-shm` sidecars it creates, so they inherit 0600 (os_unix.c findCreateFileMode)."""
+    if path == ":memory:" or path.startswith("file:") or os.path.exists(path):
+        return
+    os.close(os.open(path, os.O_CREAT | os.O_RDWR, 0o600))
+
+
 class SqliteStore:
     def __init__(self, path: str | Path = ":memory:") -> None:
         self._path = str(path)
+        _create_owner_only(self._path)
         # One connection, one lock: SQLite serializes writers anyway, and a single
         # connection keeps ":memory:" databases coherent across calls.
         self._conn = sqlite3.connect(self._path, check_same_thread=False,

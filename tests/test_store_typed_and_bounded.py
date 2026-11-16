@@ -399,6 +399,24 @@ def test_snapshot_every_env_is_validated_and_names_the_variable(monkeypatch):
             snapshot_every_from_env()
 
 
+def test_pg_schema_env_is_validated_as_an_identifier_and_names_the_variable(monkeypatch):
+    """Audit I-18: AGENTOS_PG_SCHEMA is interpolated into `CREATE SCHEMA IF NOT EXISTS "{s}"`
+    and `search_path`. The factory refuses anything that is not a plain lowercase identifier
+    before a connection is attempted (no Postgres needed here), naming the variable and the
+    rule; a good value and an unset one pass validation."""
+    from dagentos.store.factory import PG_SCHEMA_RE, store_from_env, validate_pg_schema
+    monkeypatch.setenv("AGENTOS_STORE", "postgres")
+    monkeypatch.setenv("AGENTOS_PG_DSN", "postgresql://127.0.0.1:1/nope")
+    for bad in ('x"; DROP SCHEMA public; --', "Agentos", "1abc", "a-b", "a" * 64, " agentos"):
+        monkeypatch.setenv("AGENTOS_PG_SCHEMA", bad)
+        with pytest.raises(RuntimeError, match=r"AGENTOS_PG_SCHEMA.*\^\[a-z_\]") as e:
+            store_from_env()
+        assert PG_SCHEMA_RE.pattern in str(e.value)
+    for good in ("agentos", "_t1", "a" * 63):
+        assert validate_pg_schema(good) == good
+    assert validate_pg_schema(None) is None and validate_pg_schema("") is None   # unset
+
+
 def test_concurrent_reads_on_one_store_never_raise(store):
     """UI polish pass (v0.15.0 baseline): the run page's first paint fires GET /runs/{id}, the
     stream's read_events and the badge's GET /approvals together, and the API runs sync store
@@ -471,3 +489,22 @@ def test_migrate_is_serialised_with_reads(store):
         results = list(pool.map(burst, range(8)))     # any InterfaceError propagates here
     assert [r for r in results[1::2]] == [25 * 1] * 4
     assert [r for r in results[0::2]] == [25 * (n + 1)] * 4
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes only")
+def test_sqlite_file_is_created_owner_only(tmp_path):
+    """Audit I-15: the database holds run inputs, tool outputs and stderr tails. sqlite3.connect
+    created it with the process umask (0644 in a checkout), readable by every local user. The
+    main file and the WAL/shm sidecars must be 0600; ':memory:' is untouched."""
+    import stat
+    path = tmp_path / "agentos.db"
+    store = SqliteStore(path)
+    store.put_workflow(WorkflowDefinition(name="w", version=1, nodes=[{"id": "s1", "agent": "a"}]))
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    sidecars = [tmp_path / f"agentos.db{s}" for s in ("-wal", "-shm")]
+    assert all(p.exists() for p in sidecars), "WAL mode: a write creates both sidecars"
+    assert [stat.S_IMODE(p.stat().st_mode) for p in sidecars] == [0o600, 0o600]
+    # Reopening an existing file must not fail or widen it.
+    assert SqliteStore(path).schema_version() > 0
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert SqliteStore(":memory:").schema_version() > 0
