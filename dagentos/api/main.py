@@ -192,6 +192,21 @@ def list_executors() -> list[dict]:
     return describe(executors)
 
 
+@app.get("/scheduler")
+def scheduler_state() -> JSONResponse:
+    """The operator's global pause (A12 / E-03), READ-ONLY: paused or running, who changed it
+    last, why and when. No API verb sets or clears it — that takes store access via
+    `agentos pause --all` / `resume --all`, so a stolen API token cannot un-pause an incident.
+    An unreadable flag is reported as paused (the workers treat it that way) with the
+    exception CLASS only; the message goes to the log, as `/ready` does."""
+    try:
+        state = store.get_scheduler_state()
+    except Exception as exc:  # noqa: BLE001 — reports, never raises; fails closed
+        logger.warning("scheduler state unreadable: %s: %s", type(exc).__name__, exc)
+        return JSONResponse(status_code=503, content={"paused": True, "store": type(exc).__name__})
+    return JSONResponse(content=state.model_dump(mode="json"))
+
+
 @app.get("/me")
 def me(request: Request) -> dict:
     """Who the API will record as the decider for this caller (Phase 9 inbox). In bearer mode

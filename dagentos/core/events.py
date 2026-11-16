@@ -178,6 +178,25 @@ class RunResumed(ControlEvent):
     event_type: ClassVar[str] = "run.resumed"
 
 
+# ---- scheduler-wide pause (ROADMAP A12 / audit E-03): the operator's kill switch.
+
+class SchedulerState(BaseModel):
+    """NOT a run event. The log is per run and replay must stay per-run deterministic, so a
+    fact about the whole deployment never enters `run_events`. It is one row of the store's
+    append-only `scheduler_state` history (`Store.get_scheduler_state` / `set_scheduler_state`);
+    the newest row is the current state. `agentos pause --all` writes paused=True and
+    `resume --all` writes paused=False, each with who and why; the engine reads it before
+    every wave and the worker before every pull and sweep. A fresh store is never paused."""
+
+    paused: bool = False
+    principal: Principal | None = None
+    reason: str = ""
+    changed_at: datetime | None = None    # None only on a fresh store (never set)
+
+    def who(self) -> str:
+        return f"{self.principal.kind.value}:{self.principal.id}" if self.principal else "unknown"
+
+
 # ---- human-in-the-loop (C7, DESIGN §4.4). Approval is a run state, not a library
 # pattern: the gated step has NOT started when approval.requested is appended, and its
 # step.started must have a higher seq than approval.granted.

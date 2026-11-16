@@ -11,7 +11,7 @@ policy, no keyring) and **not detectable in-log** (the one gap no in-log scheme 
 truncation after the last seal; the tool reports the uncovered tail). A chokepoint in none
 of these is a bug.
 
-Each row names the test that pins the direction (84 rows). `tests/test_fail_modes.py` checks that
+Each row names the test that pins the direction (87 rows). `tests/test_fail_modes.py` checks that
 every cited test exists, so this table cannot quietly outlive the code. Phase 8 #11;
 the operator policy ceiling (#2) is scoped against this table.
 
@@ -50,6 +50,9 @@ the operator policy ceiling (#2) is scoped against this table.
 | Optimistic append | A control request (cancel / pause) appeared since the last write | **open, narrowly** | Adopted — the only foreign appends the engine accepts | `tests/test_control.py::test_cancel_request_appended_by_api_is_adopted_by_worker_log_not_a_conflict` |
 | `_fail` under conflict | Two settles fail the run at once | **open** | Second `run.failed` is dropped; the log already says failed. **Unpinned**: no test drives two concurrent failures into `_fail`; listed so the gap is visible | `tests/test_fail_modes.py::test_unpinned_rows_are_named_here` |
 | Worker loop | A transient store error (connection reset, `database is locked`) or an escaped executor bug while handling one delivery | **closed** | Logged with the run id and traceback; the loop backs off and continues; the un-acked delivery is redelivered after the visibility timeout. `run_once` still raises | `tests/test_worker_resilience.py::test_run_forever_survives_a_transient_store_error_and_finishes_the_run` |
+| Global pause (A12), wave boundary | `agentos pause --all` set while runs are queued or mid-wave | **closed** | The worker pulls nothing and the sweep re-enqueues nothing (nor expires approvals: frozen, not drained); a run mid-advance records its in-flight wave, then the engine stops it before the next wave and the worker parks it back on the queue. Runs are neither cancelled nor individually paused; the first tick after `resume --all` continues them. The gate is in the engine, so `?sync=true` dispatches nothing either | `tests/test_global_pause.py::test_in_flight_step_finishes_after_a_mid_wave_pause_and_the_next_wave_waits_for_resume` |
+| Global pause, flag unreadable | `get_scheduler_state` raises (store fault) | **closed** | Worker and engine treat it as paused and log the exception class: nothing is pulled, re-enqueued or dispatched until the read succeeds. A kill switch that fails open under a store fault is no kill switch | `tests/test_global_pause.py::test_unreadable_scheduler_state_is_treated_as_paused` |
+| Global pause, API | Any write verb on `/scheduler` | **closed** | 405: the API only reads the flag. Setting or clearing it takes store access via the operator CLI, so a stolen API token cannot un-pause an incident | `tests/test_global_pause.py::test_api_shows_the_scheduler_state_and_cannot_set_it` |
 | API restart | Process restarts mid-run | **closed** | Run and events are on disk; paging by seq continues | `tests/test_api_durability.py::test_run_survives_app_restart_and_events_page_by_seq` |
 | Schema migration | Released migration edited | **closed** | Hash-pinned; the test fails with "add migration N+1" | `tests/test_migrations.py::test_released_migrations_are_never_edited` |
 

@@ -77,6 +77,16 @@ class FakeStore:
     def get_snapshot(self, run_id):
         return getattr(self, "snaps", {}).get(run_id)
 
+    # The scheduler-wide pause is part of the port too (A12): newest row is the state.
+    def get_scheduler_state(self):
+        from dagentos.core.events import SchedulerState
+        history = getattr(self, "scheduler", [])
+        return SchedulerState.model_validate(history[-1]) if history else SchedulerState()
+
+    def set_scheduler_state(self, state):
+        self.scheduler = getattr(self, "scheduler", [])
+        self.scheduler.append(state.model_dump(mode="json"))
+
     def list_run_ids(self): return list(self.logs)
     def run_id_for_request(self, request_id): return self.requests.get(request_id)
 

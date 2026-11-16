@@ -20,12 +20,13 @@ import sqlite3
 import threading
 import time
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from dagentos.core.coordination import LeaseToken
-from dagentos.core.events import Event, RunStarted, from_record
-from dagentos.core.models import Agent, BlobRef, WorkflowDefinition
+from dagentos.core.events import Event, RunStarted, SchedulerState, from_record
+from dagentos.core.models import Agent, BlobRef, Principal, WorkflowDefinition
 from dagentos.core.ports import ConflictError
 from dagentos.store import migrations
 
@@ -150,6 +151,25 @@ class SqliteStore:
     def get_snapshot(self, run_id: str) -> tuple[int, str | None, dict] | None:
         row = self._one("SELECT seq, last_hash, state FROM run_snapshots WHERE run_id = ?", (run_id,))
         return (int(row[0]), row[1], json.loads(row[2])) if row else None
+
+    # scheduler-wide pause (A12): append-only history, newest row is the current state
+    def get_scheduler_state(self) -> SchedulerState:
+        row = self._one("SELECT paused, principal, reason, changed_at FROM scheduler_state "
+                        "ORDER BY id DESC LIMIT 1")
+        if row is None:
+            return SchedulerState()
+        return SchedulerState(paused=bool(row[0]),
+                              principal=Principal.model_validate_json(row[1]) if row[1] else None,
+                              reason=row[2], changed_at=row[3])
+
+    def set_scheduler_state(self, state: SchedulerState) -> None:
+        at = state.changed_at or datetime.now(UTC)
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO scheduler_state(paused, principal, reason, changed_at) "
+                "VALUES (?, ?, ?, ?)",
+                (int(state.paused), state.principal.model_dump_json() if state.principal else None,
+                 state.reason, at.isoformat()))
 
     # definitions (agents immutable per (name, version))
     def put_agent(self, agent: Agent) -> None:

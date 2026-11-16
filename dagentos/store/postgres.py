@@ -20,14 +20,15 @@ import hashlib
 import json
 import time
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 import psycopg
 from psycopg import errors
 from psycopg_pool import ConnectionPool
 
 from dagentos.core.coordination import LeaseToken
-from dagentos.core.events import Event, RunStarted, from_record
-from dagentos.core.models import Agent, BlobRef, WorkflowDefinition
+from dagentos.core.events import Event, RunStarted, SchedulerState, from_record
+from dagentos.core.models import Agent, BlobRef, Principal, WorkflowDefinition
 from dagentos.core.ports import ConflictError
 from dagentos.store import migrations
 
@@ -126,6 +127,26 @@ class PostgresStore:
             row = conn.execute("SELECT seq, last_hash, state FROM run_snapshots WHERE run_id = %s",
                                (run_id,)).fetchone()
         return (int(row[0]), row[1], row[2]) if row else None
+
+    # scheduler-wide pause (A12): append-only history, newest row is the current state
+    def get_scheduler_state(self) -> SchedulerState:
+        with self._pool.connection() as conn:
+            row = conn.execute("SELECT paused, principal, reason, changed_at FROM scheduler_state "
+                               "ORDER BY id DESC LIMIT 1").fetchone()
+        if row is None:
+            return SchedulerState()
+        return SchedulerState(paused=row[0],
+                              principal=Principal.model_validate(row[1]) if row[1] else None,
+                              reason=row[2], changed_at=row[3])
+
+    def set_scheduler_state(self, state: SchedulerState) -> None:
+        at = state.changed_at or datetime.now(UTC)
+        with self._pool.connection() as conn:
+            conn.execute(
+                "INSERT INTO scheduler_state(paused, principal, reason, changed_at) "
+                "VALUES (%s, %s::jsonb, %s, %s)",
+                (state.paused, state.principal.model_dump_json() if state.principal else None,
+                 state.reason, at))
 
     # definitions (agents immutable per (name, version))
     def put_agent(self, agent: Agent) -> None:

@@ -1,4 +1,4 @@
-"""`agentos` — the operator's command line (Phase 8 #3 / #4).
+"""`agentos` — the operator's command line (Phase 8 #3 / #4, A12).
 
     agentos verify [--run ID | --all]      hash chain + seals for one run or every run
     agentos doctor                         store, migrations, executors, every run folds and
@@ -6,8 +6,11 @@
     agentos policy explain <workflow>      the workflow's budget, the effective budget under
                                            the operator ceiling, and per node what runs freely,
                                            asks, or is refused
+    agentos pause --all [--reason ..]      kill switch: workers finish in-flight steps and
+    agentos resume --all                   dispatch nothing new until resumed; runs are not
+    agentos pause --status                 cancelled or paused individually (A12 / E-03)
 
-All three read the same environment as the API and the worker (`dagentos.store.factory`,
+All of them read the same environment as the API and the worker (`dagentos.store.factory`,
 `AGENTOS_POLICY`, `AGENTOS_SIGNING_KEYS`, `AGENTOS_AUTH`). Exit status is 0 only when nothing
 failed; warnings (unconfigured but not wrong) do not fail. Output is plain text a human reads
 in a terminal; `--json` gives the same facts as one JSON document for scripts.
@@ -20,10 +23,12 @@ import logging
 import os
 import sys
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 
+from dagentos.core.events import SchedulerState
 from dagentos.core.fold import FoldError, fold
 from dagentos.core.integrity import IntegrityError, verify
-from dagentos.core.models import Budget, EffectClass, WorkflowDefinition
+from dagentos.core.models import Budget, EffectClass, Principal, PrincipalKind, WorkflowDefinition
 from dagentos.core.policy import OperatorPolicy, apply_ceiling, executor_allowed, policy_sha256
 from dagentos.core.seal import HmacKeyring, verify_seals
 from dagentos.store import migrations
@@ -272,6 +277,46 @@ def _print_explain(doc: dict) -> None:
         print(f"  {n['id']:<12} {n['agent']:<20} {n['executor']:<14} {n['outcome']:<40} {classes}")
 
 
+# ------------------------------------------------------------------ pause / resume (A12)
+
+def _operator(name: str | None) -> Principal:
+    """`--principal NAME` names the human at the keyboard; otherwise the record says the CLI
+    itself did it (system:cli), never an invented human."""
+    return (Principal(kind=PrincipalKind.human, id=name) if name
+            else Principal(kind=PrincipalKind.system, id="cli"))
+
+
+def _emit_scheduler(state: SchedulerState, args: argparse.Namespace) -> int:
+    if args.json:
+        print(json.dumps(state.model_dump(mode="json")))
+        return 0
+    line = "scheduler: " + ("paused" if state.paused else "running")
+    if state.changed_at is None:
+        print(line + " (never paused)")
+        return 0
+    print(f"{line}  since {state.changed_at.isoformat(timespec='seconds')}  by {state.who()}"
+          + (f"  reason: {state.reason}" if state.reason else ""))
+    return 0
+
+
+def _set_scheduler(args: argparse.Namespace, *, paused: bool) -> int:
+    store = store_from_env()
+    store.set_scheduler_state(SchedulerState(
+        paused=paused, principal=_operator(args.principal), reason=args.reason or "",
+        changed_at=datetime.now(UTC)))
+    return _emit_scheduler(store.get_scheduler_state(), args)   # read back: what workers see
+
+
+def cmd_pause(args: argparse.Namespace) -> int:
+    if args.status:
+        return _emit_scheduler(store_from_env().get_scheduler_state(), args)
+    return _set_scheduler(args, paused=True)
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    return _set_scheduler(args, paused=False)
+
+
 # ------------------------------------------------------------------ main
 
 def _emit(report: Report, args: argparse.Namespace) -> int:
@@ -299,6 +344,18 @@ def build_parser() -> argparse.ArgumentParser:
     ex = pol_sub.add_parser("explain", help="what the ceiling does to one workflow")
     ex.add_argument("workflow")
     ex.set_defaults(fn=cmd_policy_explain)
+    pa = sub.add_parser("pause", help="global pause (kill switch): dispatch nothing new")
+    pg = pa.add_mutually_exclusive_group(required=True)
+    pg.add_argument("--all", action="store_true", help="pause every worker's dispatch")
+    pg.add_argument("--status", action="store_true", help="show the state and its last change")
+    pa.add_argument("--reason", default="", help="why (recorded with the change)")
+    pa.add_argument("--principal", default=None, help="operator name to record (default system:cli)")
+    pa.set_defaults(fn=cmd_pause)
+    re_ = sub.add_parser("resume", help="clear the global pause; parked runs continue")
+    re_.add_argument("--all", action="store_true", required=True, help="resume every worker")
+    re_.add_argument("--reason", default="", help="why (recorded with the change)")
+    re_.add_argument("--principal", default=None, help="operator name to record (default system:cli)")
+    re_.set_defaults(fn=cmd_resume)
     return p
 
 
