@@ -281,3 +281,131 @@ def test_subprocess_stdout_over_cap_is_refused():
     with pytest.raises(ToolError, match="bytes to stdout, over config.max_bytes=100"):
         ex.execute(_req({"kind": "subprocess", "max_bytes": 100,
                          "argv": [sys.executable, "-c", "print('x' * 500)"]}), _p)
+
+
+# ------------------------------------------------------------------ audit I-08: streaming caps
+
+class _Firehose(httpx.SyncByteStream):
+    """A response body with no Content-Length that keeps coming: `total` bytes in 1 KiB
+    chunks, counting how many the executor actually pulled before it stopped."""
+
+    def __init__(self, total: int) -> None:
+        self.total, self.pulled, self.closed = total, 0, False
+
+    def __iter__(self):
+        while self.pulled < self.total:
+            self.pulled += 1024
+            yield b"x" * 1024
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_http_body_over_cap_is_refused_while_streaming_and_memory_stays_bounded():
+    """Audit I-08: `max_bytes` used to be checked after `r.content` had buffered the whole
+    body, so a hostile endpoint could push gigabytes into the worker (or the API under
+    `?sync=true`). The body is now read in chunks and abandoned at the cap."""
+    cap = 10_000
+    hose = _Firehose(total=50 * cap)                      # far past the cap, no Content-Length
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, stream=hose))
+    ex = ToolExecutor(transport=transport)
+    with pytest.raises(ToolError, match=f"over config.max_bytes={cap}"):
+        ex.execute(_req({"kind": "http", "url": "https://api.example/firehose", "max_bytes": cap}), _p)
+    assert hose.pulled < 2 * cap, f"pulled {hose.pulled} bytes: the body was buffered, not streamed"
+    assert hose.closed                                      # the connection was released
+
+
+def test_subprocess_endless_stdout_is_cut_at_the_cap_not_at_the_timeout(tmp_path):
+    """Audit I-08: `proc.communicate()` buffered stdout without limit until the timeout.
+    An endless writer must now be stopped at `max_bytes`, its process group killed, well
+    before the wall-clock budget."""
+    import os
+    import time
+    marker = tmp_path / "child.pid"
+    # The 1 ms pause per 64 KiB (~64 MB/s) only bounds the memory a regression could eat
+    # before the timeout; with the cap enforced the first chunk already ends the step.
+    flood = ("import os, sys, time\n"
+             f"open({str(marker)!r}, 'w').write(str(os.getpid()))\n"
+             "while True:\n"
+             "    sys.stdout.write('x' * 65536); sys.stdout.flush(); time.sleep(0.001)\n")
+    ex = ToolExecutor()
+    started = time.monotonic()
+    with pytest.raises(ToolError, match="bytes to stdout, over config.max_bytes=1000"):
+        ex.execute(_req({"kind": "subprocess", "max_bytes": 1000, "timeout": 3.0,
+                         "argv": [sys.executable, "-c", flood]}), _p)
+    assert time.monotonic() - started < 1.5                # cut at the cap, not the timeout
+    pid = int(marker.read_text())
+    with pytest.raises(ProcessLookupError):                # the process group is gone
+        os.killpg(pid, 0)
+
+
+# ------------------------------------------------------------------ audit I-14: redaction
+
+SECRET = "tok_0123456789abcdef"      # >= 8 chars: the redactor ignores shorter values
+
+
+def _echo_server(seen: list):
+    """An endpoint that echoes the Authorization header back: in a JSON body on /echo,
+    in an error body on /fail."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        auth = request.headers.get("authorization", "")
+        if request.url.path == "/echo":
+            return httpx.Response(200, json={"you_sent": auth, "nested": [{"again": auth}]},
+                                  headers={"ETag": f'"{auth}"'})
+        return httpx.Response(500, text=f"upstream rejected {auth}")
+    return httpx.MockTransport(handler)
+
+
+def test_http_output_and_error_text_redact_the_substituted_header_value():
+    """Audit I-14: an endpoint echoing `Authorization` used to put the secret into an
+    immutable, sealed event and the UI. The value substituted for `${TOKEN}` is replaced
+    by `[REDACTED:TOKEN]` in the recorded output (body, headers) and in the error text;
+    the request itself still carries the real header."""
+    seen: list[httpx.Request] = []
+    ex = ToolExecutor(transport=_echo_server(seen), env={"TOKEN": SECRET})
+    cfg = {"kind": "http", "url": "https://api.example/echo",
+           "headers": {"Authorization": "Bearer ${TOKEN}"}}
+    res = ex.execute(_req(cfg), _p)
+    assert seen[0].headers["authorization"] == f"Bearer {SECRET}"        # the request is real
+    assert res.output["json"] == {"you_sent": "Bearer [REDACTED:TOKEN]",
+                                  "nested": [{"again": "Bearer [REDACTED:TOKEN]"}]}
+    assert res.output["headers"]["etag"] == '"Bearer [REDACTED:TOKEN]"'
+    assert res.output["redactions"] == ["TOKEN"]                           # names, never values
+    assert SECRET not in json.dumps(res.output)
+
+    with pytest.raises(ToolError, match=r"HTTP 500.*\[REDACTED:TOKEN\]") as info:
+        ex.execute(_req({**cfg, "url": "https://api.example/fail"}), _p)
+    assert SECRET not in str(info.value)
+
+
+def test_subprocess_output_redacts_the_substituted_env_value():
+    """Audit I-14: a program that prints its environment leaks the secret into stdout,
+    stderr and the step's error text; each is scrubbed and `redactions` names what went."""
+    ex = ToolExecutor(env={"PATH": "/usr/bin:/bin", "API_KEY": SECRET})
+    prog = "import os, sys; print(os.environ['API_KEY']); print('key=' + os.environ['API_KEY'], file=sys.stderr)"
+    res = ex.execute(_req({"kind": "subprocess", "argv": [sys.executable, "-c", prog],
+                           "env": {"API_KEY": "${API_KEY}"}}), _p)
+    assert res.output["text"] == "[REDACTED:API_KEY]\n"
+    assert res.output["stderr"] == "key=[REDACTED:API_KEY]\n"
+    assert res.output["redactions"] == ["API_KEY"]
+    assert SECRET not in json.dumps(res.output)
+
+    failing = prog + "; sys.exit(2)"
+    with pytest.raises(ToolError, match=r"exited 2: 'key=\[REDACTED:API_KEY\]'") as info:
+        ex.execute(_req({"kind": "subprocess", "argv": [sys.executable, "-c", failing],
+                         "env": {"API_KEY": "${API_KEY}"}}), _p)
+    assert SECRET not in str(info.value)
+
+
+def test_steps_without_env_references_record_output_unchanged():
+    """No `${NAME}` substituted → nothing to redact: output is verbatim and carries no
+    `redactions` key, so existing recorded runs replay byte-for-byte."""
+    ex = ToolExecutor(transport=_echo_server([]), env={"TOKEN": SECRET})
+    res = ex.execute(_req({"kind": "http", "url": "https://api.example/echo",
+                           "headers": {"Authorization": f"Bearer {SECRET}"}}), _p)   # literal, not ${}
+    assert res.output["json"]["you_sent"] == f"Bearer {SECRET}"
+    assert "redactions" not in res.output
+    res = ToolExecutor().execute(_req({"kind": "subprocess",
+                                       "argv": [sys.executable, "-c", "print('plain')"]}), _p)
+    assert res.output["text"] == "plain\n" and "redactions" not in res.output
