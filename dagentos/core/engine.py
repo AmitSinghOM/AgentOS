@@ -462,6 +462,17 @@ class Engine:
         return run is not None and run.status.value not in TERMINAL and \
             run.status not in (RunStatus.paused, RunStatus.suspended)
 
+    def scheduler_paused(self) -> bool:
+        """The operator's global pause (A12 / E-03), read from the store at every wave
+        boundary. Fail-CLOSED: when the flag cannot be read, dispatch stops as if paused —
+        a kill switch that fails open under a store fault is no kill switch (FAIL_MODES)."""
+        try:
+            return self._store.get_scheduler_state().paused
+        except Exception as exc:  # noqa: BLE001 — see docstring
+            _log.warning("scheduler state unreadable (%s: %s); dispatching nothing",
+                         type(exc).__name__, exc)
+            return True
+
     def next_retry_delay(self, run: WorkflowRun) -> float | None:
         """Seconds until the earliest pending retry may start; None if none pending."""
         if not run.pending_retries:
@@ -771,6 +782,11 @@ class Engine:
             # Control requests appended by the API since our last write (C5).
             log.poll_control()
             if self._apply_control(log, ctx.run.status):
+                return
+            # Operator kill switch (A12 / E-03): the wave just recorded stands; nothing new
+            # starts. The run stays `running` (not paused) and continues after `resume --all`.
+            if self.scheduler_paused():
+                _log.info("run %s: scheduler paused; stopping at the wave boundary", ctx.run_id)
                 return
 
             ready, now = self._ready_nodes(ctx)

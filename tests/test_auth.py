@@ -165,6 +165,7 @@ def test_anonymous_caller_is_401_everywhere_except_probes(monkeypatch, token_fil
         for method, path in [("get", "/agents"), ("get", "/approvals"), ("get", "/runs/x"),
                              ("get", "/runs/x/events"), ("get", "/runs/x/stream"),
                              ("get", "/blobs/" + "0" * 64), ("get", "/executors"),
+                             ("get", "/scheduler"),
                              ("post", "/agents"), ("post", "/workflows"),
                              ("post", "/workflows/w/runs"), ("post", "/runs/x/cancel"),
                              ("post", "/runs/x/approvals/y/approve")]:

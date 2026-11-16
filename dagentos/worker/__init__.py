@@ -45,11 +45,38 @@ class Worker:
         self.errors = 0
         self.error_backoff_seconds = 1.0
         self._current: str | None = None
+        self._pause_seen: str | None = None    # last logged scheduler state (A12)
+
+    # --------------------------------------------------------- global pause (A12)
+    def _dispatch_blocked(self) -> bool:
+        """True while the operator's global pause is set — or while it cannot be read, which
+        fails CLOSED (docs/FAIL_MODES.md). Logs once per transition, not once per tick."""
+        try:
+            state = self._store.get_scheduler_state()
+        except Exception as exc:  # noqa: BLE001 — fail closed, see docstring
+            if self._pause_seen != "unreadable":
+                log.error("scheduler state unreadable (%s: %s); treating as paused: nothing is "
+                          "pulled or dispatched until it reads again", type(exc).__name__, exc)
+                self._pause_seen = "unreadable"
+            return True
+        if state.paused:
+            if self._pause_seen != "paused":
+                log.warning("scheduler paused by %s%s; finishing in-flight steps, dispatching "
+                            "nothing new", state.who(), f": {state.reason}" if state.reason else "")
+                self._pause_seen = "paused"
+            return True
+        if self._pause_seen not in (None, "running"):
+            log.warning("scheduler resumed by %s; dispatch continues", state.who())
+        self._pause_seen = "running"
+        return False
 
     # ------------------------------------------------------------------ sweep
     def recover(self) -> list[str]:
         """Re-enqueue every run that needs a worker (not terminal, not paused, not
-        suspended). Also expires timed-out approvals (C7). Idempotent."""
+        suspended). Also expires timed-out approvals (C7). Idempotent. Does nothing
+        while the scheduler is paused (A12): the deployment is frozen, not drained."""
+        if self._dispatch_blocked():
+            return []
         expired = self._engine.expire_approvals()
         if expired:
             log.info("expired %d approval(s)", len(expired))
@@ -64,7 +91,11 @@ class Worker:
 
     # ------------------------------------------------------------------- loop
     def run_once(self, timeout: float = 1.0) -> str | None:
-        """Pull one run id and process it. Returns the run id handled, or None."""
+        """Pull one run id and process it. Returns the run id handled, or None. While the
+        scheduler is paused the queue is not touched: sleep the poll interval instead."""
+        if self._dispatch_blocked():
+            time.sleep(timeout)
+            return None
         run_id = self._queue.pull(timeout)
         if run_id is None:
             return None
@@ -113,7 +144,13 @@ class Worker:
                                        heartbeat=lambda: self._heartbeat(token))
             self._faults.at(faults.AFTER_RUN_COMMIT_BEFORE_ACK, run_id=run_id)
             delay = self._engine.next_retry_delay(run)
-            if delay is not None and run.status.value == "running":
+            if run.status.value == "running" and delay is None:
+                # Stopped at a wave boundary by the global pause (A12): still running, nothing
+                # pending — the only way advance() returns such a run. Hand it straight back so
+                # the first tick after `resume --all` continues it, not the next sweep.
+                self._queue.push(run_id)
+                log.info("run %s: parked after its in-flight wave; scheduler paused", run_id)
+            elif delay is not None and run.status.value == "running":
                 # Waiting on a backoff: hand the run back to the queue, not before then.
                 self._queue.push(run_id, delay_seconds=delay)
                 log.info("run %s: retry scheduled in %.2fs", run_id, delay)
