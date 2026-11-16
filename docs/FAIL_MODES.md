@@ -11,7 +11,7 @@ policy, no keyring) and **not detectable in-log** (the one gap no in-log scheme 
 truncation after the last seal; the tool reports the uncovered tail). A chokepoint in none
 of these is a bug.
 
-Each row names the test that pins the direction (81 rows). `tests/test_fail_modes.py` checks that
+Each row names the test that pins the direction (84 rows). `tests/test_fail_modes.py` checks that
 every cited test exists, so this table cannot quietly outlive the code. Phase 8 #11;
 the operator policy ceiling (#2) is scoped against this table.
 
@@ -100,6 +100,9 @@ the operator policy ceiling (#2) is scoped against this table.
 | Subprocess tool | Command exceeds its timeout | **closed** | The whole process group is killed | `tests/test_tool_agent.py::test_subprocess_timeout_kills_the_whole_process_group` |
 | Subprocess tool | Output over cap | **closed, bounded** | Refused while streaming: stdout is read in chunks and abandoned at `max_bytes`, the process group is killed; memory stays bounded (audit I-08) | `tests/test_tool_agent.py::test_subprocess_stdout_over_cap_is_refused`, `tests/test_tool_agent.py::test_subprocess_endless_stdout_is_cut_at_the_cap_not_at_the_timeout` |
 | HTTP tool | Response body over cap, no `Content-Length` | **closed, bounded** | Refused while streaming: the body is read in chunks and abandoned at `max_bytes`; memory stays bounded (audit I-08) | `tests/test_tool_agent.py::test_http_body_over_cap_is_refused_while_streaming_and_memory_stays_bounded` |
+| HTTP tool | Endpoint echoes a substituted `${NAME}` header value | **closed** | Scrubbed to `[REDACTED:NAME]` in the recorded output (body, headers) and the error text; `output.redactions` names it; the request itself still carries the real value (audit I-14) | `tests/test_tool_agent.py::test_http_output_and_error_text_redact_the_substituted_header_value` |
+| Subprocess tool | Program prints a substituted `${NAME}` env value | **closed** | Scrubbed to `[REDACTED:NAME]` in stdout, the stderr tail and the error text; `output.redactions` names it (audit I-14) | `tests/test_tool_agent.py::test_subprocess_output_redacts_the_substituted_env_value` |
+| Tool redaction | Step substitutes no `${NAME}` | **not a boundary** | Output recorded verbatim, no `redactions` key; existing recorded runs replay unchanged | `tests/test_tool_agent.py::test_steps_without_env_references_record_output_unchanged` |
 | HTTP tool egress | Metadata / private address | **closed** | Refused unless opted in | `tests/test_tool_agent.py::test_egress_guard_refuses_metadata_and_private_addresses_unless_opted_in` |
 | Readiness probe | Store unreachable when `GET /ready` is asked | **closed** | 503 naming the exception class only (the message goes to the log); `/health` stays 200 as liveness, so an orchestrator drains the instance without restarting it | `tests/test_readiness.py::test_ready_is_503_with_the_exception_class_only_when_the_store_is_down` |
 | Webhook trigger | Missing, invalid or stale (±300 s) signature | **closed** | 401 with `WWW-Authenticate: AgentOS-Webhook`; nothing reaches the engine, no run | `tests/test_triggers.py::test_webhook_refuses_bad_credentials_before_touching_the_engine` |

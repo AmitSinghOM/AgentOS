@@ -20,8 +20,15 @@ The boundaries (docs/TRUST_BOUNDARY.md §4), fixed by construction rather than b
   refused by an egress check (`_check_egress`); private networks need an explicit opt-in.
   That check is defence in depth, not a substitute for network-layer egress policy.
 - **Secrets are the operator's too.** `${NAME}` in `headers` or `env` is substituted from
-  the executor's process environment at call time, never from inputs, and header values
-  are redacted from the recorded output.
+  the executor's process environment at call time, never from inputs. Request headers are
+  never recorded, and every value substituted in a step is redacted — as `[REDACTED:NAME]` —
+  from everything the step records or reports: error text (an error body excerpt, the
+  stderr tail), the recorded output (body, response headers, stderr, a write's
+  `external_ref`) and progress notes; `output.redactions` lists the names removed so a
+  replay is deterministic and an auditor sees that something is missing. The outgoing
+  request itself carries the real values. Values under 8 characters, and a secret that
+  comes back transformed (encoded, split, quoted differently), are not caught; a general
+  redaction pass before append is still ROADMAP row 7.
 - **Effects are honest.** GET/HEAD report `read`; any other method reports
   `write_external` with the URL as `external_ref`; a subprocess reports `execute_code`.
   The agent must DECLARE those, so the existing three-tier gate (allowed / approval /
@@ -85,6 +92,41 @@ class _OverCap(Exception):
         self.size = size
 
 
+class _Redactor:
+    """The concrete values `${NAME}` substitution put into this step's headers / env, so
+    they can be scrubbed from everything the step records or reports (audit I-14): error
+    text, the recorded output and progress notes. Each occurrence becomes `[REDACTED:NAME]`;
+    `names` lists what was actually removed, so the output says that something is missing
+    without saying what. Values shorter than `MIN_LEN` are not tracked: redacting a short
+    common string would mangle unrelated output. The outgoing request is never redacted."""
+
+    MIN_LEN = 8
+
+    def __init__(self) -> None:
+        self._values: dict[str, str] = {}
+        self.names: set[str] = set()
+
+    def track(self, name: str, value: str) -> None:
+        if len(value) >= self.MIN_LEN:
+            self._values[name] = value
+
+    def __call__(self, text: str) -> str:
+        # Longest value first, so a secret that contains another is replaced whole.
+        for name, value in sorted(self._values.items(), key=lambda kv: -len(kv[1])):
+            if value in text:
+                text = text.replace(value, f"[REDACTED:{name}]")
+                self.names.add(name)
+        return text
+
+    def progress(self, progress: ProgressFn) -> ProgressFn:
+        return lambda fraction, note: progress(fraction, self(note))
+
+    def finish(self, output: dict[str, Any]) -> dict[str, Any]:
+        if self.names:
+            output["redactions"] = sorted(self.names)
+        return output
+
+
 class ToolExecutor:
     name = "tool"
     version = VERSION
@@ -125,7 +167,9 @@ class ToolExecutor:
         method = str(cfg.get("method", "GET")).upper()
         query = _render_values(cfg.get("query") or {}, inputs)
         body = _render_values(cfg.get("json"), inputs) if "json" in cfg else None
-        headers = {k: self._substitute(v) for k, v in (cfg.get("headers") or {}).items()}
+        redact = _Redactor()
+        headers = {k: self._substitute(v, redact) for k, v in (cfg.get("headers") or {}).items()}
+        progress = redact.progress(progress)
         timeout = float(cfg.get("timeout", 30))
         max_bytes = int(cfg.get("max_bytes", DEFAULT_MAX_BYTES))
         if self._transport is None:          # real network: egress guard (see _check_egress)
@@ -152,7 +196,9 @@ class ToolExecutor:
         except httpx.TimeoutException as exc:
             raise ToolError(f"{method} {url} did not answer within {timeout}s "
                             f"(raise config.timeout; the step's retry policy applies)") from exc
-        text = b"".join(chunks).decode(r.encoding or "utf-8", "replace")
+        # Redact before slicing or parsing: a secret cut by `[:200]` would leave its head
+        # behind, and scrubbing the raw body covers `text` and `json` alike.
+        text = redact(b"".join(chunks).decode(r.encoding or "utf-8", "replace"))
         if r.status_code >= 400:
             raise ToolError(f"{method} {url} → HTTP {r.status_code}: {text[:200]!r} "
                             f"(the step's retry policy applies)")
@@ -160,7 +206,7 @@ class ToolExecutor:
 
         output: dict[str, Any] = {
             "status": r.status_code, "url": str(r.url),
-            "headers": {k: v for k, v in r.headers.items()
+            "headers": {k: redact(v) for k, v in r.headers.items()
                         if k.lower() in ("content-type", "content-length", "location", "etag")},
         }
         ctype = r.headers.get("content-type", "")
@@ -176,8 +222,8 @@ class ToolExecutor:
         else:
             effects = [Effect(effect_class=EffectClass.write_external,
                               description=f"{method} {url}",
-                              external_ref=r.headers.get("location") or str(r.url))]
-        return output, effects
+                              external_ref=redact(r.headers.get("location") or str(r.url)))]
+        return redact.finish(output), effects
 
     # ------------------------------------------------------------------ subprocess
 
@@ -190,8 +236,10 @@ class ToolExecutor:
         cwd = cfg.get("cwd")
         if cwd is not None and not Path(cwd).is_dir():
             raise ToolError(f"config.cwd {cwd!r} is not a directory")
-        env = {k: self._substitute(v) for k, v in (cfg.get("env") or {}).items()}
+        redact = _Redactor()
+        env = {k: self._substitute(v, redact) for k, v in (cfg.get("env") or {}).items()}
         env.setdefault("PATH", (self._env or os.environ).get("PATH", "/usr/bin:/bin"))
+        progress = redact.progress(progress)
         max_bytes = int(cfg.get("max_bytes", DEFAULT_MAX_BYTES))
 
         progress(0.0, f"exec {argv[0]}")
@@ -204,7 +252,7 @@ class ToolExecutor:
                 cwd=cwd, env=env, start_new_session=True)
         except FileNotFoundError as exc:
             raise ToolError(f"program {argv[0]!r} not found on the worker "
-                            f"(PATH={env['PATH']!r})") from exc
+                            f"(PATH={redact(env['PATH'])!r})") from exc
         try:
             out, err = _pump(proc, stdin, max_bytes=max_bytes,
                              deadline=time.monotonic() + timeout)
@@ -218,24 +266,26 @@ class ToolExecutor:
             raise ToolError(f"{argv[0]} wrote at least {exc.size} bytes to stdout, over "
                             f"config.max_bytes={max_bytes}; reading stopped there and its "
                             f"process group was killed") from None
-        stderr = err.decode("utf-8", "replace")[-2000:]
+        stderr = redact(err.decode("utf-8", "replace"))[-2000:]
         if proc.returncode != 0:
             raise ToolError(f"{argv[0]} exited {proc.returncode}: {stderr.strip()[:300]!r} "
                             f"(the step's retry policy applies)")
         progress(1.0, f"exit 0, {len(out)} bytes")
-        text = out.decode("utf-8", "replace")
+        text = redact(out.decode("utf-8", "replace"))
         output: dict[str, Any] = {"exit_code": 0, "stderr": stderr}
         try:
             output["json"] = json.loads(text)
         except ValueError:
             output["text"] = text
-        return output, [Effect(effect_class=EffectClass.execute_code, description=argv[0])]
+        return redact.finish(output), [Effect(effect_class=EffectClass.execute_code,
+                                              description=argv[0])]
 
     # ------------------------------------------------------------------ helpers
 
-    def _substitute(self, value: Any) -> str:
+    def _substitute(self, value: Any, redact: _Redactor) -> str:
         """`${NAME}` → the executor's environment. Unset names are an error naming them:
-        a silently empty Authorization header is worse than a failed step."""
+        a silently empty Authorization header is worse than a failed step. Every value
+        filled in is handed to `redact`, so it can be scrubbed from what the step records."""
         env = self._env if self._env is not None else os.environ
 
         def repl(m: re.Match) -> str:
@@ -243,6 +293,7 @@ class ToolExecutor:
             if name not in env:
                 raise ToolError(f"config references ${{{name}}} but it is not set in the "
                                 f"worker's environment")
+            redact.track(name, env[name])
             return env[name]
         return _ENV_REF.sub(repl, str(value))
 
