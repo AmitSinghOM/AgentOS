@@ -322,7 +322,15 @@ AGENTOS_SIGNING_KEYS=signing-keys.json uvicorn dagentos.api.main:app      # and 
 agentos verify                      # every run: chain + seals; exit 1 on any failure
 agentos doctor                      # store, migrations, executors, auth/policy/signing, every run
 agentos policy explain hello        # what the operator ceiling does to one workflow, per node
+agentos pause --all --reason "leaked provider key"   # kill switch: in-flight steps finish,
+agentos pause --status              #   nothing new dispatches, runs are not cancelled or paused
+agentos resume --all                #   individually; parked runs continue on the next tick
 ```
+
+The pause is one store-level fact (`scheduler_state`, an append-only history with who/why/when),
+never a run event, so per-run replay stays deterministic. The engine reads it before every wave
+and the worker before every pull and sweep; an unreadable flag counts as paused (fail-closed).
+`GET /scheduler` shows it read-only — no API verb can set or clear it.
 
 `GET /runs/{id}/integrity` reports the same seal state (`unsigned | verified | unverifiable |
 INVALID`). Limits, stated plainly in `docs/TRUST_BOUNDARY.md` §2: the key is symmetric (keep it
