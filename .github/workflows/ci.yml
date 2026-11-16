@@ -16,13 +16,21 @@ on:
       - "Dockerfile"
       - "scripts/release_smoke.py"
       - ".github/workflows/ci.yml"
+  schedule:
+    # Audit I-11: floors-not-pins and a gitignored uv.lock mean a dependency floor drift
+    # (pydantic-ai >=2.61, three weeks unseen) only ever showed as red checks on unrelated
+    # Dependabot PRs. A daily full run on `main` with a fresh resolve makes it visible on
+    # the day it happens. 04:37 UTC, off the hour so it is not queued behind everyone else's.
+    - cron: "37 4 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # The event name is part of the group so the daily scheduled run and a push to `main`
+  # (both on refs/heads/main) never cancel each other.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
