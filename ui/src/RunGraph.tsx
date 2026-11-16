@@ -330,6 +330,16 @@ export function RunGraph({ runId, navigate, session }: { runId: string; navigate
       debounce.current = window.setTimeout(() => { void refetch(); }, REFETCH_DEBOUNCE_MS);
     };
     let errors = 0;
+    /** A stream or refetch failure: show it, count it, and say whether the loop may still retry.
+     *  The count is of CONSECUTIVE failures — a frame or a successful refetch resets it. */
+    const failed = (): boolean => {
+      setLive("error");
+      if (++errors >= MAX_CONSECUTIVE_ERRORS) {
+        setError((prev) => `${prev ?? "stream failed"} — gave up after ${errors} attempts; reload to retry`);
+        return false;
+      }
+      return true;
+    };
     const loop = async () => {
       while (!stopped) {
         setLive("connecting");
@@ -342,25 +352,30 @@ export function RunGraph({ runId, navigate, session }: { runId: string; navigate
               const item = tickerItem(f);
               if (item) setTicker((t) => [item, ...t].slice(0, TICKER_MAX));
               scheduleRefetch();
+              errors = 0;                 // a frame is proof of life: earlier failures were not consecutive
               setLive("live");
             },
           });
           if (last) lastId.current = last;
-          errors = 0;
         } catch (e) {
           if (ctrl.signal.aborted) return;
-          setLive("error");
           setError(e instanceof ApiError ? `${e.status} ${e.detail}` : e instanceof Error ? e.message : String(e));
-          if (++errors >= MAX_CONSECUTIVE_ERRORS) {
-            setError((prev) => `${prev ?? "stream failed"} — gave up after ${errors} attempts; reload to retry`);
-            return;
-          }
+          if (!failed()) return;
           await new Promise((r) => setTimeout(r, RECONNECT_MS * 5));
           continue;
         }
         // server closed: terminal event or max duration. Refetch once; reconnect unless terminal.
+        // A refetch that fails (it has already shown its error) is a stream error, not a closed
+        // stream — the run may well be live (I-09 / D6) — so it is counted, backed off and retried;
+        // only a terminal status from the server closes the loop.
         const r = await refetch();
-        if (!r || TERMINAL.has(r.status)) { setLive("closed"); return; }
+        if (r === null) {
+          if (!failed()) return;
+          await new Promise((res) => setTimeout(res, RECONNECT_MS * 5));
+          continue;
+        }
+        errors = 0;
+        if (TERMINAL.has(r.status)) { setLive("closed"); return; }
         await new Promise((res) => setTimeout(res, RECONNECT_MS));
       }
     };

@@ -7,6 +7,7 @@
  *   - a pending approval renders as "awaiting approval" and the page carries its decision card
  *   - a pinned-version mismatch is stated, not hidden
  *   - the stream closing on a terminal run is "closed", not an error
+ *   - a failed refetch after a server close on a live run is "error" and retried, never "closed"
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -39,6 +40,20 @@ function scriptedStream() {
   const enc = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });
   return { body, emit: (s: string) => controller.enqueue(enc.encode(s)), close: () => controller.close() };
+}
+/** The stream loop's reconnect and backoff waits are seconds long. Shrink every wait over a second a
+ *  hundredfold so a reconnect test does not sleep real time; Testing Library's own waitFor timers
+ *  (≤ 1 s) are untouched. Restored by afterEach's restoreAllMocks. */
+function shortenLongWaits() {
+  const real = globalThis.setTimeout;
+  vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void, ms?: number) =>
+    real(fn, ms !== undefined && ms > 1000 ? ms / 100 : ms)) as unknown as typeof setTimeout);
+}
+/** Every text the element shows from now on, so a test can assert a state was NEVER shown. */
+function observeText(el: Element): string[] {
+  const seenText: string[] = [];
+  new MutationObserver(() => seenText.push(el.textContent ?? "")).observe(el, { childList: true, characterData: true, subtree: true });
+  return seenText;
 }
 
 type Seen = { url: string; headers: Record<string, string> };
@@ -139,6 +154,89 @@ describe("run graph", () => {
     second.close();
     await waitFor(() => expect(screen.getByRole("status", { name: "stream state" })).toHaveTextContent("closed"));
     expect(streams).toBe(2);
+  });
+
+  it("after a server close, a failed refetch is a stream error that is retried — never 'closed' on a live run (I-09 / D6)", async () => {
+    shortenLongWaits();
+    const second = scriptedStream();
+    let streams = 0;
+    let blip = false;                                 // the next GET /runs/run1 fails at the network
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      const headers = (init?.headers as Record<string, string>) ?? {};
+      seen.push({ url, headers });
+      if (url === "/me") return json(200, { mode: "bearer", principal: { kind: "human", id: "amit" } });
+      if (url === "/runs/run1") {
+        if (blip) { blip = false; throw new TypeError("Failed to fetch"); }
+        return json(200, state);
+      }
+      if (url === "/workflows/diamond") return json(200, DEF);
+      if (url === "/runs/run1/stream") {
+        streams += 1;
+        const body = streams === 1 ? stream.body : second.body;
+        return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+      }
+      return json(404, {});
+    });
+    render(<App />);
+    await screen.findByRole("group", { name: /run graph/ });
+    const chip = screen.getByRole("status", { name: "stream state" });
+    const states = observeText(chip);
+    state = run({ attempts: { a: 1 }, last_seq: 2 });
+    stream.emit(frame(2, "step.started", "a"));
+    await waitFor(() => expect(nodeLabel("a")).toBe("a: running"));
+    blip = true;
+    stream.close();                                   // max duration reached; run still running
+    await waitFor(() => expect(chip).toHaveTextContent("error"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to fetch");
+    await waitFor(() => expect(streams).toBe(2));     // backed off, then reconnected
+    expect(seen.filter((s) => s.url === "/runs/run1/stream")[1].headers["Last-Event-ID"]).toBe("2");
+    state = run({ attempts: { a: 1 }, last_seq: 3, steps: [{ node_id: "a", attempt: 1, cost: { amount: "0", currency: "USD" } }] });
+    second.emit(frame(3, "step.completed", "a"));
+    await waitFor(() => expect(nodeLabel("a")).toBe("a: completed"));
+    expect(chip).toHaveTextContent("live");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(states).toContain("error");
+    expect(states).not.toContain("closed");
+  });
+
+  it("keeps saying 'error' (never 'closed') while every refetch after a server close fails, and gives up after the retry budget", async () => {
+    shortenLongWaits();
+    let streams = 0;
+    let down = false;                                 // GET /runs/run1 fails from the close onward
+    let failedRefetches = 0;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      const headers = (init?.headers as Record<string, string>) ?? {};
+      seen.push({ url, headers });
+      if (url === "/me") return json(200, { mode: "bearer", principal: { kind: "human", id: "amit" } });
+      if (url === "/runs/run1") {
+        if (down) { failedRefetches += 1; throw new TypeError("Failed to fetch"); }
+        return json(200, state);
+      }
+      if (url === "/workflows/diamond") return json(200, DEF);
+      if (url === "/runs/run1/stream") {
+        streams += 1;
+        // later connections: a quiet run, so the server accepts and closes at once (no frames)
+        const body = streams === 1 ? stream.body : new ReadableStream<Uint8Array>({ start(c) { c.close(); } });
+        return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+      }
+      return json(404, {});
+    });
+    render(<App />);
+    await screen.findByRole("group", { name: /run graph/ });
+    const chip = screen.getByRole("status", { name: "stream state" });
+    const states = observeText(chip);
+    down = true;
+    stream.close();                                   // max duration reached; run still running
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/gave up after 5 attempts; reload to retry/));
+    expect(chip).toHaveTextContent("error");
+    expect(failedRefetches).toBe(5);                  // one per attempt, MAX_CONSECUTIVE_ERRORS in all
+    expect(streams).toBe(5);                          // reopened after each of the four non-final failures
+    expect(states).not.toContain("closed");
+    await new Promise((r) => setTimeout(r, 200));     // gave up: nothing more is tried
+    expect(failedRefetches).toBe(5);
+    expect(streams).toBe(5);
   });
 
   it("shows a pending approval on the node and carries its decision card on the page", async () => {
