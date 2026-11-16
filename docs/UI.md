@@ -58,7 +58,10 @@ Development: `cd ui && npm run dev` serves the app on `:5173` and proxies API pa
   parser (`ui/src/sse.ts`) so the token travels as `Authorization: Bearer` — `EventSource`
   cannot send headers and a token in the URL is not acceptable. Every frame lands in the event
   ticker and schedules one debounced refetch of the folded run. On the server's close the page
-  reconnects with `Last-Event-ID` unless the run is terminal.
+  reconnects with `Last-Event-ID` unless the run is terminal. If the refetch after that close
+  fails, the page shows `error`, backs off and retries it like any stream failure (counting
+  toward the same give-up budget); it never says `closed` for a run the server has not reported
+  terminal (I-09 / D6).
 - **The integrity verdict** is a chip on the header from `GET /runs/{id}/integrity`: `integrity
   verified` / `unsigned` / `seal unverifiable` / `seal INVALID` / `chain broken`, with the counts
   and the API's problem text in the title. It is read on load and again when the run's status
