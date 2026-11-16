@@ -10,9 +10,10 @@ import threading
 import time
 from collections import deque
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from dagentos.core.coordination import LeaseToken
-from dagentos.core.events import Event, RunStarted, from_record
+from dagentos.core.events import Event, RunStarted, SchedulerState, from_record
 from dagentos.core.models import Agent, BlobRef, WorkflowDefinition
 from dagentos.core.ports import ConflictError
 
@@ -23,6 +24,7 @@ class MemoryStore:
         self._workflows: dict[str, WorkflowDefinition] = {}
         self._events: dict[str, list[dict]] = {}          # run_id → records in seq order
         self._snapshots: dict[str, tuple[int, str | None, str]] = {}
+        self._scheduler: list[dict] = []                  # A12 pause history, newest last
         self._requests: dict[str, str] = {}               # request_id → run_id
         self._fences: dict[str, int] = {}                 # run_id → highest fence seen
         self._blobs: dict[str, tuple[bytes, str]] = {}
@@ -121,6 +123,18 @@ class MemoryStore:
     def get_snapshot(self, run_id: str) -> tuple[int, str | None, dict] | None:
         snap = self._snapshots.get(run_id)
         return (snap[0], snap[1], json.loads(snap[2])) if snap else None
+
+    # scheduler-wide pause (A12): append-only history, newest row is the current state.
+    # Stored as JSON records so this adapter round-trips exactly like the SQL ones.
+    def get_scheduler_state(self) -> SchedulerState:
+        with self._lock:
+            return (SchedulerState.model_validate(self._scheduler[-1]) if self._scheduler
+                    else SchedulerState())
+
+    def set_scheduler_state(self, state: SchedulerState) -> None:
+        at = state.changed_at or datetime.now(UTC)
+        with self._lock:
+            self._scheduler.append(state.model_copy(update={"changed_at": at}).model_dump(mode="json"))
 
     def list_run_ids(self) -> list[str]:
         return list(self._events)

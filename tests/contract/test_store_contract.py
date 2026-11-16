@@ -241,3 +241,33 @@ def test_postgres_ping_passes_the_timeout_to_the_pool_acquire():
     with pytest.raises(TimeoutError):
         store.ping(timeout=1.5)
     assert store._pool.timeouts == [1.5]
+
+
+# ------------------------------------------------------- scheduler-wide pause (A12 / E-03)
+
+def test_scheduler_state_defaults_to_running_and_the_newest_row_wins(store):
+    from datetime import UTC, datetime
+
+    from dagentos.core.events import SchedulerState
+    from dagentos.core.models import Principal, PrincipalKind
+
+    assert store.get_scheduler_state() == SchedulerState()           # fresh: never paused
+    amit = Principal(kind=PrincipalKind.human, id="amit")
+    t1 = datetime(2026, 11, 16, 12, 0, tzinfo=UTC)
+    store.set_scheduler_state(SchedulerState(paused=True, principal=amit, reason="leaked key",
+                                             changed_at=t1))
+    got = store.get_scheduler_state()
+    assert got.paused is True and got.reason == "leaked key"
+    assert got.principal == amit and got.principal.kind is PrincipalKind.human   # typed back
+    assert got.changed_at == t1 and got.changed_at.tzinfo is not None
+
+    t2 = datetime(2026, 11, 16, 12, 30, tzinfo=UTC)
+    store.set_scheduler_state(SchedulerState(paused=False, principal=None, reason="rotated",
+                                             changed_at=t2))
+    got = store.get_scheduler_state()
+    assert got == SchedulerState(paused=False, principal=None, reason="rotated", changed_at=t2)
+
+    # A row without a timestamp is stamped by the store, never left None.
+    store.set_scheduler_state(SchedulerState(paused=True))
+    assert store.get_scheduler_state().paused is True
+    assert store.get_scheduler_state().changed_at is not None

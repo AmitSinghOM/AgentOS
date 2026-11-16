@@ -44,6 +44,27 @@ CREATE TABLE IF NOT EXISTS run_snapshots (
 );
 """,
     }),
+    (3, "scheduler_state: global pause history (A12 / E-03)", {
+        # Append-only; the newest row is the current state. Not a run log: replay is per run.
+        "sqlite": """
+CREATE TABLE IF NOT EXISTS scheduler_state (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    paused     INTEGER NOT NULL,
+    principal  TEXT,
+    reason     TEXT    NOT NULL DEFAULT '',
+    changed_at TEXT    NOT NULL
+);
+""",
+        "postgres": """
+CREATE TABLE IF NOT EXISTS scheduler_state (
+    id         BIGSERIAL PRIMARY KEY,
+    paused     BOOLEAN NOT NULL,
+    principal  JSONB,
+    reason     TEXT    NOT NULL DEFAULT '',
+    changed_at TIMESTAMPTZ NOT NULL
+);
+""",
+    }),
 ]
 
 LEDGER = {

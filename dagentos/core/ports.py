@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Protocol
 
-from dagentos.core.events import Event
+from dagentos.core.events import Event, SchedulerState
 from dagentos.core.models import (
     Agent,
     BlobRef,
@@ -73,6 +73,15 @@ class Store(Protocol):
     # `last_hash`), and `GET /runs/{id}/integrity` always folds the whole log.
     def put_snapshot(self, run_id: str, seq: int, last_hash: str | None, state: dict) -> None: ...
     def get_snapshot(self, run_id: str) -> tuple[int, str | None, dict] | None: ...
+
+    # Scheduler-wide pause (ROADMAP A12 / audit E-03). One fact for the whole deployment, so it
+    # cannot live in any run's log (replay is per run). The store keeps an append-only history
+    # and `get` returns the newest row — a default, never-paused state on a fresh store. Written
+    # only by the operator CLI; read by the engine before every wave and by the worker before
+    # every pull and sweep. A `set` without `changed_at` is stamped by the store. A `get` that
+    # RAISES is treated as paused by every reader (fail-closed, docs/FAIL_MODES.md).
+    def get_scheduler_state(self) -> SchedulerState: ...
+    def set_scheduler_state(self, state: SchedulerState) -> None: ...
 
 
 class BlobStore(Protocol):
