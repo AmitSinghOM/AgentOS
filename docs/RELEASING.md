@@ -21,7 +21,7 @@ Documented install path: `pip install "dagentos[providerkit]" agentos-provider-o
 One version for the core and every provider (`publish.yml` refuses a tag whose version does
 not match `pyproject.toml`, and refuses a provider whose version differs from the core). Bump
 in: `pyproject.toml`, `providers/*/pyproject.toml`, `dagentos/api/main.py` (`FastAPI(version=)`).
-Tag `vX.Y.Z` or `vX.Y.Z-<word>` (the word is dropped for the comparison: `v0.9.0-pilot` → `0.9.0`).
+Tag `vX.Y.Z` or `vX.Y.Z-<word>` (the word is optional and dropped for the comparison: `v0.9.0-pilot` → `0.9.0`; tags since `v0.11.0` are bare, e.g. `v0.17.1`).
 
 ## The UI is part of the wheel
 
@@ -32,12 +32,13 @@ Node produces a wheel that fails the smoke — by design; `docs/UI.md`.
 
 ## Cut a release
 
-1. Merge the close-out PR (version bump, `docs/releases/vX.Y.Z-<word>.md`, golden log, ROADMAP).
+1. Merge the close-out PR (version bump, `docs/releases/vX.Y.Z[-<word>].md`, golden log, ROADMAP).
 2. **Rehearse**: Actions → publish → Run workflow → `dry_run: true`. This builds and twine-checks
    every distribution, installs the wheels into an empty venv and runs `scripts/release_smoke.py`,
    attests every artifact, builds the image from those wheels and runs `agentos --help` inside it.
    Nothing is uploaded. Expect the first rehearsal of any pipeline change to find something.
-3. Tag the merge commit: `git tag -a vX.Y.Z-<word> <sha> -m "..."`, `git push origin vX.Y.Z-<word>`.
+3. Tag the merge commit: `git tag -a vX.Y.Z[-<word>] <sha> -m "..."`, then push that tag.
+   The `-<word>` suffix is optional; tags since `v0.11.0` are bare.
 4. The tag runs `publish.yml` for real: artifacts + provenance, image pushed and attested,
    GitHub release created with every artifact and `SHA256SUMS`, PyPI upload **if enabled** (below).
 
@@ -67,13 +68,13 @@ forward with a new patch version.
 
 ```bash
 # provenance of a wheel (Sigstore-signed SLSA attestation produced by the release run)
-gh attestation verify dagentos-0.11.0-py3-none-any.whl --owner AmitSinghOM
+gh attestation verify dagentos-0.17.1-py3-none-any.whl --owner AmitSinghOM
 
 # provenance of the image
-gh attestation verify oci://ghcr.io/amitsinghom/agentos:0.11.0 --owner AmitSinghOM
+gh attestation verify oci://ghcr.io/amitsinghom/agentos:0.17.1 --owner AmitSinghOM
 
 # the release's SHA256SUMS matches what pip downloaded
-pip download --no-deps dagentos==0.11.0 -d /tmp/dl && (cd /tmp/dl && sha256sum *)
+pip download --no-deps dagentos==0.17.1 -d /tmp/dl && (cd /tmp/dl && sha256sum *)
 ```
 
 ## What the image is
@@ -84,9 +85,9 @@ non-root user `agentos` (uid 10001); `/var/lib/agentos` volume for the default S
 `CMD` is the API; `python -m dagentos.worker` is the worker; the `agentos` CLI is on `PATH`.
 
 ```bash
-docker run --rm ghcr.io/amitsinghom/agentos:0.11.0 agentos --help
-docker run --rm -p 127.0.0.1:8000:8000 -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.11.0
-docker run --rm -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.11.0 python -m dagentos.worker
+docker run --rm ghcr.io/amitsinghom/agentos:0.17.1 agentos --help
+docker run --rm -p 127.0.0.1:8000:8000 -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.17.1
+docker run --rm -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.17.1 python -m dagentos.worker
 ```
 
 ## Local dry run
@@ -97,6 +98,6 @@ pip install build==1.2.2.post1 twine==7.0.0 packaging==26.3
 rm -rf dist && python -m build --outdir dist . && for p in providers/*/; do python -m build --outdir dist "$p"; done
 python -m twine check --strict dist/*
 python -m venv /tmp/smoke && /tmp/smoke/bin/pip install "$(ls dist/dagentos-*.whl)[providerkit]" dist/agentos_provider_*.whl
-/tmp/smoke/bin/python scripts/release_smoke.py 0.9.0
+/tmp/smoke/bin/python scripts/release_smoke.py 0.17.1
 docker build -t agentos:local .            # needs the wheels in dist/
 ```
