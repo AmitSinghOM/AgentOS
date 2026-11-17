@@ -167,6 +167,18 @@ Tests: `::test_openai_provider_delimits_upstream_output_and_declares_the_boundar
 
 ## Not done here
 
+- Isolation for `execute_code`. These boundaries govern *which* step runs and *what* a model
+  reads; none of them bounds what a running process can reach. A `tool` subprocess gets an
+  environment built from its config only (`env` plus `PATH`), but it shares the worker's uid,
+  filesystem and network, and can reach the store's DSN, so it can read the SQLite file or the
+  `AGENTOS_SIGNING_KEYS` keyring the worker reads. The ACP agent process inherits the worker's
+  whole environment (`AGENTOS_PG_DSN` and provider keys included). There is no OS sandbox
+  (ROADMAP control-plane row 8) and no sensitive-path check on cwd or args (row 9). Meanwhile
+  the operator: runs the worker as a dedicated uid on a dedicated host or container; keeps
+  `execute_code` out of the policy's `effect_ceiling` unless a workflow needs it
+  (`examples/operator_policy.json` already does, so such a step is refused, §1b); and fixes each
+  tool's `argv` and `cwd` in the agent definition, where inputs cannot reach them.
+  `SECURITY.md` "Scope" says the same.
 - A `protocols/` adapter layer for tool calling (A8), where tool *results* re-enter the
   model. The `tool` agent (`dagentos/agents/tool.py`, v0.7.0) produces step outputs, which
   downstream model steps receive through `wrap_input` like any other step output; a
