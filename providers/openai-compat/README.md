@@ -67,6 +67,11 @@ the same rules as the two SDK harnesses (`openai-agents`, `pydantic-ai`):
   harnesses do.
 - **Results are data.** An executed tool's return value goes back as a `role: tool`
   message wrapped in `<input name="tool.NAME">…</input>`, the delimiter every input uses (C12).
+  With tools offered, the system prompt also ends with one sentence telling the model to
+  pass the data between the tags, not the tags: measured live on `llama3.2:3b` it lifted
+  clean tool calls from 4/10 to 8/10 topics (`scripts/probe_tool_boundary.py`); without it
+  the model copied `<input …>` into the argument, the server could not parse the call, and
+  the step ended with the call as plain text and no tool run.
 - **Bounded.** A model still asking for tools after `max_tool_rounds` rounds fails the step
   with `ToolError` naming the cap; so does a tool that raises (naming the tool). The step's
   retry policy decides what happens next.

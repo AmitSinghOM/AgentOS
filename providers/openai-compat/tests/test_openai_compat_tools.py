@@ -24,6 +24,7 @@ import pytest
 pytest.importorskip("agentos_provider_openai_compat")
 
 from agentos_provider_openai_compat import OpenAICompatExecutor, ToolError, from_env
+from agentos_provider_openai_compat.executor import TOOL_NOTE
 
 from dagentos.core.models import Agent, AgentType, BlobRef, Budget, EffectClass, StepRequest
 from dagentos.providerkit.prompt import DATA_BOUNDARY, wrap_input
@@ -132,7 +133,8 @@ def test_one_tool_call_is_executed_recorded_and_its_result_sent_back_as_data():
     [result] = tool_messages(second)
     assert result == {"role": "tool", "tool_call_id": "call_0_0",
                       "content": wrap_input("tool.word_count", "2")}
-    assert DATA_BOUNDARY in second["messages"][0]["content"]
+    system = second["messages"][0]["content"]
+    assert DATA_BOUNDARY in system and system.endswith(TOOL_NOTE)   # measured live, see executor
 
 
 def test_a_call_outside_the_declared_effect_classes_is_rejected_and_never_run():
@@ -241,6 +243,7 @@ def test_an_agent_without_tools_sends_and_records_exactly_what_it_did_before():
     ex = OpenAICompatExecutor(cfg, registry=registry(), transport=ref.transport(seen=seen))
     res = ex.execute(request({"prompt": "hi {run.topic}"}), noop)
     assert set(seen[0]) == {"model", "messages", "temperature", "seed"}
+    assert seen[0]["messages"][0]["content"].endswith(DATA_BOUNDARY)      # no tool note
     assert set(res.output) == {"text", "model", "finish_reason", "usage", "priced", "alias"}
     assert {m.name for m in res.cost.units} == {"input_tokens", "output_tokens", "requests"}
 

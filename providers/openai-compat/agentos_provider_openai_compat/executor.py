@@ -84,6 +84,14 @@ except PackageNotFoundError:  # running from a source tree without install
     VERSION = "0.0.0+src"
 
 DEFAULT_MAX_TOOL_ROUNDS = 4
+# Appended to the system prompt only when tools are offered. Measured live on llama3.2:3b
+# (Ollama 0.40.16, temperature 0, seed 42, the quickstart's counter agent over 10 topics):
+# without it the model copied the `<input …>` tags into the tool argument on 6 of 10 topics,
+# which Ollama cannot parse as a tool call, so the call degraded to plain text and the step
+# ended with no tool run (4/10 clean calls). With this sentence: 8/10. The two misses are
+# unchanged either way. `scripts/probe_tool_boundary.py` reproduces the measurement.
+TOOL_NOTE = ("When you call a tool, pass only the data between the tags as the argument, "
+             "never the <input> tags themselves.")
 
 
 class ToolError(ProviderError):
@@ -150,7 +158,11 @@ class OpenAICompatExecutor:
     def execute(self, req: StepRequest, progress: ProgressFn) -> StepResult:
         cfg = req.agent.config
         model_id, alias = self.config.resolve(cfg.get("model", "chat.default"))
-        messages = self._messages(cfg, req.inputs)
+        tool_mode = "tools" in cfg
+        offered, withheld = self.registry.select(cfg.get("tools") or [], req.declared_effects)
+        by_name = {s.name: s for s in offered}
+        arg_models = {s.name: _arguments_model(s) for s in offered}
+        messages = self._messages(cfg, req.inputs, tools=bool(offered))
         body: dict[str, Any] = {
             "model": model_id,
             "messages": list(messages),
@@ -161,10 +173,6 @@ class OpenAICompatExecutor:
             body["max_tokens"] = cfg["max_tokens"]
         if cfg.get("json_output"):
             body["response_format"] = {"type": "json_object"}
-        tool_mode = "tools" in cfg
-        offered, withheld = self.registry.select(cfg.get("tools") or [], req.declared_effects)
-        by_name = {s.name: s for s in offered}
-        arg_models = {s.name: _arguments_model(s) for s in offered}
         if offered:
             body["tools"] = [_function_schema(s, arg_models[s.name]) for s in offered]
             if cfg.get("tool_choice") is not None:
@@ -296,10 +304,13 @@ class OpenAICompatExecutor:
         rec["output_sha256"] = _sha(out)
         return rec, wrap_input(f"tool.{name}", out)        # C12: a tool result is data
 
-    def _messages(self, cfg: dict, inputs: dict) -> list[dict]:
+    def _messages(self, cfg: dict, inputs: dict, *, tools: bool = False) -> list[dict]:
         # C12: the agent definition is the only source of instructions; everything
-        # interpolated from inputs is delimited data and the system prompt says so.
+        # interpolated from inputs is delimited data and the system prompt says so. With
+        # tools offered, TOOL_NOTE follows (see its comment for the live measurement).
         system = f"{cfg['system']}\n\n{DATA_BOUNDARY}" if cfg.get("system") else DATA_BOUNDARY
+        if tools:
+            system = f"{system} {TOOL_NOTE}"
         msgs = [{"role": "system", "content": system}]
         if cfg.get("prompt"):
             user = render_prompt(str(cfg["prompt"]), inputs)
