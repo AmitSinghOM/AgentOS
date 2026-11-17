@@ -90,6 +90,20 @@ class Store(Protocol):
     def put_snapshot(self, run_id: str, seq: int, last_hash: str | None, state: dict) -> None: ...
     def get_snapshot(self, run_id: str) -> tuple[int, str | None, dict] | None: ...
 
+    # Archive (audit E-08, `agentos archive`): the ONE way rows leave a store, and only after
+    # the run's record has been written to a file and read back (dagentos.export.archive_runs).
+    # Not an edit to a log: every row of the run (events, snapshot, queue and lease rows, the
+    # run row — so its request_id is released) goes in one transaction, or none does.
+    def purge_run(self, run_id: str, *, expected_seq: int,
+                  blobs: Sequence[str] = ()) -> list[str]:
+        """Remove every row of `run_id`, refusing with ConflictError when the log's last seq
+        is not `expected_seq` (something appended since the caller exported it — a retry on a
+        failed run) or the run is unknown; nothing is written on refusal. Then, for each sha256
+        in `blobs`, delete the blob only if no REMAINING run's stored record names it
+        (content-addressed blobs are shared: a pricing table, identical inputs). Returns the
+        sha256 of every blob removed. Blobs are never touched unless named."""
+        ...
+
     # Scheduler-wide pause (ROADMAP A12 / audit E-03). One fact for the whole deployment, so it
     # cannot live in any run's log (replay is per run). The store keeps an append-only history
     # and `get` returns the newest row — a default, never-paused state on a fresh store. Written

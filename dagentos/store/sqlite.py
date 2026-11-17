@@ -464,6 +464,34 @@ class SqliteStore:
         row = self._one("SELECT run_id FROM runs WHERE request_id = ?", (request_id,))
         return row[0] if row else None
 
+    # archive (E-08): every row of one run in one transaction, see Store.purge_run
+    def purge_run(self, run_id: str, *, expected_seq: int,
+                  blobs: Sequence[str] = ()) -> list[str]:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                (current,) = self._conn.execute(
+                    "SELECT COALESCE(MAX(seq), 0) FROM run_events WHERE run_id = ?", (run_id,)
+                ).fetchone()
+                if current == 0 or current != expected_seq:
+                    raise ConflictError(f"run {run_id!r}: expected seq {expected_seq}, log is "
+                                        f"at {current}; not purged")
+                for table in ("run_events", "run_snapshots", "queue", "leases", "runs"):
+                    self._conn.execute(f"DELETE FROM {table} WHERE run_id = ?", (run_id,))
+                removed: list[str] = []
+                for sha in dict.fromkeys(blobs):          # once each, caller's order
+                    referenced = self._conn.execute(
+                        "SELECT 1 FROM run_events WHERE instr(record, ?) > 0 LIMIT 1", (sha,)
+                    ).fetchone()
+                    if referenced is None and self._conn.execute(
+                            "DELETE FROM blobs WHERE sha256 = ?", (sha,)).rowcount:
+                        removed.append(sha)
+                self._conn.execute("COMMIT")
+                return removed
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+
     # blobs
     def put(self, data: bytes, media_type: str = "application/json") -> BlobRef:
         digest = hashlib.sha256(data).hexdigest()

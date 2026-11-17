@@ -411,6 +411,29 @@ class PostgresStore:
             ).fetchone()
         return row[0] if row else None
 
+    # archive (E-08): every row of one run in one transaction, see Store.purge_run
+    def purge_run(self, run_id: str, *, expected_seq: int,
+                  blobs: Sequence[str] = ()) -> list[str]:
+        with self._pool.connection() as conn, conn.transaction():
+            row = conn.execute("SELECT last_seq FROM runs WHERE run_id = %s FOR UPDATE",
+                               (run_id,)).fetchone()          # serializes with appenders
+            current = row[0] if row else 0
+            if row is None or current != expected_seq:
+                raise ConflictError(f"run {run_id!r}: expected seq {expected_seq}, log is at "
+                                    f"{current}; not purged")
+            # children first: run_events and run_snapshots REFERENCE runs(run_id)
+            for table in ("run_events", "run_snapshots", "queue", "leases", "runs"):
+                conn.execute(f"DELETE FROM {table} WHERE run_id = %s", (run_id,))
+            removed: list[str] = []
+            for sha in dict.fromkeys(blobs):              # once each, caller's order
+                referenced = conn.execute(
+                    "SELECT 1 FROM run_events WHERE strpos(record::text, %s) > 0 LIMIT 1", (sha,)
+                ).fetchone()
+                if referenced is None and conn.execute(
+                        "DELETE FROM blobs WHERE sha256 = %s", (sha,)).rowcount:
+                    removed.append(sha)
+            return removed
+
     # blobs
     def put(self, data: bytes, media_type: str = "application/json") -> BlobRef:
         digest = hashlib.sha256(data).hexdigest()

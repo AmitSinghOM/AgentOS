@@ -184,6 +184,35 @@ class MemoryStore:
     def run_id_for_request(self, request_id: str) -> str | None:
         return self._requests.get(request_id)
 
+    # archive (E-08): every row of one run in one critical section, see Store.purge_run
+    def purge_run(self, run_id: str, *, expected_seq: int,
+                  blobs: Sequence[str] = ()) -> list[str]:
+        with self._cv:
+            current = len(self._events.get(run_id, []))
+            if run_id not in self._events or current != expected_seq:
+                raise ConflictError(f"run {run_id!r}: expected seq {expected_seq}, log is at "
+                                    f"{current}; not purged")
+            del self._events[run_id]
+            for table in (self._snapshots, self._index, self._fences, self._leases,
+                          self._fence_counter):
+                table.pop(run_id, None)
+            self._runs.pop(run_id, None)
+            self._requests = {k: v for k, v in self._requests.items() if v != run_id}
+            self._inflight = [(t, r) for t, r in self._inflight if r != run_id]
+            heapq.heapify(self._inflight)
+            if run_id in self._queue:
+                self._queue.remove(run_id)
+            removed: list[str] = []
+            for sha in dict.fromkeys(blobs):              # once each, caller's order
+                if sha in self._blobs and not self._blob_referenced(sha):
+                    del self._blobs[sha]
+                    removed.append(sha)
+            return removed
+
+    def _blob_referenced(self, sha: str) -> bool:
+        """The same rule as the SQL adapters: the sha256 appears in some remaining record."""
+        return any(sha in json.dumps(rec) for log in self._events.values() for rec in log)
+
     # blobs
     def put(self, data: bytes, media_type: str = "application/json") -> BlobRef:
         digest = hashlib.sha256(data).hexdigest()
