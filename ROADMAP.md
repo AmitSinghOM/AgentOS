@@ -7,6 +7,33 @@ history should read like a real project, because it is one.
 > Rule: do not start phase N+1 until phase N is demoable and tagged. Earn scope by
 > finishing.
 
+## Open items (as of 2026-11-16, after [#138](https://github.com/AmitSinghOM/AgentOS/pull/138))
+
+Every ⏭ checkbox below that is still open, in one place. Each line names the phase whose row
+carries the design; the rows stay as history. No GitHub issues exist for these (audit W3-23).
+
+- **A7** `KeyStore` port + crypto-shredding erasure (`RunErased`) — Phase 2; the signed tail half shipped in Phase 8 #3
+- **A8** `protocols/` adapter layer: JSON-Schema tools, MCP / A2A / function-calling round trip — Phase 2, Phase 6
+- **A11** `agentos export-run --format jsonl` for external evaluators — Phase 3
+- **A4** filesystem `BlobStore` adapter (SQLite, Postgres, Memory exist) — Phase 1
+- Redaction, general pre-append pass (#7; the `tool` executor's half shipped in #137) — Phase 8
+- Sandbox around the `tool` subprocess (#8) — Phase 8
+- Sensitive-path check on subprocess cwd/args and HTTP-derived paths (#9) — Phase 8
+- `agentos snapshot` (store + blobs export) — Phase 8 #4
+- Token-level streaming via an executor hook — Phase 7
+- Mid-step suspension on SDK `needs_approval` / ACP `session/load` (persist `RunState` as a blob + resume protocol) — Phase 7, Phase 10
+- Chaos, Layer 1: `coordination_reset_mid_run`, `pg_connection_drop_mid_txn`, the Hypothesis property test — Phase 1
+- Chaos, Layer 2 (Toxiproxy): `coordination_partition_mid_run`, `pg_latency_under_fanout` — Phase 2
+- `advance()` cognitive-complexity refactor (cqa PY-MAINT-002), behaviour pinned by golden corpus + chaos suite — Phase 6
+- Ed25519 signer through the seal seam (today HMAC only) — Phase 8 #3, Phase 10
+- **D2** constraints file for the image build (reproducible third-party wheels) — Production pass 2
+- **D10** types-only OpenAPI client codegen with a drift test — Phase 10
+- `GET /approvals` and the recovery sweep fold every non-terminal run (denormalised `runs.status` deferred) — Production pass
+
+Shipped since the 2026-11-12 audit and no longer open: A12 global pause (#138), D6 stream
+reconnect (#135), tool-output byte caps + `${NAME}` redaction (#137), scheduled CI (#134),
+PyPI matrix (#132), ADRs 0006–0009 (`docs/adr/`, this sweep).
+
 ---
 
 ## Phase 0 — Walking Skeleton  ·  ~1 weekend  ·  ✅ shipped `v0.1.0-skeleton`
@@ -34,7 +61,7 @@ history should read like a real project, because it is one.
 The Phase 1–3 scope below is anchored to a dated survey of what the popular agent
 runtimes get wrong — LangGraph, agno, Microsoft Agent Framework, crewAI, OpenAI Agents,
 Google ADK, mastra, Temporal, DBOS, Hatchet — with each con cited to an open issue or a
-documented rule. Survey: `Study/AGENTOS_LANDSCAPE.md` §4. Each con is a GitHub issue
+documented rule. Survey: `docs/LANDSCAPE.md` §4 (public extract of a private note). Each con is a GitHub issue
 labelled `landscape-con`; an issue closes only when its acceptance test is in the suite.
 
 ## Phase 1 — Durable Execution  ·  ~2 weekends   ← the flagship  ·  ✅ shipped `v0.2.0-durable` (2026-09-13)
@@ -47,18 +74,18 @@ forward — see the dated decision at the end of this phase.
 - [ ] **Longevity structure** (`docs/DEVELOPMENT_STRUCTURE.md`): ports + injected adapters, import-linter contract, CI matrix 3.11/3.14 — **shipped at Phase 0 close**; remaining Phase 1 items:
   - [x] `schema_version`, `event_type`, `parent_run_id` on every event; upcaster registry (`core/upcast.py`)
   - [x] `StepRequest`/`StepResult` with `effects`, `cost`, `provenance` (§2.1); budget enforced by the core — **done in Phase 2 slice 1** (`core/engine.py` gate → dispatch → verify → record)
-  - [ ] ⏭ Model-vendor executors as `agentos-provider-*` plugins via entry points; core ships `echo` + `tool` only — the Phase 1 demo needs no vendor key
+  - [x] Model-vendor executors as `agentos-provider-*` plugins via entry points; core ships `echo` + `tool` only — the Phase 1 demo needs no vendor key — **done in Phase 4** (`v0.5.0-providers`)
   - [x] SQLite (`store/sqlite.py`, stdlib), Postgres (`store/postgres.py`, psycopg 3) and Memory adapters all pass `tests/contract/` (store + coordination suites; Postgres leg runs in CI against a service container)
-  - [~] golden corpus mechanism live (`tests/golden/`, `scripts/record_golden.py`, `v0.2.0-dev.json`); record `v0.2.0.json` at release
-  - [ ] ⏭ ADR 0006 core-depends-on-nothing, 0007 log-is-the-API, 0008 providers-are-plugins, 0009 queue-and-lease-are-ports
+  - [x] golden corpus mechanism live (`tests/golden/`, `scripts/record_golden.py`, `v0.2.0-dev.json`); `v0.2.0.json` recorded at release (one log per release since, through `v0.10.0.json`)
+  - [x] ADR 0006 core-depends-on-nothing, 0007 log-is-the-API, 0008 providers-are-plugins, 0009 queue-and-lease-are-ports — written down 2026-11-16 in `docs/adr/` from the decisions recorded here (audit I-32)
   - [ ] **AI-engineering pass (§11)** — `EffectClass`, `Principal`, `BlobRef`, `BlobStore` port **shipped at Phase 0 close**; Phase 1 items:
     - [x] A1 declare-then-do: `Agent.declared_effects` checked against `WorkflowDefinition.budget.allowed_effect_classes` BEFORE dispatch; undeclared reported effect → `step.dead_lettered` + run failed (Phase 3 turns the failure into SUSPENDED-for-approval)
     - [x] A2 `Principal` mandatory on every decision (422 without one); `spend`/`write_external` require `kind == human` unless `Budget.allow_agent_approval` (403 otherwise); other gated classes may be agent-approved
-    - [ ] ⏭ A3 capability aliases (`chat.fast`, …) resolved by provider plugins; `ExecutorSubstituted` event on change
-    - [~] A4 events carry `BlobRef`; SQLite + Memory `BlobStore` adapters; filesystem adapter still to add
+    - [x] A3 capability aliases (`chat.fast`, …) resolved by provider plugins; `ExecutorSubstituted` event on change — **done in Phase 4** (`executor.substituted`)
+    - [~] A4 events carry `BlobRef`; SQLite, Postgres and Memory `BlobStore` adapters; filesystem adapter still to add
     - [x] A5 `progress(fraction, note)` renews the lease on every call and appends `step.progress` at most once per second; lease loss mid-step raises `LeaseLost` before any write (proven over Toxiproxy alongside the fence)
-    - [~] A6 metered `Cost{units: [Meter], amount (decimal string), currency, pricing_snapshot_hash}`; per-step and rolling run ceilings enforced; dead-lettered cost still counted. Pricing table as a blob: with the first provider plugin
-    - [ ] ⏭ A10 provider plugins tested against recorded cassettes; live re-record is a nightly opt-in job
+    - [x] A6 metered `Cost{units: [Meter], amount (decimal string), currency, pricing_snapshot_hash}`; per-step and rolling run ceilings enforced; dead-lettered cost still counted. Pricing table as a blob — **done in Phase 4** with the first provider plugin
+    - [x] A10 provider plugins tested against recorded cassettes; live re-record is a nightly opt-in job — **done in Phase 4** (`provider-live` workflow)
 - [x] Worker process consuming a run queue, decoupled from the API (`dagentos/worker/`; queue is a `Queue` port with SQLite/Postgres/Memory adapters — Redis is now an optional adapter, not a requirement: see ADR note below)
 - [x] Real tool agent (HTTP/subprocess) in core — landed Phase 6 (`dagentos/agents/tool.py`); LLM executors live in provider plugins
 - [x] Idempotency keys on step execution (`run_id:step_id:sha256(inputs)`); completed steps replayed from the log, never re-executed
@@ -158,7 +185,7 @@ the dated decision.
 - [x] **Cost-ceiling suspension** (DESIGN §8 budget guardrails, A6): exceeding `max_run_cost` records the tripping step, then suspends with a `kind=cost` approval whose grant raises the effective ceiling to `total + max_run_cost` (`run.cost_ceiling`, in the log); human-only unless `allow_agent_approval`; rejection fails the run (money already spent, nothing to reopen); trips again at the raised ceiling
 - [x] **C7** — approval is a run state; the gated step's `step.started.seq > approval.granted.seq` is asserted; it runs exactly once, tagged with its `approval_id` ([#7](https://github.com/AmitSinghOM/AgentOS/issues/7))
 - [x] **C8** — per-step cost on `step.completed`; run cost = sum of step costs (Decimal); Prometheus + OTel only, no SaaS anywhere ([#8](https://github.com/AmitSinghOM/AgentOS/issues/8))
-- [ ] ⏭ **C12** — trust boundary on resume payloads and replayed events ([#12](https://github.com/AmitSinghOM/AgentOS/issues/12))
+- [x] **C12** — trust boundary on resume payloads and replayed events ([#12](https://github.com/AmitSinghOM/AgentOS/issues/12)) — **closed in Phase 5** (`v0.6.0-trusted`, `docs/TRUST_BOUNDARY.md`)
 - [x] **A9** OpenTelemetry GenAI semantic conventions (`gen_ai.*`) for spans; AgentOS-specific attributes under `agentos.*`; semconv version recorded on every span's resource
 - [ ] ⏭ **A11** `agentos export-run --format jsonl`: inputs/outputs by hash + provenance for external evaluators (opik); AgentOS records, never scores
 
@@ -197,7 +224,7 @@ test and run live for both.
 - [x] **Run inputs**: `POST /workflows/{name}/runs {"inputs": …}` stored by hash (`run.started.inputs_ref`), visible to every step as `{run.…}`; workflows without inputs are byte-for-byte unchanged (golden logs still fold)
 - [x] **DX bar**: `docs/quickstart-llm.md` (five minutes, no key) executed by `tests/test_quickstart_llm.py` against the recorded cassette AND run end-to-end against live Ollama with separate API + worker; `scripts/quickstart_llm.py` does steps 3–5 in one command; every provider error message says what to do (`ollama serve`, `ollama pull x`, set `AGENTOS_OPENAI_API_KEY`, available template keys); typed config with documented env defaults; provider README
 - [x] README screenshots (Jaeger span with `gen_ai.*`, Grafana) — done in Phase 5
-- [ ] ⏭ C12 executor-input trust boundary: tool results are data, never prompt (`agentos/protocols/`, A8)
+- [x] C12 executor-input trust boundary: tool results are data, never prompt — **closed in Phase 5** (`wrap_input` + `DATA_BOUNDARY`; the `protocols/` round trip is A8, still open)
 - [ ] ⏭ A11 `agentos export-run --format jsonl`
 - [x] **Second provider** `agentos-provider-anthropic` (Anthropic Messages wire format; Ollama's `/v1/messages` as the free default) — proved the seam: different request shape, auth header, error envelope (529), no `response_format`; zero changes to the core or the first provider. Shared pieces extracted to `dagentos.providerkit` (cassettes, pricing, errors, templates, env config, conformance scenarios); the OpenAI provider refactored onto it
 - [x] Real `tool` agent (HTTP/subprocess) in core — landed after Phase 5 (v0.7.0 slice)
@@ -262,7 +289,7 @@ locking test.
 - [ ] ⏭ A8 `protocols/` function-calling round trip
 - [ ] ⏭ A11 `agentos export-run --format jsonl`
 - [x] A12 global pause — shipped 2026-11-16 as the store-level `scheduler_state` flag ([#138](https://github.com/AmitSinghOM/AgentOS/pull/138); Phase 2 row has the design)
-- [ ] ⏭ A7 KeyStore + signed chain tail
+- [ ] ⏭ A7 KeyStore + signed chain tail (tail: done Phase 8 #3, `dagentos/core/seal.py`; KeyStore / crypto-shredding open)
 - [ ] ⏭ `advance()` cognitive complexity (cqa PY-MAINT-002) — a refactor PR, behaviour pinned by the golden corpus and chaos suite
 
 **Tag:** `v0.7.0-complete`. **Post:** "Snapshots That Are Never the Truth."
@@ -283,7 +310,7 @@ callers exist.
 
 ## Landscape check — 2026-09-17 (after `v0.7.0-complete`)
 
-The survey that scoped Phases 1–6 (`Study/AGENTOS_LANDSCAPE.md`, 2026-09-13) was re-checked
+The survey that scoped Phases 1–6 (`docs/LANDSCAPE.md`, public extract of a 2026-09-13 private note) was re-checked
 against primary sources on 2026-09-17. Three layers are all called "the production LLM
 handler for agents"; AgentOS competes in exactly one of them.
 
@@ -316,7 +343,7 @@ to model steps as its DAG). The optional UI moved to Phase 8 (and, after the 202
 The three properties no competitor has — declared-then-do with typed principals, state
 replay instead of code replay, and verified derived state — are exactly the ones that are
 hard to retrofit, and are the reason to keep the core as it is rather than chase the
-feature table. Full comparison and the mentor read: `Study/AGENTOS_LANDSCAPE.md` §5.
+feature table. Full comparison and the mentor read: `docs/LANDSCAPE.md` §5 (the mentor read stays in the private note).
 
 ## Phase 7 — Streaming + inner harness  ·  ~1-2 weekends  ·  ✅ shipped `v0.8.0-watchable` (2026-09-18)
 **Goal:** a pilot evaluator can watch a run live from any process, and can run the agent
@@ -408,7 +435,7 @@ that shows AgentOS approvals; AgentOS could be the durable backend under its tas
 
 **What AgentOS absorbs, ranked by "a pilot would be refused without it".** Full table with
 costs and the honest reverse direction (what KiroCrew could take from AgentOS: declared-then-do
-effects, state replay, cost as a governed quantity) in `Study/AGENTOS_LANDSCAPE.md` §8.
+effects, state replay, cost as a governed quantity) in `docs/LANDSCAPE.md` §8 (summary; the full table is in the private note).
 
 | # | Mechanism KiroCrew has | AgentOS today | Absorb as |
 | --- | --- | --- | --- |
@@ -512,7 +539,8 @@ ceiling second, then the ceiling, then the signature, then operability, then dis
   package rename; PyPI Trusted Publisher setup (Amit's account); `agentos snapshot`.
 - [x] Triggers (#5), Slack approval adapter (#6) — shipped in `v0.17.0` as PRs #106 and #107
   (Phase 10, below).
-- [ ] ⏭ Redaction (#7), sensitive paths (#9), sandbox (#8), `agentos snapshot` — after the
+- [ ] ⏭ Redaction (#7; the `tool` executor's half shipped in [#137](https://github.com/AmitSinghOM/AgentOS/pull/137),
+  the general pre-append pass is what remains), sensitive paths (#9), sandbox (#8), `agentos snapshot` — after the
   items above, in that order.
 
 **Tag:** `v0.9.0-pilot`. **Post:** "A Human Said Yes — Prove It."
@@ -730,17 +758,24 @@ are fixed above or closed by the tag; its remaining rows (streaming byte caps on
 the D6 reconnect, scheduled CI on `main`, repository security settings, a redaction pass,
 `agentos.db` permissions, documentation drift, tooling debt) are queued as its Waves 1–3, not
 dropped. Still open, unchanged: A7 `KeyStore` / erasure, A8 `protocols/` + MCP, A11
-`agentos export-run`, A12 global pause, redaction (#7), sandbox (#8), sensitive paths (#9),
+`agentos export-run`, A12 global pause (since shipped 2026-11-16, [#138](https://github.com/AmitSinghOM/AgentOS/pull/138)), redaction (#7), sandbox (#8), sensitive paths (#9),
 `agentos snapshot`, the Ed25519 signer through the seal seam, mid-step suspension (ACP
-`session/load`, SDK `needs_approval`), D6 (stream reconnect after one failed refetch), D10
+`session/load`, SDK `needs_approval`), D6 (stream reconnect after one failed refetch; since shipped 2026-11-16, [#135](https://github.com/AmitSinghOM/AgentOS/pull/135)), D10
 (types-only OpenAPI codegen with a drift test), D2 (constraints file for the image build).
-Every ⏭ item remains a checkbox, not a deletion.
+Every ⏭ item remains a checkbox, not a deletion. The consolidated list is "Open items" at the top of this file.
 
 **Tag:** `v0.17.0`.
 
 ---
 
 ## Chaos engineering plan
+
+> Written at Phase 0, before the Redis removal (ADR 0009, `docs/adr/`), and kept as history
+> (2026-11-16). Read it with three substitutions: the `redis_*` rows map to the
+> `coordination_reset_mid_run` fault point (Phase 1 ⏭); there is no Redis target for Toxiproxy,
+> only Postgres (`tests/chaos/network/`); and the `kill -9` demo is
+> `tests/chaos/test_kill9_real_process.py`, not `test_crash_after_step_2.py`. Live fault-point
+> names are in `dagentos/core/faults.py`.
 
 Netflix's Chaos Monkey is the right *idea* and the wrong *tool* for this project. The tool
 randomly terminates instances in a production fleet so engineers are forced to tolerate
