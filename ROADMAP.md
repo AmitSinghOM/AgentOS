@@ -21,8 +21,7 @@ carries the design; the rows stay as history. No GitHub issues exist for these (
 - `agentos snapshot` (store + blobs export) — Phase 8 #4
 - Token-level streaming via an executor hook — Phase 7
 - Mid-step suspension on SDK `needs_approval` / ACP `session/load` (persist `RunState` as a blob + resume protocol) — Phase 7, Phase 10
-- Chaos, Layer 1: `coordination_reset_mid_run`, `pg_connection_drop_mid_txn`, the Hypothesis property test — Phase 1
-- Chaos, Layer 2 (Toxiproxy): `coordination_partition_mid_run`, `pg_latency_under_fanout` — Phase 2
+- Chaos, Layer 1: `coordination_reset_mid_run`, `pg_connection_drop_mid_txn` — Phase 1 (the Hypothesis property test shipped, see below)
 - `advance()` cognitive-complexity refactor (cqa PY-MAINT-002), behaviour pinned by golden corpus + chaos suite — Phase 6
 - Ed25519 signer through the seal seam (today HMAC only) — Phase 8 #3, Phase 10
 - **D2** constraints file for the image build (reproducible third-party wheels) — Production pass 2
@@ -31,7 +30,8 @@ carries the design; the rows stay as history. No GitHub issues exist for these (
 Shipped since the 2026-11-12 audit and no longer open: A12 global pause (#138), D6 stream
 reconnect (#135), tool-output byte caps + `${NAME}` redaction (#137), scheduled CI (#134),
 PyPI matrix (#132), ADRs 0006–0009 (`docs/adr/`, this sweep), A11 `agentos export-run`
-([#149](https://github.com/AmitSinghOM/AgentOS/pull/149)).
+([#149](https://github.com/AmitSinghOM/AgentOS/pull/149)), the Hypothesis property suite and
+Toxiproxy Layer 2 scenarios 2–5 ([#152](https://github.com/AmitSinghOM/AgentOS/pull/152), audit E-12).
 
 ---
 
@@ -99,7 +99,7 @@ forward — see the dated decision at the end of this phase.
   - [x] definition changed between crash and resume → refused with version error (C3)
   - [ ] ⏭ `coordination_reset_mid_run` → run completes from the log alone (leases/queue rebuilt by the recovery sweep)
   - [ ] ⏭ `pg_connection_drop_mid_txn` → no partial event written; worker reconnects and resumes
-  - [ ] ⏭ Property test over the event log (Hypothesis): random fault schedule × random 1–5 step workflow → invariants hold (see plan)
+  - [x] Property test over the event log (Hypothesis) — shipped [#152](https://github.com/AmitSinghOM/AgentOS/pull/152) as `tests/property/` (runs in the normal `test` job, 50 derandomized examples each): random 1–6 node DAG × random executor outcomes (failures, retries, dead-letters) × random operator interleaving (pause/resume/cancel/approve/reject/retry) → the five invariants hold, `fold(events[:k]) == GET /runs/{id}?at=k` at every k, snapshot + tail == full fold; plus any single edit/insert/remove of a random log is refused by `fold`, `Idempotency-Key` creates one run per distinct key, `topological_order` respects every edge and rejects every cycle. Fault-point *schedules* stay deterministic (Layer 1 rows above); the property draws executor failures and operator actions instead
 - [x] **C1** — effects recorded before ack; replay never re-executes user code ([#1](https://github.com/AmitSinghOM/AgentOS/issues/1))
 - [x] **C2** — idempotent enqueue and append, `UNIQUE(run_id, seq)` ([#2](https://github.com/AmitSinghOM/AgentOS/issues/2))
 - [x] **C3** — replay by `step_id` + `workflow_version`, never by position ([#3](https://github.com/AmitSinghOM/AgentOS/issues/3))
@@ -145,10 +145,12 @@ cancel/pause, agent versioning. Items marked ⏭ carried forward — see the dat
 - [x] **C5** — `POST /runs/{id}/cancel|pause|resume` as persisted requests finalized at the worker's next boundary (or immediately, under a lease, when the run is idle/paused); the in-flight step's `progress()` raises `Cancelled` (cooperative token); pause finishes the current wave, leaves the queue, and is skipped by the recovery sweep; `Principal` on every control event; nothing ties a run to a client connection ([#5](https://github.com/AmitSinghOM/AgentOS/issues/5))
 - [x] **C9** — one execution model: every DAG node is a durable step — the wave scheduler and the single-step path are the same loop ([#9](https://github.com/AmitSinghOM/AgentOS/issues/9))
 - [x] **C11** — `DEAD_LETTERED` step state with cause and a retry path ([#11](https://github.com/AmitSinghOM/AgentOS/issues/11))
-- [~] **Chaos, network class:** Toxiproxy between worker ↔ Postgres (`tests/chaos/network/`, CI job `chaos-network` with Postgres + Toxiproxy service containers)
+- [x] **Chaos, network class:** Toxiproxy between worker ↔ Postgres (`tests/chaos/network/`, CI job `chaos-network` with Postgres + Toxiproxy service containers)
   - [x] `lease_expiry_race` — 2 s latency on worker A's link so its lease lapses mid-step; worker B finishes; A's late write is rejected **by the fence** (asserted on the rejection reason, not just seq) (C6 split-brain). Also fixed: fence now recorded at `acquire`, not first write, closing the window between takeover and B's first append
-  - [ ] ⏭ `coordination_partition_mid_run` → run resumes via recovery sweep once the link returns
-  - [ ] ⏭ `pg_latency_under_fanout` → fan-in waits, no branch output lost (C4)
+  - [x] `coordination_partition_mid_run` — [#152](https://github.com/AmitSinghOM/AgentOS/pull/152): the proxy is DISABLED (every connection dropped) at `before_effect_commit` / `after_effect_commit` of s2, placed by `CutLinkAt`; A's lease lapses, B resumes via the recovery sweep; exactly one `step.completed` per step, s2 re-run once (before) or replayed (after), never a third time; A appends nothing after the link heals; the log read through the healed proxy is byte-identical (C1, C6)
+  - [x] `pg_latency_under_fanout` — [#152](https://github.com/AmitSinghOM/AgentOS/pull/152): 200 ms latency added when the first branch of n1 → [n2, n3, n4] → n5 starts and kept for the run; every step completes once, no retry or dead-letter, the three branches overlap in wall time, n5's inputs are all three branch outputs, total time bounded (C4)
+  - [x] `partition_during_approval_grant` — [#152](https://github.com/AmitSinghOM/AgentOS/pull/152): the real API over the proxied store serves `POST …/approve` and the link is cut just before / just after the grant's append; the client sees 500 either way; the retry is 202 (grant lands once) or 409 `is granted` (the cut call was the grant); never two `approval.granted`, the gated step runs once after the grant, the recovery sweep resumes the run (C7)
+  - [x] `restart_after_partial_wave` — [#152](https://github.com/AmitSinghOM/AgentOS/pull/152): a real worker process on the lagging proxied link is `os._exit(137)`'d at `after_effect_commit:n2` mid fan-out (n3/n4 started, uncommitted); a second real process on the direct link resumes from the log: n2 never started again, n3/n4 re-attempted exactly once, n5 ran once and saw all three branch outputs (C1, C4, C6)
 - [ ] ⏭ **A7** crypto-shredding: per-run data key in a `KeyStore` port; erasure = destroy key + `RunErased` event; log stays append-only
 - [~] **A8** `agentos/protocols/`: tools described by JSON Schema; MCP / A2A / vendor function-calling are adapters; tool results are data, never prompt. Function-calling round trip shipped for `openai-compat` ([#148](https://github.com/AmitSinghOM/AgentOS/pull/148)): registry tools offered by declared effect class, a call outside that set rejected (never run) and recorded `rejected: true`, results wrapped as data, bounded by `max_tool_rounds`, recorded like the SDK harnesses. ⏭ MCP / `protocols/` adapter still open
 - [x] **A12** global pause (shipped 2026-11-16, [#138](https://github.com/AmitSinghOM/AgentOS/pull/138)): `agentos pause --all` / `resume --all` / `pause --status`. Not `SchedulerPaused` run events as first sketched — a deployment-wide fact in a run log would break per-run replay — but a store-level append-only `scheduler_state` history (migration 3; who / why / when; newest row is the state). The engine reads it before every wave, so in-flight steps finish and nothing new dispatches (`?sync=true` included); the worker pulls nothing and the sweep re-enqueues nothing; runs are neither cancelled nor individually paused; an unreadable flag counts as paused (fail-closed); `GET /scheduler` is read-only
@@ -832,6 +834,13 @@ partitions without touching AgentOS code. Scenarios:
 Toxics are toggled via Toxiproxy's HTTP API from the test, so each scenario is a normal
 pytest case. Add a `chaos-network` CI job that brings up compose with the proxy and runs
 `tests/chaos/network/`.
+
+> Status (2026-11-17, [#152](https://github.com/AmitSinghOM/AgentOS/pull/152)): row 1 is `test_lease_expiry_race.py`; row 4 is
+> `test_pg_latency_under_fanout.py`; the two Redis rows have no Redis target (ADR 0009) and
+> became full partitions of the Postgres link — `test_coordination_partition_mid_run.py` (mid
+> step) and `test_partition_during_approval_grant.py` (during the approve call);
+> `test_restart_after_partial_wave.py` is the kill -9 demo under lag on a fan-out wave. The
+> `bandwidth 1KB/s` row is not written. Scenario detail is in the Phase 2 checklist above.
 
 ### Layer 3 — Fleet-level chaos (only if AgentOS ever runs on Kubernetes; probably never)
 
