@@ -375,3 +375,74 @@ def test_list_runs_refuses_a_cursor_it_did_not_issue(store):
     _start(store, "r1", 1)
     with pytest.raises(ValueError, match="invalid cursor"):
         store.list_runs(cursor="not-a-cursor")
+
+
+# ------------------------------------------------------------- purge_run (audit E-08)
+
+def _two_runs_sharing_a_blob(store):
+    """r1 and r2 both reference `shared` (a pricing table, say); only r1 references `own`."""
+    shared = store.put(b'{"table": "prices"}')
+    own = store.put(b'{"out": "r1 only"}')
+    other = store.put(b'{"out": "r2 only"}')
+    for rid, ref in (("r1", own), ("r2", other)):
+        _start(store, rid, 1 if rid == "r1" else 2, then=[
+            StepCompleted(run_id=rid, step_id="s", attempt=1, idempotency_key=f"k-{rid}",
+                          output_ref=ref),
+            StepCompleted(run_id=rid, step_id="t", attempt=1, idempotency_key=f"j-{rid}",
+                          output_ref=shared),
+            RunCompleted(run_id=rid, occurred_at=_at(5))])
+    return shared, own, other
+
+
+def test_purge_run_removes_every_row_of_one_run_only_at_the_expected_seq(store):
+    """The archive's one write to the store: events, snapshot, queue and lease rows and the run
+    row go in one transaction, nothing of any other run moves, and a log that grew since the
+    caller read it (a retry on a failed run) is refused — the append-only guarantee for a live
+    run is the caller's `expected_seq`, exactly as for `append_events`."""
+    _two_runs_sharing_a_blob(store)
+    store.put_snapshot("r1", 4, "h", {"last_seq": 4})
+    store.push("r1")
+    token = store.acquire("r1", "w", ttl_seconds=30)
+    assert token is not None
+    before_r2 = store.read_events("r2")
+
+    with pytest.raises(ConflictError):                  # stale: the log is at 4, not 3
+        store.purge_run("r1", expected_seq=3)
+    assert len(store.read_events("r1")) == 4 and store.get_snapshot("r1") is not None
+    assert store.queue_depth() == 1
+
+    assert store.purge_run("r1", expected_seq=4) == []  # no blobs asked for → none removed
+    assert store.read_events("r1") == []
+    assert store.list_run_ids() == ["r2"]
+    assert [r.run_id for r in store.list_runs(limit=None).runs] == ["r2"]
+    assert store.run_status_counts() == {"completed": 1}
+    assert store.run_id_for_request("req-r1") is None     # the idempotency key is released
+    assert store.get_snapshot("r1") is None
+    assert store.queue_depth() == 0
+    assert store.read_events("r2") == before_r2            # the other run is untouched
+    assert store.run_id_for_request("req-r2") == "r2"
+    # a fresh run under the same id starts from seq 0 with a new fence counter
+    store.append_events("r1", 0, [_started(run_id="r1", request_id="req-r1-again")])
+    assert [e.seq for e in store.read_events("r1")] == [1]
+    assert store.acquire("r1", "w2", ttl_seconds=30) is not None
+
+
+def test_purge_run_removes_only_blobs_no_remaining_run_references(store):
+    """The reference count is honest: a blob is kept while ANY remaining run's record names
+    its sha256 (the shared pricing table), removed only when none does; a sha the caller
+    passes that no run references at all is removed too (it was this run's, now orphaned)."""
+    shared, own, other = _two_runs_sharing_a_blob(store)
+    orphan = store.put(b"orphan")
+    removed = store.purge_run("r1", expected_seq=4,
+                              blobs=[shared.sha256, own.sha256, orphan.sha256, "0" * 64])
+    assert sorted(removed) == sorted([own.sha256, orphan.sha256])   # not the unknown sha
+    assert store.exists(shared) and store.exists(other)   # r2 still names shared
+    assert not store.exists(own) and not store.exists(orphan)
+    assert store.read_events("r2")[1].output_ref == other
+
+
+def test_purge_run_of_an_unknown_run_is_a_conflict_and_writes_nothing(store):
+    _two_runs_sharing_a_blob(store)
+    with pytest.raises(ConflictError):
+        store.purge_run("nope", expected_seq=4)
+    assert store.list_run_ids() == ["r1", "r2"]

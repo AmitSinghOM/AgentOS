@@ -11,7 +11,7 @@ policy, no keyring) and **not detectable in-log** (the one gap no in-log scheme 
 truncation after the last seal; the tool reports the uncovered tail). A chokepoint in none
 of these is a bug.
 
-Each row names the test that pins the direction (88 rows). `tests/test_fail_modes.py` checks that
+Each row names the test that pins the direction (91 rows). `tests/test_fail_modes.py` checks that
 every cited test exists, so this table cannot quietly outlive the code. Phase 8 #11;
 the operator policy ceiling (#2) is scoped against this table.
 
@@ -135,3 +135,6 @@ log) is untouched by it.
 | `agentos verify` | Any run's chain or seal fails | **closed** | Exit 1, the run named with the reason | `tests/test_seal_and_cli.py::test_verify_passes_on_a_good_store_and_fails_on_a_tampered_run` |
 | `agentos doctor` | Store unreachable | **closed** | Exit 1 on the first check; nothing else attempted | `tests/test_seal_and_cli.py::test_doctor_fails_when_the_store_is_unreachable` |
 | `agentos doctor` | Auth asserted / policy unset / keyring unset | **warn** | Reported as warnings, exit 0 — unconfigured is not broken | `tests/test_seal_and_cli.py::test_doctor_reports_configuration_and_every_run` |
+| `agentos archive --yes` | Export fails: disk full, unwritable `--out`, the file does not read back, or the process dies before the purge | **closed** | Nothing is purged: `Store.purge_run` runs only after `<run_id>.jsonl` is written, fsynced, re-read and counted. A `.part` is removed, so no incomplete `.jsonl` and no manifest row is left; the re-run is idempotent (same clock, same bytes) | `tests/test_archive_runs.py::test_a_failed_export_purges_nothing_and_leaves_no_file`, `tests/test_archive_runs.py::test_a_crash_between_export_and_purge_leaves_the_run_and_the_rerun_finishes` |
+| `agentos archive --yes` | A candidate run's chain or seals fail verify | **closed for the purge; exported** | Exported with `chain.verified: false` so the auditor has the record as stored, KEPT in the store (never destroy the only evidence of a tampering), listed under `kept` with the reason, manifest row `purged: false`, exit 1 | `tests/test_archive_runs.py::test_a_tampered_run_is_exported_but_kept_and_reported`, `tests/test_archive_runs.py::test_a_rechained_run_whose_seal_fails_is_kept_too` |
+| `agentos archive --yes` | A run the fold does not call terminal — including one whose index row says it is | **closed** | Skipped (`non-terminal` / `index drift`), never exported, never touched; the index only picks candidates, the fold decides. Something appended between export and purge refuses the purge (`expected_seq`) | `tests/test_archive_runs.py::test_a_non_terminal_run_is_skipped_even_with_yes`, `tests/test_archive_runs.py::test_the_decision_is_made_on_the_fold_not_the_index_row`, `tests/contract/test_store_contract.py::test_purge_run_removes_every_row_of_one_run_only_at_the_expected_seq` |

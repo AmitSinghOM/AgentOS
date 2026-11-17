@@ -12,7 +12,7 @@ history should read like a real project, because it is one.
 Every ⏭ checkbox below that is still open, in one place. Each line names the phase whose row
 carries the design; the rows stay as history. No GitHub issues exist for these (audit W3-23).
 
-- **A7** `KeyStore` port + crypto-shredding erasure (`RunErased`) — Phase 2; the signed tail half shipped in Phase 8 #3
+- **A7** `KeyStore` port + crypto-shredding erasure (`RunErased`) — Phase 2; the signed tail half shipped in Phase 8 #3; the retention half (audit E-08) shipped as `agentos archive` (#PR_ARCHIVE): rows leave the store only after an export file holds them, so disk is bounded but nothing is *erased* — the erasure half stays open
 - **A8** `protocols/` adapter layer: MCP / A2A adapters still open; the function-calling round trip shipped for `openai-compat` ([#148](https://github.com/AmitSinghOM/AgentOS/pull/148)) — Phase 2, Phase 6
 - **A4** filesystem `BlobStore` adapter (SQLite, Postgres, Memory exist) — Phase 1
 - Redaction, general pre-append pass (#7; the `tool` executor's half shipped in #137) — Phase 8
@@ -31,7 +31,9 @@ Shipped since the 2026-11-12 audit and no longer open: A12 global pause (#138), 
 reconnect (#135), tool-output byte caps + `${NAME}` redaction (#137), scheduled CI (#134),
 PyPI matrix (#132), ADRs 0006–0009 (`docs/adr/`, this sweep), A11 `agentos export-run`
 ([#149](https://github.com/AmitSinghOM/AgentOS/pull/149)), the Hypothesis property suite and
-Toxiproxy Layer 2 scenarios 2–5 ([#152](https://github.com/AmitSinghOM/AgentOS/pull/152), audit E-12).
+Toxiproxy Layer 2 scenarios 2–5 ([#152](https://github.com/AmitSinghOM/AgentOS/pull/152), audit E-12),
+E-08 retention `agentos archive` (#PR_ARCHIVE; export-then-purge of terminal runs older than a
+cutoff, manifest, never on an unverified chain — A7 erasure still open).
 
 ---
 
@@ -151,7 +153,7 @@ cancel/pause, agent versioning. Items marked ⏭ carried forward — see the dat
   - [x] `pg_latency_under_fanout` — [#152](https://github.com/AmitSinghOM/AgentOS/pull/152): 200 ms latency added when the first branch of n1 → [n2, n3, n4] → n5 starts and kept for the run; every step completes once, no retry or dead-letter, the three branches overlap in wall time, n5's inputs are all three branch outputs, total time bounded (C4)
   - [x] `partition_during_approval_grant` — [#152](https://github.com/AmitSinghOM/AgentOS/pull/152): the real API over the proxied store serves `POST …/approve` and the link is cut just before / just after the grant's append; the client sees 500 either way; the retry is 202 (grant lands once) or 409 `is granted` (the cut call was the grant); never two `approval.granted`, the gated step runs once after the grant, the recovery sweep resumes the run (C7)
   - [x] `restart_after_partial_wave` — [#152](https://github.com/AmitSinghOM/AgentOS/pull/152): a real worker process on the lagging proxied link is `os._exit(137)`'d at `after_effect_commit:n2` mid fan-out (n3/n4 started, uncommitted); a second real process on the direct link resumes from the log: n2 never started again, n3/n4 re-attempted exactly once, n5 ran once and saw all three branch outputs (C1, C4, C6)
-- [ ] ⏭ **A7** crypto-shredding: per-run data key in a `KeyStore` port; erasure = destroy key + `RunErased` event; log stays append-only
+- [ ] ⏭ **A7** crypto-shredding: per-run data key in a `KeyStore` port; erasure = destroy key + `RunErased` event; log stays append-only. Retention (not erasure) shipped as `agentos archive` (#PR_ARCHIVE, audit E-08): export-then-purge of terminal runs older than a cutoff, `Store.purge_run` in one transaction, `ARCHIVE.jsonl` manifest, a run that fails verify is exported but kept; `docs/REPLAY.md` "Archiving runs" states the boundary
 - [~] **A8** `agentos/protocols/`: tools described by JSON Schema; MCP / A2A / vendor function-calling are adapters; tool results are data, never prompt. Function-calling round trip shipped for `openai-compat` ([#148](https://github.com/AmitSinghOM/AgentOS/pull/148)): registry tools offered by declared effect class, a call outside that set rejected (never run) and recorded `rejected: true`, results wrapped as data, bounded by `max_tool_rounds`, recorded like the SDK harnesses. ⏭ MCP / `protocols/` adapter still open
 - [x] **A12** global pause (shipped 2026-11-16, [#138](https://github.com/AmitSinghOM/AgentOS/pull/138)): `agentos pause --all` / `resume --all` / `pause --status`. Not `SchedulerPaused` run events as first sketched — a deployment-wide fact in a run log would break per-run replay — but a store-level append-only `scheduler_state` history (migration 3; who / why / when; newest row is the state). The engine reads it before every wave, so in-flight steps finish and nothing new dispatches (`?sync=true` included); the worker pulls nothing and the sweep re-enqueues nothing; runs are neither cancelled nor individually paused; an unreadable flag counts as paused (fail-closed); `GET /scheduler` is read-only
 

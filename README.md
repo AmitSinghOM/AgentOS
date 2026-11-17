@@ -360,6 +360,8 @@ agentos resume --all                #   individually; parked runs continue on th
 agentos init demo                   # a minimal project: .env, agent.json, workflow.json, README
 agentos run workflow.json --agents agent.json   # one run, in-process, to a terminal state (exit 3 = suspended)
 agentos export-run --run <id> --format jsonl --include-blobs --out run.jsonl   # a file for an auditor / evaluator
+agentos archive --older-than 30d --out ./archive          # dry run: which terminal runs WOULD leave the store
+agentos archive --older-than 30d --out ./archive --yes    # export each to <run_id>.jsonl, check it, then purge
 ```
 
 `agentos export-run` hands a run to an auditor or an external evaluator (opik, langfuse) as JSON
@@ -368,6 +370,15 @@ referenced blobs with `--include-blobs`, and the fold's own status and cost. Age
 never scores. `--all` is one stream with a header per run. A run that fails verification is still
 exported, marked `verified: false`, and the exit is 1. Format and versioning rule:
 `docs/REPLAY.md`, "Exporting a run".
+
+`agentos archive` is the bound on disk, and the only path that removes rows: every terminal run
+last updated before the cutoff is exported with the same writer, fsynced and read back, and only
+then purged in one transaction (events, snapshot, queue and lease rows, the run row; blobs only
+with `--include-blobs`, and only those no remaining run references). `ARCHIVE.jsonl` in the
+output dir records each file's sha256. A run whose chain or seals fail is exported but **kept**
+(exit 1); non-terminal runs are never touched; the default is a dry run. The export file is then
+the record, and this is retention, not erasure — crypto-shredding (A7) is still open.
+`docs/REPLAY.md`, "Archiving runs".
 
 The pause is one store-level fact (`scheduler_state`, an append-only history with who/why/when),
 never a run event, so per-run replay stays deterministic. The engine reads it before every wave

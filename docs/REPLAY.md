@@ -145,7 +145,76 @@ inputs from its blob lines, and asserts the result equals the live `GET /runs/{i
 external evaluator can reconstruct a run's state from the file alone.
 
 Read-only against the store: nothing is appended and nothing enters a run log. Out of scope
-here: a TTL / archive setting and erasure (A7 crypto-shredding), and importing a file back.
+here: erasure (A7 crypto-shredding) and importing a file back. A bound on disk is the next
+section.
+
+## Archiving runs (E-08): export, then purge
+
+An append-only log has no delete, so disk grows without bound. `agentos archive` is the one
+path that removes rows from a store, and it is the export above followed by a purge — never
+the reverse, and never for a run that is still live or that fails verification.
+
+```bash
+agentos archive --older-than 30d --out ./archive            # dry run (default): what WOULD leave
+agentos archive --older-than 30d --out ./archive --yes      # export, check, purge
+agentos archive --older-than 90d --status failed,cancelled --out ./archive --include-blobs --yes
+```
+
+**Mechanism** (`dagentos.export.archive_runs`, `Store.purge_run`). The run index picks the
+candidates — status terminal (`completed`, `failed`, `cancelled`; `--status` narrows), last
+updated before now minus `--older-than` — oldest first; nothing is decided on the index. For
+each candidate:
+
+1. Re-read the log, judge the chain and seals (`chain_state`), fold it. A run the fold does not
+   call terminal, or whose last event is not older than the cutoff, is skipped as `index drift`.
+2. Write the A11 export to `<out>/<run_id>.jsonl.part` (0600), fsync, read it back the way an
+   auditor will (every line parses, the header names the run, events are seq 1..n, the summary
+   agrees), rename to `<out>/<run_id>.jsonl`, fsync the directory. A `.jsonl` in the archive
+   dir is therefore always a complete, checked file. `--include-blobs` writes the referenced
+   blobs into it, as `export-run` does.
+3. Only if `chain.verified` is true: `Store.purge_run(run_id, expected_seq=n)` removes the run's
+   events, snapshot, queue and lease rows and the run row in **one transaction**, refusing if
+   the log's last seq is no longer `n` (a retry on a failed run appended since). With
+   `--include-blobs` the run's referenced blobs are named too, and each is deleted **only if no
+   remaining run's stored record contains its sha256** — blobs are content-addressed and shared
+   (a pricing table, identical inputs), so the reference check is a scan of the remaining
+   records, done inside the same transaction. Without `--include-blobs` no blob is touched.
+4. Append one row to `<out>/ARCHIVE.jsonl` (0600, append-only, fsynced): `{"kind":
+   "agentos.archive", "version": 1, "run_id", "exported_at", "file", "sha256", "bytes",
+   "events", "status", "chain_verified", "purged", "blobs_removed"}`. The manifest is how an
+   operator proves what left the store and when; `sha256` is of the file as written.
+
+A run whose chain or seals do **not** verify is exported (step 2) and then **kept**: the store
+never loses the only evidence of a tampering. It is listed under `kept`, its manifest row says
+`purged: false`, stderr names it, and the exit is 1. Non-terminal runs are never read, exported
+or touched — they are listed as `skipped (non-terminal)`. Dry run (the default) makes every
+decision and writes nothing: `--yes` performs.
+
+**Afterwards.** The run is simply gone from the store: `GET /runs/{id}` (and `/events`,
+`/integrity`) answer 404, `GET /runs` and its `counts` no longer list it, `agentos verify --all`
+and `doctor` no longer see it, and its `Idempotency-Key` is released (a client replaying the
+original start request would start a *new* run). **The export file is the record**: it re-folds
+to the run the API served before the purge
+(`tests/test_archive_runs.py::test_yes_exports_then_purges_and_the_file_refolds_to_the_pre_purge_run`).
+Keep `<out>` where you keep the database backups. Without `--include-blobs` the file references
+inputs and outputs by hash only and the blobs stay in the store.
+
+**Failure ordering** (`docs/FAIL_MODES.md`, "archive" rows). Export fails → nothing purged, no
+`.jsonl`, no manifest row. Process dies between the rename and the purge → the file exists,
+the run is still in the store, no manifest row claims it left; the re-run exports the same
+bytes (same `exported_at` → same sha256) and finishes. A `.jsonl` present with no manifest row
+means exactly that window: the purge did not happen (or the row's write did not land) — the
+run is either still in the store or the file is its complete record; `agentos verify --run`
+tells which.
+
+**Privacy and erasure boundary.** Archive is *retention*, not *erasure*. The rows leave the
+store, but the exported file still holds every event, every input and output it referenced
+(with `--include-blobs`, their bytes), and the manifest holds the run id. Deleting that file is
+an operator act outside AgentOS and leaves no proof. True erasure — a per-run data key in a
+`KeyStore` port so that destroying the key makes the stored bytes unreadable while the log stays
+append-only and hash-chained, recorded as a `RunErased` event — is ROADMAP **A7** and is still
+open. Until then: a deletion request is served by `archive --yes --include-blobs` for the run's
+cohort plus deletion of the exported file, and the chain of custody ends at that deletion.
 
 ## The run index is derived, never replayed (E-07)
 
@@ -168,3 +237,4 @@ status, and `agentos doctor` compares the stored rows with the fold on a live st
 - Tamper-evidence of those facts: `TRUST_BOUNDARY.md` §2.
 - Snapshots (C15, #15): see the section above.
 - Taking a run away as a file: "Exporting a run (A11)" above.
+- Bounding disk without breaking the log: "Archiving runs (E-08)" above.

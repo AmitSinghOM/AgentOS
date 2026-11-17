@@ -17,6 +17,11 @@
     agentos export-run --run ID | --all    one run (or every run, one stream) as JSON Lines for
         --format jsonl [--out PATH|-]      an auditor or evaluator: header, events as stored,
         [--include-blobs]                  fold summary; exit 1 if a chain fails verify (A11)
+    agentos archive --older-than 30d       bound disk: export every terminal run last updated
+        --out DIR [--status completed,..]  before the cutoff to DIR/<run_id>.jsonl, read it back,
+        [--include-blobs] [--dry-run|--yes] then purge its rows; DIR/ARCHIVE.jsonl records each.
+                                           Dry run by default; a run whose chain fails verify is
+                                           exported but KEPT (exit 1); non-terminal never touched
 
 All of them read the same environment as the API and the worker (`dagentos.store.factory`,
 `AGENTOS_POLICY`, `AGENTOS_SIGNING_KEYS`, `AGENTOS_AUTH`). Exit status is 0 only when nothing
@@ -29,11 +34,12 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from dagentos.core.events import SchedulerState
@@ -51,7 +57,7 @@ from dagentos.core.models import (
 from dagentos.core.policy import OperatorPolicy, apply_ceiling, executor_allowed, policy_sha256
 from dagentos.core.ports import ConflictError
 from dagentos.core.seal import HmacKeyring, verify_seals
-from dagentos.export import write_run
+from dagentos.export import TERMINAL_STATUSES, ArchiveReport, archive_runs, write_run
 from dagentos.store import migrations
 from dagentos.store.factory import store_from_env
 
@@ -512,6 +518,79 @@ def cmd_export_run(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+# ------------------------------------------------------------------ archive (E-08)
+
+def _now() -> datetime:
+    """The archive's clock (cutoff and `exported_at`); one seam so tests can set it."""
+    return datetime.now(UTC)
+
+
+_DURATION = re.compile(r"^(\d+)([mhdw])$")
+_UNITS = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
+
+
+def _duration(text: str) -> timedelta:
+    """`--older-than`: an integer and one unit — m(inutes), h(ours), d(ays), w(eeks)."""
+    m = _DURATION.match(text)
+    if m is None:
+        raise ValueError(f"--older-than expects <N>m|h|d|w (e.g. 30d), got {text!r}")
+    return timedelta(**{_UNITS[m.group(2)]: int(m.group(1))})
+
+
+def _statuses(text: str | None) -> list[RunStatus]:
+    """`--status`: a comma-separated subset of the terminal statuses; default all of them."""
+    if text is None:
+        return list(TERMINAL_STATUSES)
+    allowed = {s.value: s for s in TERMINAL_STATUSES}
+    chosen = [part.strip() for part in text.split(",") if part.strip()]
+    bad = [c for c in chosen if c not in allowed]
+    if bad or not chosen:
+        raise ValueError(f"--status accepts {', '.join(allowed)} (comma-separated), got {text!r}")
+    return [allowed[c] for c in chosen]
+
+
+def _print_archive(report: ArchiveReport, older_than: str) -> None:
+    mode = "dry run" if report.dry_run else "archive"
+    verb = "would archive" if report.dry_run else "archived"
+    print(f"{mode}: runs last updated before {report.cutoff} (older than {older_than}) "
+          f"→ {report.out}")
+    for a in report.archived:
+        print(f"  {verb:<14} {a.run_id}  {a.status}  {a.events} events"
+              + (f"  → {a.file}" if a.file else "")
+              + (f"  {len(a.blobs_removed)} blob(s) removed" if a.blobs_removed else ""))
+    for k in report.kept:
+        print(f"  {'KEPT' if not report.dry_run else 'would keep':<14} {k.run_id}  "
+              f"chain unverified: {k.error}" + (f"  → {k.file}" if k.file else ""))
+    for s in report.skipped:
+        print(f"  {'skipped':<14} {s.run_id}  {s.status}  ({s.reason})")
+    print(f"{len(report.archived)} {verb}, {len(report.kept)} kept (chain unverified), "
+          f"{len(report.skipped)} skipped"
+          + (" — dry run: nothing written, nothing removed; add --yes to perform"
+             if report.dry_run else f"; manifest {report.manifest}" if report.manifest else ""))
+
+
+def cmd_archive(args: argparse.Namespace) -> int:
+    """Export-then-purge, dry run by default (dagentos.export.archive_runs). Exit 1 when a run
+    was exported but kept because its chain or seals failed: the store never loses the only
+    evidence of a tampering, and the operator is told which run to look at."""
+    older_than = _duration(args.older_than)
+    statuses = _statuses(args.status)
+    store = store_from_env()
+    now = _now()
+    report = archive_runs(store, store, Path(args.out), cutoff=now - older_than,
+                          statuses=statuses, include_blobs=args.include_blobs,
+                          keyring=_keyring(), dry_run=not args.yes,
+                          exported_at=now.isoformat(timespec="seconds"))
+    for kept in report.kept:
+        print(f"run {kept.run_id}: exported with verified=false, kept in the store: {kept.error}",
+              file=sys.stderr)
+    if args.json:
+        print(json.dumps(report.as_dict(), indent=2))
+    else:
+        _print_archive(report, args.older_than)
+    return 1 if report.failed else 0
+
+
 # ------------------------------------------------------------------ main
 
 def _emit(report: Report, args: argparse.Namespace) -> int:
@@ -574,6 +653,21 @@ def build_parser() -> argparse.ArgumentParser:
     exp.add_argument("--include-blobs", action="store_true",
                      help="append every referenced blob (inputs, outputs, pricing) as base64")
     exp.set_defaults(fn=cmd_export_run)
+    arc = sub.add_parser("archive", help="export terminal runs older than a cutoff to files, "
+                                         "then purge them from the store (dry run by default)")
+    arc.add_argument("--older-than", required=True, metavar="DURATION",
+                     help="runs last updated before now minus this: <N>m|h|d|w, e.g. 30d")
+    arc.add_argument("--out", required=True, metavar="DIR",
+                     help="archive directory (created 0700): <run_id>.jsonl per run + ARCHIVE.jsonl")
+    arc.add_argument("--status", default=None, metavar="LIST",
+                     help="comma-separated subset of completed,failed,cancelled (default: all)")
+    arc.add_argument("--include-blobs", action="store_true",
+                     help="write referenced blobs into each file and remove those no remaining "
+                          "run references; without it every blob stays in the store")
+    ag = arc.add_mutually_exclusive_group()
+    ag.add_argument("--dry-run", action="store_true", help="list what would leave (default)")
+    ag.add_argument("--yes", action="store_true", help="perform the export and the purge")
+    arc.set_defaults(fn=cmd_archive)
     return p
 
 
@@ -583,8 +677,9 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.fn(args)
-    except (RuntimeError, FileNotFoundError, ValueError) as exc:
-        # ValueError: a workflow/agent file that does not validate, or a DAG with a cycle
+    except (RuntimeError, OSError, ValueError) as exc:
+        # ValueError: a workflow/agent file that does not validate, or a DAG with a cycle;
+        # OSError: a file the command could not read or write (archive dir, export target)
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
