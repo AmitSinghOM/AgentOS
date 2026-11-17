@@ -14,6 +14,9 @@
     agentos run <workflow.json>            register the agents + workflow and advance one run
         [--agents a.json ...]              in-process to a terminal state (the API's `?sync=true`
         [--input k=v] [--store URL]        path, no server); exit 3 when it suspends for approval
+    agentos export-run --run ID | --all    one run (or every run, one stream) as JSON Lines for
+        --format jsonl [--out PATH|-]      an auditor or evaluator: header, events as stored,
+        [--include-blobs]                  fold summary; exit 1 if a chain fails verify (A11)
 
 All of them read the same environment as the API and the worker (`dagentos.store.factory`,
 `AGENTOS_POLICY`, `AGENTOS_SIGNING_KEYS`, `AGENTOS_AUTH`). Exit status is 0 only when nothing
@@ -27,6 +30,8 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,6 +51,7 @@ from dagentos.core.models import (
 from dagentos.core.policy import OperatorPolicy, apply_ceiling, executor_allowed, policy_sha256
 from dagentos.core.ports import ConflictError
 from dagentos.core.seal import HmacKeyring, verify_seals
+from dagentos.export import write_run
 from dagentos.store import migrations
 from dagentos.store.factory import store_from_env
 
@@ -455,6 +461,45 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 3 if run.status is RunStatus.suspended else 1
 
 
+# ------------------------------------------------------------------ export-run (A11 / E-08)
+
+@contextmanager
+def _export_target(path: str) -> Iterator:
+    """`-` is stdout. A file is created 0600, like the SQLite store: it holds run data."""
+    if path == "-":
+        yield sys.stdout
+        return
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with open(fd, "w", encoding="utf-8", newline="\n") as fh:
+        yield fh
+
+
+def cmd_export_run(args: argparse.Namespace) -> int:
+    """Read-only. A run whose chain or seals fail is STILL exported — an auditor needs the
+    tampered record too — with `chain.verified: false` in its header, and the exit is 1."""
+    store = store_from_env()
+    if args.run is not None and not store.read_events(args.run, limit=1):
+        print(f"unknown run {args.run!r}", file=sys.stderr)
+        return 2
+    run_ids = [args.run] if args.run is not None else store.list_run_ids()
+    keyring = _keyring()
+    exported_at = datetime.now(UTC).isoformat(timespec="seconds")
+    failed = False
+    with _export_target(args.out) as out:
+        for run_id in run_ids:
+            chain, missing = write_run(out, store, store, run_id, keyring=keyring,
+                                       include_blobs=args.include_blobs,
+                                       exported_at=exported_at)
+            if not chain["verified"]:
+                failed = True
+                print(f"run {run_id}: exported with verified=false: {chain['error']}",
+                      file=sys.stderr)
+            for sha in missing:
+                print(f"warning: run {run_id}: blob {sha} is referenced but not in the store",
+                      file=sys.stderr)
+    return 1 if failed else 0
+
+
 # ------------------------------------------------------------------ main
 
 def _emit(report: Report, args: argparse.Namespace) -> int:
@@ -506,6 +551,17 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--store", default=None, metavar="URL",
                      help="sqlite:///PATH | memory | postgresql://... (default: AGENTOS_STORE env)")
     run.set_defaults(fn=cmd_run)
+    exp = sub.add_parser("export-run", help="one run (or --all) as JSON Lines for auditors and "
+                                            "external evaluators")
+    eg = exp.add_mutually_exclusive_group(required=True)
+    eg.add_argument("--run", help="one run id")
+    eg.add_argument("--all", action="store_true", help="every run, one stream, oldest first")
+    exp.add_argument("--format", required=True, choices=["jsonl"], help="output format")
+    exp.add_argument("--out", default="-", metavar="PATH",
+                     help="file to write (created 0600); - for stdout (default)")
+    exp.add_argument("--include-blobs", action="store_true",
+                     help="append every referenced blob (inputs, outputs, pricing) as base64")
+    exp.set_defaults(fn=cmd_export_run)
     return p
 
 

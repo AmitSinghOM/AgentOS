@@ -359,7 +359,15 @@ agentos pause --status              #   nothing new dispatches, runs are not can
 agentos resume --all                #   individually; parked runs continue on the next tick
 agentos init demo                   # a minimal project: .env, agent.json, workflow.json, README
 agentos run workflow.json --agents agent.json   # one run, in-process, to a terminal state (exit 3 = suspended)
+agentos export-run --run <id> --format jsonl --include-blobs --out run.jsonl   # a file for an auditor / evaluator
 ```
+
+`agentos export-run` hands a run to an auditor or an external evaluator (opik, langfuse) as JSON
+Lines: a header with the chain verdict, every event exactly as stored (hashes included), the
+referenced blobs with `--include-blobs`, and the fold's own status and cost. AgentOS records,
+never scores. `--all` is one stream with a header per run. A run that fails verification is still
+exported, marked `verified: false`, and the exit is 1. Format and versioning rule:
+`docs/REPLAY.md`, "Exporting a run".
 
 The pause is one store-level fact (`scheduler_state`, an append-only history with who/why/when),
 never a run event, so per-run replay stays deterministic. The engine reads it before every wave
