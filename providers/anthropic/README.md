@@ -60,4 +60,5 @@ both providers on a runner and replays.
 
 ## Status
 
-`0.1.0`. MIT.
+Versioned with the core (`pyproject.toml` here matches the root; `docs/RELEASING.md`
+"Versions"). MIT.
