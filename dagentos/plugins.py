@@ -79,6 +79,6 @@ def store_pricing_snapshots(executors: dict[str, Executor], blobs) -> dict[str, 
         try:
             ref = blobs.put(fn(), media_type="application/json")
             stored[name] = ref.sha256
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — one provider's snapshot must not stop startup
             logger.warning("executor %r pricing snapshot not stored: %s", name, exc)
     return stored

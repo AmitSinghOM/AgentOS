@@ -80,7 +80,8 @@ def test_agent_code_may_change_between_attempts_without_breaking_replay():
 
     class NewDice(Dice):                               # different implementation resumes it
         def execute(self, req, progress):
-            random.random(); random.random()           # extra randomness, different code path
+            random.random()                            # extra randomness, different code path
+            random.random()
             return StepResult(output={"roll": 7, "version": 2},
                               effects=[Effect(effect_class=EffectClass.compute)], cost=Cost(),
                               provenance=Provenance(executor="dice", executor_version="v2"))

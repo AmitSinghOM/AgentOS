@@ -29,8 +29,10 @@ class CassetteMiss(RuntimeError):
 
 def request_key(method: str, url: str, body: bytes) -> str:
     h = hashlib.sha256()
-    h.update(method.upper().encode()); h.update(b"\n")
-    h.update(httpx.URL(url).raw_path); h.update(b"\n")
+    h.update(method.upper().encode())
+    h.update(b"\n")
+    h.update(httpx.URL(url).raw_path)
+    h.update(b"\n")
     try:  # canonicalise JSON so key order in the client never matters
         h.update(json.dumps(json.loads(body or b"{}"), sort_keys=True,
                             separators=(",", ":")).encode())

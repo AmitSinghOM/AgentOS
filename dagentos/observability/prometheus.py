@@ -13,8 +13,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 
-RunResolver = Callable[[str], "WorkflowRun | None"]
-
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     CollectorRegistry,
@@ -40,6 +38,8 @@ from dagentos.core.events import (
     StepStarted,
 )
 from dagentos.core.models import WorkflowRun
+
+RunResolver = Callable[[str], "WorkflowRun | None"]
 
 RUN_BUCKETS = (0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 3600, float("inf"))
 STEP_BUCKETS = (0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, float("inf"))

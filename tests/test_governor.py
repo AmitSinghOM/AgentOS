@@ -189,7 +189,9 @@ def test_progress_emits_again_after_interval():
     class Ticking(ScriptedExecutor):
         def execute(self, req, progress):
             self.calls.append(req.step_id)
-            progress(0.1, "a"); clock.t += PROGRESS_MIN_INTERVAL; progress(0.5, "b")
+            progress(0.1, "a")
+            clock.t += PROGRESS_MIN_INTERVAL
+            progress(0.5, "b")
             return self.results[req.agent.name]
 
     ex = Ticking({"a1": _result()})

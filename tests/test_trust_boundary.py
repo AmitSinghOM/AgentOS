@@ -150,13 +150,16 @@ def test_a_tampered_log_does_not_fold_and_the_api_says_so(monkeypatch, tamper):
         log[1]["agent"] = "attacker"                                 # step.started rewritten
         expect = "seq 2: content does not match"
     elif tamper == "insert":
-        forged = dict(log[1]); forged["seq"] = 2
+        forged = dict(log[1])
+        forged["seq"] = 2
         log.insert(1, forged)
-        for i, rec in enumerate(log, start=1): rec["seq"] = i        # renumber to look legal
+        for i, rec in enumerate(log, start=1):                       # renumber to look legal
+            rec["seq"] = i
         expect = "does not match"
     else:
         del log[2]                                                   # a step.completed gone
-        for i, rec in enumerate(log, start=1): rec["seq"] = i
+        for i, rec in enumerate(log, start=1):
+            rec["seq"] = i
         expect = "does not match"
     r = c.get(f"/runs/{run_id}/integrity").json()
     assert r["ok"] is False and expect in r["error"], r

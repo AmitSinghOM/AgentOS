@@ -178,7 +178,8 @@ def test_read_events_limit_pages_in_seq_order_on_every_adapter(store):
         if not page:
             break
         assert len(page) <= 5 and [e.seq for e in page] == list(range(after + 1, after + 1 + len(page)))
-        walked += page; after = page[-1].seq
+        walked += page
+        after = page[-1].seq
     assert [e.seq for e in walked] == list(range(1, n + 1))
     assert store.read_events(run_id, limit=None) == store.read_events(run_id)
     assert store.read_events(run_id, after_seq=n, limit=5) == []

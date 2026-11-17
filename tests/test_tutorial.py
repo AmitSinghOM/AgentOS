@@ -169,7 +169,7 @@ def test_tutorial_prose_quotes_the_numbers_the_test_pins():
     for needle in ("`202`", "`422`", "`403`", "`201`", "Seventeen events",
                    "`\"hashed\": 17`", "?at=9", "`at=5`", "`at=10`"):
         assert needle in text, f"tutorial no longer says {needle}"
-    for seq, event, step in TUTORIAL_LOG:
+    for seq, event, _step in TUTORIAL_LOG:
         if event.startswith("step."):
             continue                                         # grouped as 2–4 etc. in the table
         assert re.search(rf"^\| {seq} \| `{re.escape(event)}`", text, re.MULTILINE), \

@@ -62,6 +62,30 @@ providerkit = ["httpx>=0.27", "jsonschema>=4.20,<5"]
 line-length = 100
 target-version = "py311"
 
+# Audit I-23: with no `select`, ruff ran only its default E4/E7/E9/F set, so the
+# `# noqa: BLE001` comments on every deliberate `except Exception` boundary were inert and
+# nothing said so. BLE is now on (each boundary keeps its noqa + reason), RUF100 flags a
+# noqa that no longer suppresses anything, B/UP/I catch the mechanical mistakes.
+[tool.ruff.lint]
+select = ["E", "F", "B", "BLE", "UP", "I", "RUF100"]
+ignore = [
+    # 148 lines were over 100 columns when E501 first ran (I-23); reflowing them is a
+    # formatting pass, not a lint fix. Drop this line in the PR that reflows them.
+    "E501",
+    # The eight `class X(str, Enum)` models keep `str(X.A)` / f"{X.A}" == "X.A"; StrEnum would
+    # make both return the value. That is a behaviour change, so it is not applied by a linter.
+    "UP042",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# `pytest.importorskip(...)` / `sys.path.insert(...)` must run before the imports they enable.
+"tests/**" = ["E402", "B011"]           # B011: pytest never runs under -O, `assert False` is fine
+"providers/*/tests/**" = ["E402"]
+"providers/*/scripts/**" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dagentos"]
+
 [tool.pytest.ini_options]
 # The provider's tests live with the provider (its own distribution) but run from the
 # root too; they importorskip when the provider is not installed.
