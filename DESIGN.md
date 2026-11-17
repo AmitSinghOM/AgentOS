@@ -3,7 +3,10 @@
 > A control plane for orchestrating multi-step LLM agent workflows with
 > **durable execution**, **human-in-the-loop approvals**, and **full observability**.
 
-Status: Phase 0 shipped (`v0.1.0-skeleton`). This document drives the build; it is updated as decisions change.
+Status: written at Phase 0 (`v0.1.0-skeleton`); current release `v0.17.1` (Phase 10, `ROADMAP.md`).
+This document drives the build. Its architecture prose is kept as written; where a decision
+was later superseded, a dated banner at the top of the section points at the current source
+rather than rewriting the history.
 How the build is structured to outlive its dependencies and model generations is in
 [docs/DEVELOPMENT_STRUCTURE.md](./docs/DEVELOPMENT_STRUCTURE.md).
 
@@ -50,6 +53,15 @@ for every run.
   (the locking model already supports it).
 
 ## 3. Architecture
+
+> **Superseded (2026-11-16).** The diagram below is the Phase 0 plan. Since Phase 1 there is no
+> Redis: the run queue and the per-run lease are ports (`Queue`, `Lease` in
+> `dagentos/core/coordination.py`) with SQLite, Postgres and Memory adapters in the store, so
+> the event log, queue and leases share one system of record (ROADMAP Phase 1 "ADR note",
+> Phase 6 "dependencies removed"; `docker-compose.yml` has no redis service). Model vendors are
+> not in the core: the core ships `echo` and `tool` (`dagentos/agents/`); LLM executors are
+> `agentos-provider-*` plugins found through the `agentos.executors` entry point
+> (`docs/DEVELOPMENT_STRUCTURE.md` §2.2, ROADMAP Phase 4). Telemetry is as drawn.
 
 ```
                 ┌──────────────┐
@@ -124,6 +136,14 @@ without corruption."
 **Tradeoff:** A hash + lookup on the hot path. Negligible vs. an LLM call's latency.
 
 ### 4.3 Postgres = truth, Redis = speed
+
+> **Superseded (2026-11-16).** Redis was removed before it was ever required (ROADMAP Phase 1
+> "ADR note"; dependency dropped in Phase 6). Coordination state — the run queue, per-run
+> leases with fencing tokens, retry delays — lives in the same store as the log, behind the
+> `Queue` and `Lease` ports (`dagentos/core/coordination.py`); SQLite is the default,
+> Postgres the production adapter (`dagentos/store/factory.py`). The principle below ("one
+> source of truth; the log wins") is what survived.
+
 **Decision:** All durable state lives in Postgres. Redis holds only ephemeral
 coordination: per-run execution locks (exactly-one-worker), retry backoff timers, and a
 read cache. Redis can be flushed without data loss.
@@ -135,6 +155,14 @@ Redis and Postgres disagree, Postgres wins, always.
 faster but lossy). For a correctness-first control plane, that is the right call.
 
 ### 4.4 Human approval as a first-class suspended state
+
+> **Superseded in detail (2026-11-16).** As built (ROADMAP Phase 3): the gate suspends the run
+> *before* dispatch of a step whose declared effect class needs approval; the route is
+> `POST /runs/{run_id}/approvals/{approval_id}/approve` (and `…/reject`,
+> `dagentos/api/main.py`), with a typed `Principal` on every decision
+> (`docs/TRUST_BOUNDARY.md` §1); approvals live in the log, not a side table. The model
+> below — suspend, hold nothing, resume on an external decision — is unchanged.
+
 **Decision:** An approval node emits `ApprovalRequested` and the run transitions to
 `SUSPENDED` — the worker releases its lock and moves on. No thread or resource is held
 while waiting. An external `POST /runs/{id}/approve` appends `ApprovalGranted` and
@@ -147,6 +175,12 @@ not scale and does not survive restarts. Suspend-and-resume is the only correct 
 is why approvals are Phase 3, not Phase 1.
 
 ### 4.5 Single worker now, N workers by design
+
+> **Superseded in detail (2026-11-16).** The lock is the `Lease` port with fencing tokens
+> (`dagentos/core/coordination.py`; SQL adapters, no Redis), proven against a second worker
+> over Toxiproxy (ROADMAP Phase 1–2 chaos rows). The conclusion — more workers is a
+> deployment change — stands.
+
 **Decision:** v1 runs one worker, but coordination uses Redis execution locks keyed by
 `run_id`, so a run is only ever advanced by one worker at a time.
 
@@ -155,6 +189,14 @@ The hard part (exactly-once advancement) is solved from day one; horizontal scal
 deployment change, not an architecture change.
 
 ## 5. Data Model (PostgreSQL)
+
+> **Superseded (2026-11-16).** The tables as built, identical in SQLite and Postgres
+> (`dagentos/store/sqlite.py`, `dagentos/store/postgres.py`, `dagentos/store/migrations.py`):
+> `agent_versions`, `workflows`, `runs`, `leases`, `queue`, `run_events`, `blobs`,
+> `run_snapshots`, `scheduler_state`, `schema_migrations`. Approvals and per-step state are
+> folded from `run_events`, not stored in side tables (`dagentos/core/fold.py`); there are no
+> Redis keys. The one claim below that still holds is the one that matters: `run_events` is
+> the append-only source of truth.
 
 | Table | Purpose |
 |-------|---------|
@@ -170,6 +212,14 @@ deployment change, not an architecture change.
 `runcache:{id}` (folded-state cache).
 
 ## 6. Failure Modes & Handling
+
+> **Superseded (2026-11-16).** The authoritative table is `docs/FAIL_MODES.md`: every
+> chokepoint, which way it fails, and the test that pins it. Differences from the sketch
+> below: there is no Redis, so lease expiry and retry backoff are store facts (`leases`,
+> `queue.visible_at`); the client-side idempotency key is the `Idempotency-Key` header on
+> `POST /workflows/{name}/runs` (`dagentos/api/main.py`), not a `request_id` body field; a
+> poison step is `step.dead_lettered` with a human retry path
+> (`POST /runs/{id}/steps/{step}/retry`, ROADMAP Phase 2).
 
 | Failure | Behaviour |
 |---------|-----------|
@@ -191,6 +241,13 @@ were removed once the queue and leases lived in the store (Phase 1) — one syst
 decisions are battle-tested rather than tutorial-deep.)
 
 ## 8. What I would do next with more time
+
+> **Superseded (2026-11-16).** Two of the four shipped: time-travel debugging over the log is
+> the Phase 9 UI (`GET /runs/{id}?at=k`, `docs/UI.md` "Timeline and time travel", `v0.10.0`),
+> and cost ceilings that suspend a run for approval are Phase 3 (`Budget.max_run_cost`,
+> ROADMAP "Cost-ceiling suspension", `v0.4.0`). The worker pool and a code DSL remain ideas;
+> the current open list is ROADMAP "Open items".
+
 - Distributed worker pool + leader-less run claiming.
 - Workflow definition as code (decorator DSL) in addition to JSON.
 - Replay-based "time travel" debugging UI over the event log.
