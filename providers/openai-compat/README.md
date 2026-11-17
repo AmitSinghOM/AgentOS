@@ -134,12 +134,20 @@ The engine records each as `step.failed` → retries per the node's policy →
 
 `tests/` runs against **cassettes recorded from a real Ollama** (`qwen2.5:0.5b`, see each
 file's `source`), never the network. `tests/openai_reference_server.py` fakes specific status
-codes. Re-record: `python scripts/record_cassettes.py --live`. The function-calling
-cassette (`tool_round_trip.json`) is recorded from the reference server's scripted
-trajectory (`--tools`), not a live model, and the nightly job leaves it alone. The nightly
+codes. Re-record: `python scripts/record_cassettes.py --live`. Two function-calling
+cassettes: `tool_round_trip.json` is recorded from the reference server's scripted
+trajectory (`--tools`; `source: http://reference-server/v1`) so the gating and rejection
+paths a live model will not follow stay deterministic; `tool_round_trip_live.json` is
+recorded from a real model (`--tools --live`, the quickstart's `counter` agent on
+`qwen2.5:1.5b`; its `source` names server, model and Ollama version) and is the one fixture
+that saw a real server's `tool_calls` shape. Byte-identical re-records are not possible —
+Ollama assigns a random `tool_calls[].id` per response — so its replay test checks content
+(one clean `word_count` call, two turns, the right count), not bytes. The nightly
 [`provider-live`](../../.github/workflows/provider-live.yml) workflow installs Ollama on a
-runner, re-records, and re-runs the replay tests on the fresh recordings. If that job fails
-for 30 days this README gets a `deprecated` banner; the core is unaffected.
+runner, runs the live tool round trip for real (`AGENTOS_LIVE_TOOLS=1
+tests/test_openai_compat_live_tools.py`), re-records every live cassette including
+`tool_round_trip_live.json`, and re-runs the replay tests on the fresh recordings. If that
+job fails for 30 days this README gets a `deprecated` banner; the core is unaffected.
 
 ## Status
 
