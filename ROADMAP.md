@@ -14,7 +14,6 @@ carries the design; the rows stay as history. No GitHub issues exist for these (
 
 - **A7** `KeyStore` port + crypto-shredding erasure (`RunErased`) — Phase 2; the signed tail half shipped in Phase 8 #3
 - **A8** `protocols/` adapter layer: JSON-Schema tools, MCP / A2A / function-calling round trip — Phase 2, Phase 6
-- **A11** `agentos export-run --format jsonl` for external evaluators — Phase 3
 - **A4** filesystem `BlobStore` adapter (SQLite, Postgres, Memory exist) — Phase 1
 - Redaction, general pre-append pass (#7; the `tool` executor's half shipped in #137) — Phase 8
 - Sandbox around the `tool` subprocess (#8) — Phase 8
@@ -32,7 +31,8 @@ carries the design; the rows stay as history. No GitHub issues exist for these (
 
 Shipped since the 2026-11-12 audit and no longer open: A12 global pause (#138), D6 stream
 reconnect (#135), tool-output byte caps + `${NAME}` redaction (#137), scheduled CI (#134),
-PyPI matrix (#132), ADRs 0006–0009 (`docs/adr/`, this sweep).
+PyPI matrix (#132), ADRs 0006–0009 (`docs/adr/`, this sweep), A11 `agentos export-run`
+([#149](https://github.com/AmitSinghOM/AgentOS/pull/149)).
 
 ---
 
@@ -187,7 +187,7 @@ the dated decision.
 - [x] **C8** — per-step cost on `step.completed`; run cost = sum of step costs (Decimal); Prometheus + OTel only, no SaaS anywhere ([#8](https://github.com/AmitSinghOM/AgentOS/issues/8))
 - [x] **C12** — trust boundary on resume payloads and replayed events ([#12](https://github.com/AmitSinghOM/AgentOS/issues/12)) — **closed in Phase 5** (`v0.6.0-trusted`, `docs/TRUST_BOUNDARY.md`)
 - [x] **A9** OpenTelemetry GenAI semantic conventions (`gen_ai.*`) for spans; AgentOS-specific attributes under `agentos.*`; semconv version recorded on every span's resource
-- [ ] ⏭ **A11** `agentos export-run --format jsonl`: inputs/outputs by hash + provenance for external evaluators (opik); AgentOS records, never scores
+- [x] **A11** `agentos export-run --format jsonl` — shipped 2026-11-17 ([#149](https://github.com/AmitSinghOM/AgentOS/pull/149)): a header with the chain verdict, every event exactly as stored (hashes included, so the chain re-verifies from the file), referenced blobs on `--include-blobs`, the fold's status and cost; a tampered run still exports marked `verified: false` (exit 1); format and versioning rule in `docs/REPLAY.md`. AgentOS records, never scores
 
 **Demo:** run pauses at approval, approve from another terminal, run resumes; show the
 Jaeger trace and the cost breakdown.
@@ -225,7 +225,7 @@ test and run live for both.
 - [x] **DX bar**: `docs/quickstart-llm.md` (five minutes, no key) executed by `tests/test_quickstart_llm.py` against the recorded cassette AND run end-to-end against live Ollama with separate API + worker; `scripts/quickstart_llm.py` does steps 3–5 in one command; every provider error message says what to do (`ollama serve`, `ollama pull x`, set `AGENTOS_OPENAI_API_KEY`, available template keys); typed config with documented env defaults; provider README
 - [x] README screenshots (Jaeger span with `gen_ai.*`, Grafana) — done in Phase 5
 - [x] C12 executor-input trust boundary: tool results are data, never prompt — **closed in Phase 5** (`wrap_input` + `DATA_BOUNDARY`; the `protocols/` round trip is A8, still open)
-- [ ] ⏭ A11 `agentos export-run --format jsonl`
+- [x] A11 `agentos export-run --format jsonl` — shipped 2026-11-17 ([#149](https://github.com/AmitSinghOM/AgentOS/pull/149); Phase 3 row has the design)
 - [x] **Second provider** `agentos-provider-anthropic` (Anthropic Messages wire format; Ollama's `/v1/messages` as the free default) — proved the seam: different request shape, auth header, error envelope (529), no `response_format`; zero changes to the core or the first provider. Shared pieces extracted to `dagentos.providerkit` (cassettes, pricing, errors, templates, env config, conformance scenarios); the OpenAI provider refactored onto it
 - [x] Real `tool` agent (HTTP/subprocess) in core — landed after Phase 5 (v0.7.0 slice)
 
@@ -255,7 +255,7 @@ from a real two-process run, which also exposed and fixed cross-process observab
 - [x] README screenshots: Jaeger span with `gen_ai.*`, Grafana dashboard, from a real two-process run (`docs/images/`). Taking them exposed and fixed a real defect: the worker's observers never saw `run.started`, so Prometheus labelled everything `workflow="unknown"` and Jaeger got orphan step spans. Now: trace/run-span ids derive from the run id, observers resolve run facts from the store, run-level happenings are child spans, and the worker serves `/metrics` on `:8001`
 
 - [x] Real `tool` agent (HTTP/subprocess) in core (`dagentos/agents/tool.py`, v0.7.0 slice): operator-fixed url/argv, inputs only as query/json values or stdin JSON, `${ENV}` secrets redacted, effects by method/kind so the existing gate governs it, 1 MiB cap, egress guard (link-local never; private opt-in), process-group kill on timeout; results flow through `wrap_input`. Reviewed by the code-reviewer + security-reviewer pipeline (WARNING → fixed). ⏭ `protocols/` function-calling round trip (A8) still open
-- [ ] ⏭ A11 `agentos export-run --format jsonl`
+- [x] A11 `agentos export-run --format jsonl` — shipped 2026-11-17 ([#149](https://github.com/AmitSinghOM/AgentOS/pull/149); Phase 3 row has the design)
 - [x] A12 global pause — shipped 2026-11-16 as the store-level `scheduler_state` flag ([#138](https://github.com/AmitSinghOM/AgentOS/pull/138); Phase 2 row has the design)
 
 **Tag:** `v0.6.0-trusted`. **Post:** "Three Doors: Where Untrusted Bytes Meet an Agent Engine."
@@ -287,7 +287,7 @@ locking test.
 - [x] Unused `sqlalchemy` + `redis` dependencies and the compose redis service removed (queue and lease have been SQL adapters since Phase 1); import-linter still forbids them in the core
 - [x] Four-seat review (Staff / Product / Security / CTO) + code-reviewer skill + cqa-analyzer on the snapshot PR: 10 findings, 9 fixed each with a test, 1 cosmetic declined with reason; Design score 8.96 → 8.98
 - [ ] ⏭ A8 `protocols/` function-calling round trip
-- [ ] ⏭ A11 `agentos export-run --format jsonl`
+- [x] A11 `agentos export-run --format jsonl` — shipped 2026-11-17 ([#149](https://github.com/AmitSinghOM/AgentOS/pull/149); Phase 3 row has the design)
 - [x] A12 global pause — shipped 2026-11-16 as the store-level `scheduler_state` flag ([#138](https://github.com/AmitSinghOM/AgentOS/pull/138); Phase 2 row has the design)
 - [ ] ⏭ A7 KeyStore + signed chain tail (tail: done Phase 8 #3, `dagentos/core/seal.py`; KeyStore / crypto-shredding open)
 - [ ] ⏭ `advance()` cognitive complexity (cqa PY-MAINT-002) — a refactor PR, behaviour pinned by the golden corpus and chaos suite
@@ -758,7 +758,7 @@ are fixed above or closed by the tag; its remaining rows (streaming byte caps on
 the D6 reconnect, scheduled CI on `main`, repository security settings, a redaction pass,
 `agentos.db` permissions, documentation drift, tooling debt) are queued as its Waves 1–3, not
 dropped. Still open, unchanged: A7 `KeyStore` / erasure, A8 `protocols/` + MCP, A11
-`agentos export-run`, A12 global pause (since shipped 2026-11-16, [#138](https://github.com/AmitSinghOM/AgentOS/pull/138)), redaction (#7), sandbox (#8), sensitive paths (#9),
+`agentos export-run` (since shipped 2026-11-17, [#149](https://github.com/AmitSinghOM/AgentOS/pull/149)), A12 global pause (since shipped 2026-11-16, [#138](https://github.com/AmitSinghOM/AgentOS/pull/138)), redaction (#7), sandbox (#8), sensitive paths (#9),
 `agentos snapshot`, the Ed25519 signer through the seal seam, mid-step suspension (ACP
 `session/load`, SDK `needs_approval`), D6 (stream reconnect after one failed refetch; since shipped 2026-11-16, [#135](https://github.com/AmitSinghOM/AgentOS/pull/135)), D10
 (types-only OpenAPI codegen with a drift test), D2 (constraints file for the image build).
