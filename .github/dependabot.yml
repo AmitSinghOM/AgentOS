@@ -54,6 +54,12 @@ updates:
   - package-ecosystem: "docker"
     directory: "/"
     schedule: { interval: "weekly", day: "monday" }
+    # The image tracks python:3.12-slim on purpose: deploy/constraints.txt is hash-compiled
+    # for 3.12 and CI tests 3.11 and 3.14. Only digest/patch moves of that tag are automatic;
+    # a minor or major bump is a release decision (see docs/RELEASING.md).
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
-      docker-minor-patch:
-        update-types: ["minor", "patch"]
+      docker-patch:
+        update-types: ["patch"]
