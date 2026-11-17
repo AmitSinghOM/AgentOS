@@ -89,6 +89,20 @@ docker run --rm -p 127.0.0.1:8000:8000 -e AGENTOS_STORE=postgres -e AGENTOS_PG_D
 docker run --rm -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.11.0 python -m dagentos.worker
 ```
 
+## Reproducible image
+
+Every third-party distribution in the image, and `pip` itself, comes from `deploy/constraints.txt`:
+one exact version each with the sha256 of every file PyPI serves for it, installed with
+`pip install --require-hashes`; our own wheels then go in with `--no-deps`, so two builds of one
+tag install the same bytes and nothing outside the list can reach the image. The list is derived
+from `pyproject.toml` and `providers/*/pyproject.toml` by `scripts/refresh_constraints.py`
+(`uv pip compile --universal --generate-hashes` for Python 3.12, so one file serves amd64 and
+arm64). **Refresh it before every release and after any Dependabot `pip` group merges**: those
+move the floors the resolution starts from, and a dependency the file does not list fails the
+image build (`tests/test_packaging.py` checks every direct requirement is pinned, not the full
+resolution). `python scripts/refresh_constraints.py --check` reports whether the committed file
+is current. The `python:3.12-slim` digest is bumped by Dependabot (`docker` ecosystem).
+
 ## Local dry run
 
 ```bash

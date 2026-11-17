@@ -49,3 +49,11 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule: { interval: "weekly", day: "monday" }
+  # Audit I-21: the Dockerfile pins python:3.12-slim by digest; without this ecosystem the
+  # digest only ever moved by hand (last 2026-09-20).
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule: { interval: "weekly", day: "monday" }
+    groups:
+      docker-minor-patch:
+        update-types: ["minor", "patch"]
