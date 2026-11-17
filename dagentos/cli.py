@@ -9,6 +9,11 @@
     agentos pause --all [--reason ..]      kill switch: workers finish in-flight steps and
     agentos resume --all                   dispatch nothing new until resumed; runs are not
     agentos pause --status                 cancelled or paused individually (A12 / E-03)
+    agentos init <dir>                     a minimal project: .env, agent.json, workflow.json,
+                                           README.md — the quick start's files (E-04)
+    agentos run <workflow.json>            register the agents + workflow and advance one run
+        [--agents a.json ...]              in-process to a terminal state (the API's `?sync=true`
+        [--input k=v] [--store URL]        path, no server); exit 3 when it suspends for approval
 
 All of them read the same environment as the API and the worker (`dagentos.store.factory`,
 `AGENTOS_POLICY`, `AGENTOS_SIGNING_KEYS`, `AGENTOS_AUTH`). Exit status is 0 only when nothing
@@ -24,12 +29,22 @@ import os
 import sys
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 
 from dagentos.core.events import SchedulerState
 from dagentos.core.fold import FoldError, fold
 from dagentos.core.integrity import IntegrityError, verify
-from dagentos.core.models import Budget, EffectClass, Principal, PrincipalKind, WorkflowDefinition
+from dagentos.core.models import (
+    Agent,
+    Budget,
+    EffectClass,
+    Principal,
+    PrincipalKind,
+    RunStatus,
+    WorkflowDefinition,
+)
 from dagentos.core.policy import OperatorPolicy, apply_ceiling, executor_allowed, policy_sha256
+from dagentos.core.ports import ConflictError
 from dagentos.core.seal import HmacKeyring, verify_seals
 from dagentos.store import migrations
 from dagentos.store.factory import store_from_env
@@ -317,6 +332,129 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return _set_scheduler(args, paused=False)
 
 
+# ------------------------------------------------------------------ init / run (E-04)
+
+# The README quick start's two example files (examples/echo_agent.json, hello_workflow.json),
+# embedded because the wheel ships `dagentos/` only; tests/test_cli_init.py pins them equal.
+INIT_AGENT = {"name": "greeter", "type": "echo", "config": {"message": "hello from agentos"}}
+INIT_WORKFLOW = {"name": "hello", "nodes": [{"id": "a", "agent": "greeter", "depends_on": []},
+                                            {"id": "b", "agent": "greeter", "depends_on": ["a"]}]}
+INIT_ENV = """\
+# Store: AGENTOS_STORE=memory|sqlite|postgres (default sqlite -> ./agentos.db, AGENTOS_SQLITE_PATH)
+AGENTOS_STORE=sqlite
+# Authentication. `asserted` records the principal a request claims, UNVERIFIED (fine on your
+# laptop; the API warns at startup). Before anyone else can reach the API switch to bearer:
+# tokens resolve to principals through a file of SHA-256 hashes (README "Authentication").
+AGENTOS_AUTH=asserted
+# AGENTOS_AUTH=bearer
+# AGENTOS_AUTH_TOKENS=./tokens.json
+"""
+INIT_README = """\
+# AgentOS demo
+
+`agent.json` is an `echo` agent; `workflow.json` runs it twice, `b` after `a`.
+
+```bash
+agentos run workflow.json --agents agent.json      # one run, in-process, to a terminal state
+uvicorn dagentos.api.main:app                      # or the API ... (reads .env via your shell)
+python -m dagentos.worker                          # ... with a worker, in another terminal
+```
+
+`agentos run` exits 0 when the run completed, 3 when it suspended for a human's approval
+(decide at http://127.0.0.1:8000/ui once the API is up), 1 when a step failed.
+"""
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    target = Path(args.dir)
+    if target.exists() and any(target.iterdir()):
+        print(f"error: {target} is not empty; refusing to overwrite", file=sys.stderr)
+        return 2
+    target.mkdir(parents=True, exist_ok=True)
+    (target / ".env").write_text(INIT_ENV)
+    (target / "agent.json").write_text(json.dumps(INIT_AGENT, indent=2) + "\n")
+    (target / "workflow.json").write_text(json.dumps(INIT_WORKFLOW, indent=2) + "\n")
+    (target / "README.md").write_text(INIT_README)
+    print(f"wrote {target}/{{.env, agent.json, workflow.json, README.md}}\n"
+          f"next: cd {target} && agentos run workflow.json --agents agent.json")
+    return 0
+
+
+def _store_from_arg(url: str | None):
+    """`--store sqlite:///path | memory | postgresql://...`; unset → the environment, as the
+    API and worker read it."""
+    if url is None:
+        return store_from_env()
+    if url == "memory":
+        from dagentos.store.memory import MemoryStore
+        return MemoryStore()
+    if url.startswith("sqlite:///"):
+        from dagentos.store.sqlite import SqliteStore
+        return SqliteStore(url[len("sqlite:///"):])
+    if url.startswith(("postgresql://", "postgres://")):
+        from dagentos.store.postgres import PostgresStore
+        return PostgresStore(url)
+    raise RuntimeError(f"--store must be sqlite:///PATH, memory or postgresql://..., got {url!r}")
+
+
+def _inputs(pairs: list[str]) -> dict:
+    out = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key:
+            raise RuntimeError(f"--input expects KEY=VALUE, got {pair!r}")
+        out[key] = value
+    return out
+
+
+def _engine(store):
+    """The API's composition (dagentos/api/main.py) minus observers: built-in executors plus
+    discovered plugins, the operator ceiling and keyring when the environment names them."""
+    from dagentos.agents.echo import EchoExecutor
+    from dagentos.agents.tool import ToolExecutor
+    from dagentos.core.engine import Engine
+    from dagentos.core.models import AgentType
+    from dagentos.plugins import discover_executors
+    executors = {AgentType.echo.value: EchoExecutor(), AgentType.tool.value: ToolExecutor(),
+                 **discover_executors()}
+    return Engine(store=store, blobs=store, executors=executors,
+                  lease=store if hasattr(store, "acquire") else None,
+                  policy=_policy(), keyring=_keyring())
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    store = _store_from_arg(args.store)
+    inputs = _inputs(args.input)
+    for path in args.agents:
+        agent = Agent.model_validate_json(Path(path).read_text())
+        try:
+            store.put_agent(agent)                 # identical re-post is a no-op (API rule)
+        except ConflictError as exc:
+            raise RuntimeError(f"{path}: {exc}") from exc
+    wf = WorkflowDefinition.model_validate_json(Path(args.workflow).read_text())
+    wf.validate_dag()
+    store.put_workflow(wf)
+    run = _engine(store).start_run(wf.name, principal=_operator(None), inputs=inputs or None)
+    events = len(store.read_events(run.id))
+    pending = sum(1 for a in run.approvals.values() if a.status.value == "pending")
+    if args.json:
+        print(json.dumps({"run_id": run.id, "status": run.status.value, "events": events,
+                          "pending_approvals": pending,
+                          "dead_lettered": run.dead_lettered, "failed_steps": run.failed_steps}))
+    else:
+        print(f"run {run.id}: {run.status.value}, {events} events")
+        if run.status is RunStatus.suspended:
+            print(f"  suspended: {pending} approval(s) pending — decide in the UI or with "
+                  f"POST /runs/{run.id}/approvals/{{approval_id}}/approve")
+        for step_id, cause in run.dead_lettered.items():
+            print(f"  step {step_id} dead-lettered: {cause}")
+        for step_id, error in run.failed_steps.items():
+            print(f"  step {step_id} failed: {error}")
+    if run.status is RunStatus.completed:
+        return 0
+    return 3 if run.status is RunStatus.suspended else 1
+
+
 # ------------------------------------------------------------------ main
 
 def _emit(report: Report, args: argparse.Namespace) -> int:
@@ -356,6 +494,18 @@ def build_parser() -> argparse.ArgumentParser:
     re_.add_argument("--reason", default="", help="why (recorded with the change)")
     re_.add_argument("--principal", default=None, help="operator name to record (default system:cli)")
     re_.set_defaults(fn=cmd_resume)
+    ini = sub.add_parser("init", help="write a minimal project (.env, agent.json, workflow.json)")
+    ini.add_argument("dir", help="target directory; must not exist or be empty")
+    ini.set_defaults(fn=cmd_init)
+    run = sub.add_parser("run", help="register agents + workflow and advance one run in-process")
+    run.add_argument("workflow", help="workflow definition JSON file")
+    run.add_argument("--agents", nargs="+", default=[], metavar="FILE",
+                     help="agent definition JSON file(s) to register first")
+    run.add_argument("--input", action="append", default=[], metavar="KEY=VALUE",
+                     help="run input, reaches steps as {run.KEY}; repeatable")
+    run.add_argument("--store", default=None, metavar="URL",
+                     help="sqlite:///PATH | memory | postgresql://... (default: AGENTOS_STORE env)")
+    run.set_defaults(fn=cmd_run)
     return p
 
 
@@ -365,7 +515,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.fn(args)
-    except (RuntimeError, FileNotFoundError) as exc:
+    except (RuntimeError, FileNotFoundError, ValueError) as exc:
+        # ValueError: a workflow/agent file that does not validate, or a DAG with a cycle
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
