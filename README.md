@@ -454,7 +454,8 @@ store, the auth mode and `agentos doctor --json`, with a reminder to redact.
 Report vulnerabilities privately through GitHub's Security Advisory form; scope, supported
 versions and response times are in [`SECURITY.md`](SECURITY.md). Dependabot watches every
 distribution, the UI and the workflow actions; CI runs `pip-audit --strict` and
-`npm audit --audit-level=high` on every pull request. Release artifacts carry build
+`npm audit --audit-level=high --omit=dev` (what ships in `ui/dist`; the dev tree is reported, not
+blocking) on every pull request. Release artifacts carry build
 provenance (`gh attestation verify`).
 
 ## License
