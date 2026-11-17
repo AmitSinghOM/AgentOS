@@ -7,33 +7,37 @@ history should read like a real project, because it is one.
 > Rule: do not start phase N+1 until phase N is demoable and tagged. Earn scope by
 > finishing.
 
-## Open items (as of 2026-11-16, after [#138](https://github.com/AmitSinghOM/AgentOS/pull/138))
+## Open items (as of 2026-11-18, after `v0.18.0`)
 
 Every ⏭ checkbox below that is still open, in one place. Each line names the phase whose row
 carries the design; the rows stay as history. No GitHub issues exist for these (audit W3-23).
 
 - **A7** `KeyStore` port + crypto-shredding erasure (`RunErased`) — Phase 2; the signed tail half shipped in Phase 8 #3; the retention half (audit E-08) shipped as `agentos archive` ([#153](https://github.com/AmitSinghOM/AgentOS/pull/153)): rows leave the store only after an export file holds them, so disk is bounded but nothing is *erased* — the erasure half stays open
-- **A8** `protocols/` adapter layer: MCP / A2A adapters still open; the function-calling round trip shipped for `openai-compat` ([#148](https://github.com/AmitSinghOM/AgentOS/pull/148)) — Phase 2, Phase 6
+- **A8** `protocols/` adapter layer: MCP / A2A adapters still open; the function-calling round trip shipped for `openai-compat` ([#148](https://github.com/AmitSinghOM/AgentOS/pull/148), live cassette + nightly [#154](https://github.com/AmitSinghOM/AgentOS/pull/154)) — Phase 2, Phase 6
 - **A4** filesystem `BlobStore` adapter (SQLite, Postgres, Memory exist) — Phase 1
+- OIDC / SSO-backed approver identity (deferred in Phase 8 #1: a bearer token names an operator today, "OIDC is the second authenticator") — Phase 8
 - Redaction, general pre-append pass (#7; the `tool` executor's half shipped in #137) — Phase 8
 - Sandbox around the `tool` subprocess (#8) — Phase 8
 - Sensitive-path check on subprocess cwd/args and HTTP-derived paths (#9) — Phase 8
-- `agentos snapshot` (store + blobs export) — Phase 8 #4
+- `agentos snapshot` (store + blobs export; `export-run` covers the log, not the store) — Phase 8 #4
 - Token-level streaming via an executor hook — Phase 7
 - Mid-step suspension on SDK `needs_approval` / ACP `session/load` (persist `RunState` as a blob + resume protocol) — Phase 7, Phase 10
 - Chaos, Layer 1: `coordination_reset_mid_run`, `pg_connection_drop_mid_txn` — Phase 1 (the Hypothesis property test shipped, see below)
 - `advance()` cognitive-complexity refactor (cqa PY-MAINT-002), behaviour pinned by golden corpus + chaos suite — Phase 6
 - Ed25519 signer through the seal seam (today HMAC only) — Phase 8 #3, Phase 10
-- **D2** constraints file for the image build (reproducible third-party wheels) — Production pass 2
 - **D10** types-only OpenAPI client codegen with a drift test — Phase 10
 
-Shipped since the 2026-11-12 audit and no longer open: A12 global pause (#138), D6 stream
+Shipped in `v0.18.0` (Phase 11 below) and no longer open: A12 global pause (#138), D6 stream
 reconnect (#135), tool-output byte caps + `${NAME}` redaction (#137), scheduled CI (#134),
-PyPI matrix (#132), ADRs 0006–0009 (`docs/adr/`, this sweep), A11 `agentos export-run`
+PyPI matrix (#132), ADRs 0006–0009 (`docs/adr/`, #141), A11 `agentos export-run`
 ([#149](https://github.com/AmitSinghOM/AgentOS/pull/149)), the Hypothesis property suite and
 Toxiproxy Layer 2 scenarios 2–5 ([#152](https://github.com/AmitSinghOM/AgentOS/pull/152), audit E-12),
 E-08 retention `agentos archive` ([#153](https://github.com/AmitSinghOM/AgentOS/pull/153); export-then-purge of terminal runs older than a
-cutoff, manifest, never on an unverified chain — A7 erasure still open).
+cutoff, manifest, never on an unverified chain — A7 erasure still open), E-07 run index
+([#151](https://github.com/AmitSinghOM/AgentOS/pull/151), migration 4), D2 hash-pinned constraints
+for the image ([#140](https://github.com/AmitSinghOM/AgentOS/pull/140); CI still resolves floors on
+purpose, so the daily run catches a drift), E-04 `agentos init` / `run` (#142), I-23/I-24 ruff rule
+set + mypy baseline gate (#139).
 
 ---
 
@@ -664,7 +668,10 @@ the five UI majors closed with reasons, then lifted here. No majors are currentl
 **Declared bound, not fixed (D2):** the image resolves third-party wheels from PyPI at build
 time under our `>=` floors, so two builds of the same tag can differ and the attestation
 covers floating inputs. The fix is a constraints file used by the image and CI only (a
-library must not pin), with a refresh process — its own slice.
+library must not pin), with a refresh process — its own slice. *Shipped for the image in
+`v0.18.0` ([#140](https://github.com/AmitSinghOM/AgentOS/pull/140), `deploy/constraints.txt`,
+`--require-hashes`); CI keeps resolving floors on purpose so the daily run on `main` catches a
+drift (#134).*
 
 ---
 
@@ -760,10 +767,139 @@ dropped. Still open, unchanged: A7 `KeyStore` / erasure, A8 `protocols/` + MCP, 
 `agentos export-run` (since shipped 2026-11-17, [#149](https://github.com/AmitSinghOM/AgentOS/pull/149)), A12 global pause (since shipped 2026-11-16, [#138](https://github.com/AmitSinghOM/AgentOS/pull/138)), redaction (#7), sandbox (#8), sensitive paths (#9),
 `agentos snapshot`, the Ed25519 signer through the seal seam, mid-step suspension (ACP
 `session/load`, SDK `needs_approval`), D6 (stream reconnect after one failed refetch; since shipped 2026-11-16, [#135](https://github.com/AmitSinghOM/AgentOS/pull/135)), D10
-(types-only OpenAPI codegen with a drift test), D2 (constraints file for the image build).
+(types-only OpenAPI codegen with a drift test), D2 (constraints file for the image build; since shipped 2026-11-17, [#140](https://github.com/AmitSinghOM/AgentOS/pull/140)).
 Every ⏭ item remains a checkbox, not a deletion. The consolidated list is "Open items" at the top of this file.
 
 **Tag:** `v0.17.0`.
+
+---
+
+## Phase 11 — Hardening, operability, run index, archive, function calling  ·  ✅ shipped `v0.18.0` (2026-11-18)
+**Goal:** close every blocker row of the 2026-11-12 audit, pay down the tooling and supply-chain
+debt it listed, and add the operability it ranked highest: an incident kill switch, a run index
+behind a server-side filter, a run export an auditor can take away, retention that purges only
+what it has exported and verified, and function calling on the plain OpenAI-compatible provider.
+Three waves, 21 merged PRs, 75 commits. Release note:
+[`docs/releases/v0.18.0.md`](docs/releases/v0.18.0.md).
+
+*Wave 1 — audit blockers*
+
+- [x] **Scheduled CI** ([#134](https://github.com/AmitSinghOM/AgentOS/pull/134); I-11). Daily
+  run on `main` (`37 4 * * *`), `concurrency.group` keyed by `github.event_name` so a schedule and
+  a push cannot cancel each other; the nightly `provider-live` installs and replays all five
+  provider suites. A floor drift now fails on `main` within a day instead of on a stranger's PR.
+- [x] **Wave 1 hardening** ([#136](https://github.com/AmitSinghOM/AgentOS/pull/136); I-10,
+  I-15, I-18, I-16/I-37, I-42). A worker thread that dies mid-test fails the test
+  (`filterwarnings = error::PytestUnhandledThreadExceptionWarning`); `agentos.db` created `0600`
+  (`os.open(O_CREAT, 0o600)` before `sqlite3.connect`; WAL/SHM inherit it); `AGENTOS_PG_SCHEMA`
+  validated as `^[a-z_][a-z0-9_]{0,62}$` before any connection; `/metrics` documented as open with
+  what its labels carry, open-path lists corrected in `SECURITY.md` and `TRUST_BOUNDARY.md`; the
+  image installs the acp provider wheel, pinned by a test that derives the set from `providers/*`.
+- [x] **Tool executor: byte caps while streaming, redaction of substituted secrets**
+  ([#137](https://github.com/AmitSinghOM/AgentOS/pull/137); I-08, I-14). http via `c.stream()` +
+  `iter_bytes()` counted after decompression; subprocess via a `selectors` pump (stdin drained,
+  stdout in 64 KiB chunks, stderr as a 64 KiB tail, `killpg` past the cap). Every value filled in
+  for a `${NAME}` reference (8+ chars) becomes `[REDACTED:NAME]` in the recorded output, headers,
+  stderr tail, error text and progress notes; `output.redactions` names what was removed; the
+  outgoing request keeps the real value; steps that substitute nothing record verbatim. Control-
+  plane row 7's tool half. FAIL_MODES 80 → 84.
+- [x] **UI stream reconnect** ([#135](https://github.com/AmitSinghOM/AgentOS/pull/135); I-09 /
+  D6). A failed refetch after a server stream close is a stream *error* (retried, counted, backed
+  off), never `closed` on a run the server has not called terminal. UI tests 99 → 101.
+- [x] **Global pause** ([#138](https://github.com/AmitSinghOM/AgentOS/pull/138); A12 / E-03).
+  `agentos pause --all | resume --all | pause --status`; one store-level, append-only
+  `scheduler_state` history (**migration 3**), newest row wins, read through the `Store` port —
+  not a run event, because replay is per run (the first sketch's `SchedulerPaused` events were
+  rejected for that reason). Engine gate at every wave boundary (so `?sync=true` honours it),
+  worker gate before `pull` and in `recover()`; frozen, not drained (approval expiry waits too);
+  fail-closed on a store fault; `GET /scheduler` read-only, 405 on writes, so a stolen API token
+  cannot un-pause. FAIL_MODES 84 → 87.
+
+*Wave 2 — tooling, supply chain, docs, community*
+
+- [x] **Lint and typing** ([#139](https://github.com/AmitSinghOM/AgentOS/pull/139); I-23, I-24).
+  ruff `E F B BLE UP I RUF100` (191 findings → 0; E501 and UP042 ignored with reasons), `py.typed`
+  in `dagentos` and all five providers, `[tool.mypy]` + `mypy-baseline.txt` (40 errors in 14
+  files, none fixed here) + `scripts/typecheck_gate.py` (new error → exit 1, line numbers
+  ignored) + the CI `typecheck` job (mypy 2.4.1 pinned; ninth check).
+- [x] **Supply chain** ([#140](https://github.com/AmitSinghOM/AgentOS/pull/140),
+  [#145](https://github.com/AmitSinghOM/AgentOS/pull/145),
+  [#146](https://github.com/AmitSinghOM/AgentOS/pull/146); I-22, I-21/E-20, D2). Every CI
+  action pinned by commit SHA with its tag in a comment; the Ollama installer checksummed
+  before it runs; the model input reaches the shell through `env:` only; **`deploy/constraints.txt`**
+  (70 hash-pinned third-party distributions + `pip`, `uv pip compile --universal` for 3.12) with
+  `--require-hashes` in the Dockerfile and `--no-deps` for our wheels; `scripts/refresh_constraints.py
+  --check`; Dependabot `docker` ecosystem, patch digests only.
+- [x] **Docs drift sweep** ([#141](https://github.com/AmitSinghOM/AgentOS/pull/141);
+  I-29…I-45, W3-23). The "Open items" list at the top of this file; five stale ⏭ rows ticked;
+  `DESIGN.md` status line + dated Superseded banners; `DEVELOPMENT_STRUCTURE.md` real toolchain
+  and layout; `docs/LANDSCAPE.md` public extract; **ADRs 0006–0009** reconstructed in
+  `docs/adr/`; UI / TRUST / triggers / notifications / provider READMEs / RELEASING /
+  `.env.example` corrected against the code.
+- [x] **Community hygiene + `agentos init` / `run`** ([#142](https://github.com/AmitSinghOM/AgentOS/pull/142);
+  I-36, E-04). `CONTRIBUTING.md` (install line extracted from `ci.yml` by the test), issue forms,
+  PR template, README badges and `/ui` screenshot. `agentos init <dir>` writes `.env`,
+  `agent.json`, `workflow.json`, README; `agentos run <workflow.json>` drives `Engine.start_run`
+  in-process (exit 0 completed / 3 suspended / 1 failed / 2 usage). The first five minutes are
+  three commands.
+- [x] **npm audit gate scope** ([#150](https://github.com/AmitSinghOM/AgentOS/pull/150)).
+  Blocking step `--omit=dev` (the three runtime deps in `ui/dist`); full tree as a `::warning`.
+  Ordered by picomatch GHSA-fc5q-39xc-vjpf (dev only, no fix published).
+- [x] **Dependencies** ([#130](https://github.com/AmitSinghOM/AgentOS/pull/130),
+  [#144](https://github.com/AmitSinghOM/AgentOS/pull/144),
+  [#147](https://github.com/AmitSinghOM/AgentOS/pull/147)): npm minor/patch group (vite 8.3.8,
+  user-event 14.6.10), `upload-artifact` 7.0.2, `python:3.12-slim` digest.
+
+*Wave 3 — operability*
+
+- [x] **Run index** ([#151](https://github.com/AmitSinghOM/AgentOS/pull/151); E-07).
+  **Migration 4**: `runs.status`, `pending_approvals`, `indexed_seq`, `updated_at` + two indexes,
+  written by `run_index.index_events` *inside every append transaction*, backfilled and caught up
+  in `migrate()`; the fold never reads it and nothing that decides anything does. `Store.list_runs`
+  / `run_status_counts`; `GET /runs?status=&workflow=&cursor=` with `next_cursor` + `counts`
+  (cursor on `created_at`, never `updated_at`); `/approvals` and the sweep fold only what the index
+  lists; `doctor` gains a `runs index` drift row; UI chips, workflow filter and Load more are
+  server-side. SQLite migrations atomic. FAIL_MODES 87 → 88. Closes the Production-pass
+  "declared bound" on `runs.status`.
+- [x] **`agentos export-run`** ([#149](https://github.com/AmitSinghOM/AgentOS/pull/149); A11 /
+  E-08, E-06). JSON Lines: header with the chain verdict, every event as stored (canonical lines
+  that re-hash with stdlib), optional blob lines, fold summary; exit 1 on a failed chain *and the
+  run is still exported*; `0600`; byte-identical re-export. `dagentos/export.py` over the core
+  ports. E-06: `SECURITY.md` / `TRUST_BOUNDARY.md` say that `execute_code` runs with the worker's
+  privileges and the ACP agent inherits the worker's environment.
+- [x] **`agentos archive`** ([#153](https://github.com/AmitSinghOM/AgentOS/pull/153); E-08
+  second half). `--older-than <N>m|h|d|w --out DIR [--status] [--include-blobs] [--dry-run|--yes]`.
+  Export → fsync → read back → rename → **then** `Store.purge_run(expected_seq=n)` in one
+  transaction, only if `chain.verified`; unverified → exported, kept, exit 1; non-terminal or index
+  drift → never touched; blobs removed only when no remaining run references them;
+  `ARCHIVE.jsonl` manifest. Retention, not erasure (A7 stays open). FAIL_MODES 88 → 91.
+- [x] **Function calling on `openai-compat`** ([#148](https://github.com/AmitSinghOM/AgentOS/pull/148),
+  [#154](https://github.com/AmitSinghOM/AgentOS/pull/154); A8 / E-17). `config.tools` /
+  `tool_choice` / `max_tool_rounds`; only tools whose effect class the step declared are offered
+  (`ToolRegistry.select`, the harnesses' rule); a call outside the offer or failing validation is
+  **rejected** and recorded `rejected: true`, never run; results return as delimited data; bounded
+  rounds; recorded like the SDK harnesses (hashes, `tools_offered`/`tools_withheld`, `turns`,
+  summed usage). `TOOL_NOTE` lifts clean calls on a 3B model from 4/10 to 8/10. #154: the one
+  cassette recorded from a real model (`qwen2.5:1.5b`) and a nightly live tool round trip on a
+  second model (`model_tools`). MCP / A2A (`protocols/`) stays ⏭.
+- [x] **Property + chaos tests** ([#152](https://github.com/AmitSinghOM/AgentOS/pull/152); E-12).
+  `tests/property/`: six Hypothesis properties over random DAGs, failures and operator
+  interleavings (fold determinism at every `?at=k`, snapshot path, chain tamper → `FoldError`,
+  idempotent start, topological order, cycle/dangling errors); ~1300 examples, five engine
+  mutations caught. `tests/chaos/network/` scenarios 2–5 on Toxiproxy (partition mid-step before /
+  after commit, latency under fan-out, partition around the approval grant, real-process restart
+  after a partial wave). Phase 1's Hypothesis row and Phase 2's network class are ticked.
+
+**What this changes in the plan.** Every blocker row of the 2026-11-12 audit is closed. The
+items that stay open are the ones that need a design decision or a dependency the stance
+refuses today, consolidated in "Open items" at the top: A7 erasure (`KeyStore`, crypto-shredding),
+A8's `protocols/` half (MCP / A2A), OIDC / SSO approver identity, Ed25519 through the seal seam,
+the `tool` sandbox (#8) and sensitive-path check (#9), the general pre-append redaction pass (#7),
+mid-step suspension, `agentos snapshot`, token-level streaming, A4 filesystem `BlobStore`, the
+Layer 1 `coordination_reset_mid_run` / `pg_connection_drop_mid_txn` fault points, the `advance()`
+refactor, D10 codegen. Every ⏭ item remains a checkbox, not a deletion.
+
+**Tag:** `v0.18.0`.
 
 ---
 

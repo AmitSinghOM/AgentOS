@@ -12,7 +12,7 @@ commit SHA because it holds `id-token: write`.
 | Import package | `dagentos` | same as the distribution since v0.11.0 (`pip install dagentos` → `import dagentos`). v0.9.0–v0.10.0 shipped as `agentos-durable` with import package `agentos`; those releases stay as published |
 | PyPI distributions (providers) | `agentos-provider-openai-compat`, `-anthropic`, `-openai-agents`, `-pydantic-ai`, `-acp` | each depends on `dagentos[providerkit]` |
 | Image | `ghcr.io/amitsinghom/agentos:{version,latest}` | GitHub namespace; multi-arch (amd64, arm64) |
-| Console script | `agentos` | `verify` / `doctor` / `policy explain` |
+| Console script | `agentos` | `verify` / `doctor` / `policy explain` / `pause` / `resume` / `init` / `run` / `export-run` / `archive` |
 
 Documented install path: `pip install "dagentos[providerkit]" agentos-provider-openai-compat`.
 
@@ -68,13 +68,13 @@ forward with a new patch version.
 
 ```bash
 # provenance of a wheel (Sigstore-signed SLSA attestation produced by the release run)
-gh attestation verify dagentos-0.17.1-py3-none-any.whl --owner AmitSinghOM
+gh attestation verify dagentos-0.18.0-py3-none-any.whl --owner AmitSinghOM
 
 # provenance of the image
-gh attestation verify oci://ghcr.io/amitsinghom/agentos:0.17.1 --owner AmitSinghOM
+gh attestation verify oci://ghcr.io/amitsinghom/agentos:0.18.0 --owner AmitSinghOM
 
 # the release's SHA256SUMS matches what pip downloaded
-pip download --no-deps dagentos==0.17.1 -d /tmp/dl && (cd /tmp/dl && sha256sum *)
+pip download --no-deps dagentos==0.18.0 -d /tmp/dl && (cd /tmp/dl && sha256sum *)
 ```
 
 ## What the image is
@@ -85,9 +85,9 @@ non-root user `agentos` (uid 10001); `/var/lib/agentos` volume for the default S
 `CMD` is the API; `python -m dagentos.worker` is the worker; the `agentos` CLI is on `PATH`.
 
 ```bash
-docker run --rm ghcr.io/amitsinghom/agentos:0.17.1 agentos --help
-docker run --rm -p 127.0.0.1:8000:8000 -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.17.1
-docker run --rm -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.17.1 python -m dagentos.worker
+docker run --rm ghcr.io/amitsinghom/agentos:0.18.0 agentos --help
+docker run --rm -p 127.0.0.1:8000:8000 -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.18.0
+docker run --rm -e AGENTOS_STORE=postgres -e AGENTOS_PG_DSN=... ghcr.io/amitsinghom/agentos:0.18.0 python -m dagentos.worker
 ```
 
 ## Reproducible image
@@ -112,6 +112,6 @@ pip install build==1.2.2.post1 twine==7.0.0 packaging==26.3
 rm -rf dist && python -m build --outdir dist . && for p in providers/*/; do python -m build --outdir dist "$p"; done
 python -m twine check --strict dist/*
 python -m venv /tmp/smoke && /tmp/smoke/bin/pip install "$(ls dist/dagentos-*.whl)[providerkit]" dist/agentos_provider_*.whl
-/tmp/smoke/bin/python scripts/release_smoke.py 0.17.1
+/tmp/smoke/bin/python scripts/release_smoke.py 0.18.0
 docker build -t agentos:local .            # needs the wheels in dist/
 ```

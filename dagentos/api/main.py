@@ -109,7 +109,7 @@ def max_body_bytes_from_env() -> int:
 
 max_body_bytes = max_body_bytes_from_env()
 
-app = FastAPI(title="AgentOS", version="0.17.1")
+app = FastAPI(title="AgentOS", version="0.18.0")
 
 
 @app.middleware("http")

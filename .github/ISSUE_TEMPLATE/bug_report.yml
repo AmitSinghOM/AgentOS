@@ -16,7 +16,7 @@ body:
     attributes:
       label: Version
       description: "`pip show dagentos` (Version line) or the image tag; add `pip show agentos-provider-*` for any provider involved"
-      placeholder: "dagentos 0.17.1"
+      placeholder: "dagentos 0.18.0"
     validations:
       required: true
   - type: dropdown
