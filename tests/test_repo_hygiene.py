@@ -67,7 +67,7 @@ def test_contributing_describes_the_ci_gate():
     assert install in text, install                       # the same install line as the test job
     for needle in ("ruff check .", "lint-imports", "pytest -q --ignore=tests/chaos", "-p no:asyncio",
                    "importorskip", "docs/FAIL_MODES.md", "docs/RELEASING.md", "SECURITY.md",
-                   "Node", "22", "3.11"):
+                   "Node", "22", "3.11", "mypy-baseline.txt", "BLE001"):
         assert needle in text, needle
 
 

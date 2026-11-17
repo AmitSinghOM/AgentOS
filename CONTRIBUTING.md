@@ -23,11 +23,29 @@ this repository; their tests only run when they are installed (below).
 ## Run the gate locally
 
 ```bash
-ruff check .                              # style + the rules in pyproject [tool.ruff]
+ruff check .                              # E, F, B, BLE, UP, I, RUF100 (pyproject [tool.ruff.lint])
 lint-imports                              # layering contract: the core imports no adapter or SDK
+mypy --no-error-summary | sort > /tmp/mypy.txt; python scripts/typecheck_gate.py mypy-baseline.txt /tmp/mypy.txt
 pytest -q --ignore=tests/chaos            # the suite CI runs on 3.11 and 3.14
 pytest -v tests/chaos --ignore=tests/chaos/network   # the fault points (the `chaos` job)
 ```
+
+On lint and types:
+
+- `ruff` selects `E, F, B, BLE, UP, I, RUF100`; `E501` (line length) and `UP042` (`StrEnum`)
+  are ignored with the reasons written next to them in `pyproject.toml`. `I` is import order —
+  `ruff check --fix --select I` sorts a new module for you. `BLE` means every deliberate
+  `except Exception` boundary carries `# noqa: BLE001  # <why this boundary swallows>`, and
+  `RUF100` fails a `noqa` that no longer suppresses anything.
+- `mypy` is in the `dev` extra and runs non-strict over `dagentos` only (`[tool.mypy]`). The CI
+  `typecheck` job is not count-based: `scripts/typecheck_gate.py` fails only on an error line
+  that is **not** in the committed `mypy-baseline.txt` (line numbers ignored), so fixing an old
+  error is fine and adding a new one is not. Refresh the baseline with
+  `mypy --no-error-summary | sort > mypy-baseline.txt` only in a PR that fixes types, never to
+  silence a new error. CI pins `mypy==2.4.1`; use the same version locally or a newer mypy's extra
+  checks will look like regressions.
+- Every package ships `py.typed` (`dagentos/`, each `providers/*/agentos_provider_*/`), which is
+  the promise behind the `Typing :: Typed` classifier — keep public signatures annotated.
 
 Three things that bite on a laptop:
 
