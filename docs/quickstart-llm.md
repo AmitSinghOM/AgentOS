@@ -114,6 +114,32 @@ curl -s -X POST 'localhost:8000/workflows/haiku/runs?sync=true' -H 'Content-Type
      -d '{"inputs": {"topic": "event logs"}}' | python -m json.tool
 ```
 
+### Letting the model call a tool
+
+The same provider runs a function-calling round trip. Name registered tools in
+`config.tools`; the two built-ins (`word_count` and `utc_now`, effect class `compute`) need
+no plugin:
+
+```json
+{"name": "counter", "type": "llm", "executor": "openai-compat",
+ "declared_effects": ["compute"],
+ "config": {"model": "chat.default",
+            "system": "Count the words with the word_count tool, then reply with the number.",
+            "prompt": "How many words are in {run.topic}?",
+            "tools": ["word_count"], "max_tool_rounds": 2}}
+```
+
+Use a model that emits tool calls: `chat.default` is `llama3.2:3b` (`ollama pull
+llama3.2:3b`); a 0.5B model rarely does. The model is offered only the tools whose effect
+class the agent declares. A call to anything else (a withheld tool, or a name nobody
+registered) is refused, never run, and the model is told why so it can still answer.
+Each call lands on `step.completed` under `output.tool_calls`: name, call id, SHA-256 of
+the arguments and of the output, and `rejected: true` on a refused one. `turns` counts the
+model calls and `usage` is summed over every round. A model still asking for tools after
+`max_tool_rounds` rounds (default 4) fails the step with `ToolError`. Register your own
+tools with the `agentos.tools` entry point (`dagentos/providerkit/tools.py`); the rules are
+in `providers/openai-compat/README.md` under "Tools".
+
 ## 6. Same agents, a different wire format (optional)
 
 There is a second provider, `anthropic`, which speaks the Anthropic Messages API — and

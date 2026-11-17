@@ -32,6 +32,52 @@ or `python scripts/quickstart_llm.py` against a running API.
 | `temperature` / `seed` | deterministic by default so cassettes replay | `0` / `42` |
 | `max_tokens` | | server default |
 | `json_output` | request a JSON object; parsed into `output.json` | `false` |
+| `tools` | registered tool names the model may call (see [Tools](#tools)) | none |
+| `tool_choice` | sent as-is alongside the offered tools (`auto`, `none`, `required`, or a named function) | server default |
+| `max_tool_rounds` | how many rounds of tool calls the model may ask for | `4` |
+
+## Tools
+
+The function-calling round trip on the plain OpenAI wire format, with the same registry and
+the same rules as the two SDK harnesses (`openai-agents`, `pydantic-ai`):
+
+```json
+{"name": "counter", "type": "llm", "executor": "openai-compat",
+ "declared_effects": ["compute"],
+ "config": {"model": "chat.default",
+            "system": "Count the words with the word_count tool, then reply with the number.",
+            "prompt": "How many words are in {run.topic}?",
+            "tools": ["word_count"], "max_tool_rounds": 2}}
+```
+
+- **Tools are the operator's.** `config.tools` names entries of the shared registry
+  (`dagentos/providerkit/tools.py`): two built-ins, `word_count` and `utc_now` (class
+  `compute`), plus whatever the `agentos.tools` entry point registers. An unknown name is a
+  definition error listing what is registered. Each tool's JSON Schema is derived from its
+  type-annotated signature and docstring.
+- **Offered by declared effect class.** The model is sent, as OpenAI `tools`, only the
+  named tools whose effect class the agent declares; the rest are `tools_withheld`.
+- **The rejection rule.** When a response carries `tool_calls`, each call is checked before
+  anything runs. A call to a tool that was not offered (withheld, or a name nobody
+  registered) is **rejected**: the function is never called, and the refusal (which tool,
+  which class, what is offered) goes back as that call's tool result so the model can still
+  answer. Arguments must fit the signature (unknown keys refused); a misfit is rejected the
+  same way and the model may retry. A rejected call reports no effect when the tool was not
+  offered; an offered tool refused for its arguments still reports its class, as the SDK
+  harnesses do.
+- **Results are data.** An executed tool's return value goes back as a `role: tool`
+  message wrapped in `<input name="tool.NAME">…</input>`, the delimiter every input uses (C12).
+- **Bounded.** A model still asking for tools after `max_tool_rounds` rounds fails the step
+  with `ToolError` naming the cap; so does a tool that raises (naming the tool). The step's
+  retry policy decides what happens next.
+
+What is recorded when `tools` is set: `tool_calls` (one entry per call: `name`, `call_id`,
+`arguments_sha256`, `output_sha256`, and `rejected: true` with the refusal's hash in place
+of an output), `tools_offered`, `tools_withheld`, `turns` (model calls), `usage` summed
+over every round, a `model_requests` meter, and one `Effect` per distinct offered tool
+called. The prompt hash covers the offered schemas. Without `tools` the request and the
+output are unchanged. Mid-step approval is out of scope, as on the harnesses: a step that
+declares an approval-required class is suspended by the governor before this executor runs.
 
 ## Environment
 
@@ -54,7 +100,8 @@ plugin rather than refusing to start.
 `priced`, and `json` when requested. `cost`: `input_tokens`, `output_tokens`, `requests`
 meters, a Decimal `amount`, and `pricing_snapshot_hash` — the table's bytes are stored in
 the BlobStore at startup (`GET /blobs/{hash}`). `provenance`: `openai-compat`, package
-version, concrete `model_id`, `model_alias`, `prompt_hash`. Effects: `compute` only.
+version, concrete `model_id`, `model_alias`, `prompt_hash`. Effects: `compute`, plus
+one per tool called (see [Tools](#tools)).
 
 ## Aliases and substitution (§11 A3)
 
@@ -73,6 +120,7 @@ steps are never re-run.
 | `ProviderRateLimited` / `ProviderServerError` | 429 / 5xx / timeout | the node's retry policy applies |
 | `TemplateError` | `{x.y}` not in inputs | the keys that *are* available |
 | `BadResponse` | malformed body or non-JSON when `json_output` | what came back |
+| `ToolError` | the model is still calling tools after `max_tool_rounds`, or a tool raised | the cap to raise, or the tool that failed |
 
 The engine records each as `step.failed` → retries per the node's policy →
 `step.dead_lettered` with the message as the cause.
@@ -81,7 +129,9 @@ The engine records each as `step.failed` → retries per the node's policy →
 
 `tests/` runs against **cassettes recorded from a real Ollama** (`qwen2.5:0.5b`, see each
 file's `source`), never the network. `tests/openai_reference_server.py` fakes specific status
-codes. Re-record: `python scripts/record_cassettes.py --live`. The nightly
+codes. Re-record: `python scripts/record_cassettes.py --live`. The function-calling
+cassette (`tool_round_trip.json`) is recorded from the reference server's scripted
+trajectory (`--tools`), not a live model, and the nightly job leaves it alone. The nightly
 [`provider-live`](../../.github/workflows/provider-live.yml) workflow installs Ollama on a
 runner, re-records, and re-runs the replay tests on the fresh recordings. If that job fails
 for 30 days this README gets a `deprecated` banner; the core is unaffected.
