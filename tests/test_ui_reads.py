@@ -31,7 +31,7 @@ def test_runs_list_is_newest_first_clamped_and_summarised(monkeypatch):
     assert body[0]["status"] == "suspended" and body[0]["pending_approvals"] == 1
     assert body[1]["status"] == "completed" and body[1]["pending_approvals"] == 0
     assert set(body[0]) == {"id", "workflow", "workflow_version", "status", "total_cost",
-                            "last_seq", "started_at", "pending_approvals"}
+                            "last_seq", "started_at", "updated_at", "pending_approvals"}
     assert len(c.get("/runs", params={"limit": 1}).json()["data"]) == 1
     assert len(c.get("/runs", params={"limit": 0}).json()["data"]) == 1        # clamped to 1
     assert len(c.get("/runs", params={"limit": 10000}).json()["data"]) == 2    # clamped to 500

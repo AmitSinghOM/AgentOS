@@ -8,14 +8,22 @@ import heapq
 import json
 import threading
 import time
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from dagentos.core.coordination import LeaseToken
 from dagentos.core.events import Event, RunStarted, SchedulerState, from_record
-from dagentos.core.models import Agent, BlobRef, WorkflowDefinition
+from dagentos.core.models import Agent, BlobRef, RunStatus, WorkflowDefinition
 from dagentos.core.ports import ConflictError
+from dagentos.core.run_index import (
+    RunIndex,
+    RunPage,
+    RunSummary,
+    decode_cursor,
+    encode_cursor,
+    index_events,
+)
 
 
 class MemoryStore:
@@ -26,6 +34,8 @@ class MemoryStore:
         self._snapshots: dict[str, tuple[int, str | None, str]] = {}
         self._scheduler: list[dict] = []                  # A12 pause history, newest last
         self._requests: dict[str, str] = {}               # request_id → run_id
+        self._runs: dict[str, tuple[str, datetime]] = {}  # run_id → (workflow, created_at)
+        self._index: dict[str, RunIndex] = {}             # run_id → derived row (E-07)
         self._fences: dict[str, int] = {}                 # run_id → highest fence seen
         self._blobs: dict[str, tuple[bytes, str]] = {}
         self._leases: dict[str, tuple[str, int, float]] = {}   # run_id → (holder, fence, expires)
@@ -98,6 +108,9 @@ class MemoryStore:
             for ev in out:
                 if isinstance(ev, RunStarted):
                     self._requests[ev.request_id] = run_id
+                    self._runs[run_id] = (ev.workflow, ev.occurred_at)
+            if run_id in self._runs:            # the index row moves with the log (E-07)
+                self._index[run_id] = index_events(self._index.get(run_id), out)
             return out
 
     def read_events(self, run_id: str, after_seq: int = 0, limit: int | None = None) -> list[Event]:
@@ -138,6 +151,35 @@ class MemoryStore:
 
     def list_run_ids(self) -> list[str]:
         return list(self._events)
+
+    # run index (E-07): nothing to backfill or catch up — no process older than the index
+    # ever wrote to this store.
+    def list_runs(self, *, status: Sequence[RunStatus] | None = None,
+                  workflow: str | None = None, cursor: str | None = None,
+                  limit: int | None = 50) -> RunPage:
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be >= 1 or None")
+        after = None
+        if cursor is not None:
+            key, rid = decode_cursor(cursor)
+            after = (datetime.fromisoformat(key), rid)
+        with self._lock:
+            rows = sorted(((created, rid, wf, self._index[rid])
+                           for rid, (wf, created) in self._runs.items()
+                           if (status is None or self._index[rid].status in status)
+                           and (workflow is None or wf == workflow)
+                           and (after is None or (created, rid) < after)), reverse=True)
+        more = limit is not None and len(rows) > limit
+        rows = rows[:limit] if more else rows
+        return RunPage(
+            runs=[RunSummary(run_id=rid, workflow=wf, status=idx.status, created_at=created,
+                             updated_at=idx.updated_at) for created, rid, wf, idx in rows],
+            next_cursor=encode_cursor(rows[-1][0].isoformat(), rows[-1][1]) if more else None)
+
+    def run_status_counts(self, *, workflow: str | None = None) -> dict[str, int]:
+        with self._lock:
+            return dict(Counter(self._index[rid].status.value for rid, (wf, _) in self._runs.items()
+                                if workflow is None or wf == workflow))
 
     def run_id_for_request(self, request_id: str) -> str | None:
         return self._requests.get(request_id)

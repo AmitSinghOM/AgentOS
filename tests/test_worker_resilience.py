@@ -82,7 +82,7 @@ def test_run_forever_survives_a_transient_store_error_and_finishes_the_run(caplo
 
 
 class SweepFlakyStore(MemoryStore):
-    """`list_run_ids` (called twice per sweep: expire, then re-enqueue) works for the boot
+    """`list_runs` (called twice per sweep: expire, then re-enqueue) works for the boot
     sweep, raises during the second sweep — the first periodic one — then works again."""
 
     def __init__(self) -> None:
@@ -90,11 +90,11 @@ class SweepFlakyStore(MemoryStore):
         self.calls = 0
         self.fail_calls = {3}          # first call of the second sweep
 
-    def list_run_ids(self):
+    def list_runs(self, **kw):
         self.calls += 1
         if self.calls in self.fail_calls:
             raise ConnectionResetError("simulated: connection reset during sweep")
-        return super().list_run_ids()
+        return super().list_runs(**kw)
 
 
 def test_run_forever_survives_a_transient_error_in_the_periodic_sweep(caplog):

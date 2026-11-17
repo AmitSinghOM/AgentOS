@@ -44,7 +44,14 @@ from dagentos.api.ui import mount_ui
 from dagentos.core.engine import ControlNotAllowed, Engine, RetryNotAllowed
 from dagentos.core.fold import FoldError, fold
 from dagentos.core.integrity import IntegrityError, verify
-from dagentos.core.models import Agent, AgentType, BlobRef, Principal, WorkflowDefinition
+from dagentos.core.models import (
+    Agent,
+    AgentType,
+    BlobRef,
+    Principal,
+    RunStatus,
+    WorkflowDefinition,
+)
 from dagentos.core.policy import policy_from_env
 from dagentos.core.ports import ConflictError
 from dagentos.core.seal import keyring_from_env, verify_seals
@@ -349,26 +356,35 @@ def start_run(name: str, request: Request, response: Response, sync: bool = Fals
 
 
 @app.get("/runs")
-def list_runs(limit: int = 50) -> dict:
-    """Newest-first summary of runs for the operator UI's landing page. `limit` is clamped
-    to 1..500. Costs `limit` folds, not one per run in the store: `list_run_ids` is ordered
-    by creation, so we walk it newest-first and stop once the page is full. (`/approvals`
-    and the recovery sweep still scan — they filter on folded status; see ROADMAP.)"""
+def list_runs(limit: int = 50, status: RunStatus | None = None, workflow: str | None = None,
+              cursor: str | None = None) -> dict:
+    """Newest-created first, for the operator UI's landing page (audit E-07). `status` and
+    `workflow` filter on the store's run index; `cursor` is a previous page's `next_cursor`
+    (opaque; null on the last page) and never repeats or skips a run, even one that changes
+    status between pages. `limit` is clamped to 1..500. Costs `limit` folds: the index picks
+    the page, then each run is folded and the FOLD is what is returned — a row whose index
+    disagrees with its fold is left out of a status filter rather than shown under the wrong
+    one (`agentos doctor` counts such rows). `counts` is runs per indexed status."""
     limit = max(1, min(limit, 500))
+    try:
+        page = store.list_runs(status=[status] if status else None, workflow=workflow,
+                               cursor=cursor, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     out = []
-    for run_id in reversed(store.list_run_ids()):
-        if len(out) == limit:
-            break
-        run = engine.get_run(run_id, hydrate=False)
-        if run is None:
+    for summary in page.runs:
+        run = engine.get_run(summary.run_id, hydrate=False)
+        if run is None or (status is not None and run.status is not status):
             continue
         out.append({"id": run.id, "workflow": run.workflow,
                     "workflow_version": run.workflow_version, "status": run.status.value,
                     "total_cost": run.total_cost, "last_seq": run.last_seq,
                     "started_at": run.started_at.isoformat(),
+                    "updated_at": summary.updated_at.isoformat() if summary.updated_at else None,
                     "pending_approvals": sum(1 for a in run.approvals.values()
                                              if a.status.value == "pending")})
-    return {"data": out}
+    return {"data": out, "next_cursor": page.next_cursor,
+            "counts": store.run_status_counts(workflow=workflow)}
 
 
 @app.get("/runs/{run_id}")
@@ -551,14 +567,15 @@ def list_run_approvals(run_id: str) -> dict:
 
 @app.get("/approvals")
 def list_pending_approvals() -> dict:
-    """Every pending approval across suspended runs — the operator's inbox.
-    (Scans runs; a store index arrives with the Phase 3 operator surface.)"""
+    """Every pending approval across suspended runs — the operator's inbox, oldest run first.
+    The run index names the suspended runs (E-07); only those are folded, and the fold still
+    decides: a run the index calls suspended but the fold does not is skipped."""
     out = []
-    for run_id in store.list_run_ids():
-        run = engine.get_run(run_id, hydrate=False)
+    for summary in reversed(store.list_runs(status=[RunStatus.suspended], limit=None).runs):
+        run = engine.get_run(summary.run_id, hydrate=False)
         if run is None or run.status.value != "suspended":
             continue
-        out += [{"run_id": run_id, "workflow": run.workflow, **a.model_dump()}
+        out += [{"run_id": run.id, "workflow": run.workflow, **a.model_dump()}
                 for a in run.approvals.values() if a.status.value == "pending"]
     return {"data": out}
 

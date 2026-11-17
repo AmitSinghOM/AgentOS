@@ -11,7 +11,7 @@ policy, no keyring) and **not detectable in-log** (the one gap no in-log scheme 
 truncation after the last seal; the tool reports the uncovered tail). A chokepoint in none
 of these is a bug.
 
-Each row names the test that pins the direction (87 rows). `tests/test_fail_modes.py` checks that
+Each row names the test that pins the direction (88 rows). `tests/test_fail_modes.py` checks that
 every cited test exists, so this table cannot quietly outlive the code. Phase 8 #11;
 the operator policy ceiling (#2) is scoped against this table.
 
@@ -63,6 +63,7 @@ the operator policy ceiling (#2) is scoped against this table.
 | Snapshot write | Store's `put_snapshot` raises | **open** | Logged, the advance succeeds, nothing is cached, the log still folds. (That a *prior* exception is not replaced is by construction — the write is wrapped in its own `try` inside `finally` — and not separately tested.) | `tests/test_store_typed_and_bounded.py::test_a_failing_snapshot_write_never_fails_the_advance` |
 | Snapshot read | Snapshot does not anchor to the log (tampered, stale, beyond the tail) | **closed for the snapshot, open for the read** | Ignored; the full log is folded | `tests/test_store_typed_and_bounded.py::test_a_snapshot_that_does_not_chain_to_the_log_is_ignored_not_trusted` |
 | Snapshot write ordering | Stale worker writes an older snapshot | **closed** | Monotonic per run; the older one is dropped | `tests/test_store_typed_and_bounded.py::test_put_snapshot_is_monotonic_per_run` |
+| Run index (`runs.status`, E-07) | The row disagrees with the fold: a process older than migration 4 appended, a hand edit, an index bug | **open, reported by doctor** | `GET /runs`, the inbox and the sweep fold every run the index lists and act on the fold, so a drifted run is never shown under the wrong status; it can be missing from a status filter, the inbox or the sweep. A row behind its log is caught up on the run's next append and on the next start; `agentos doctor` counts any other disagreement (FAIL). To rebuild every row: `UPDATE runs SET indexed_seq = NULL`, then restart | `tests/test_run_index_api.py::test_runs_never_serve_a_row_under_a_filter_its_fold_disagrees_with`, `tests/test_run_index_api.py::test_doctor_counts_rows_that_disagree_with_the_fold` |
 | Observer | An observer raises | **open** | Logged, swallowed; telemetry is derived and rebuildable | `tests/test_observability.py::test_observer_failure_never_breaks_the_engine` |
 | Slack notifier | Slack unreachable, slow, or non-2xx | **open** | `observe()` returned before the post; the pump logs a WARNING naming the approval (never the URL); the inbox still shows the gate | `tests/test_slack_notifier.py::test_transport_failure_is_logged_not_raised` |
 | Slack notifier | Post blocks | **open, off-thread** | The engine's append path is not held; the post happens on the notifier's own thread | `tests/test_slack_notifier.py::test_observe_returns_immediately_even_when_slack_blocks` |

@@ -27,7 +27,6 @@ carries the design; the rows stay as history. No GitHub issues exist for these (
 - Ed25519 signer through the seal seam (today HMAC only) — Phase 8 #3, Phase 10
 - **D2** constraints file for the image build (reproducible third-party wheels) — Production pass 2
 - **D10** types-only OpenAPI client codegen with a drift test — Phase 10
-- `GET /approvals` and the recovery sweep fold every non-terminal run (denormalised `runs.status` deferred) — Production pass
 
 Shipped since the 2026-11-12 audit and no longer open: A12 global pause (#138), D6 stream
 reconnect (#135), tool-output byte caps + `${NAME}` redaction (#137), scheduled CI (#134),
@@ -625,11 +624,7 @@ it returns; a request-body size limit (`AGENTOS_MAX_BODY_BYTES`); `GET /runs/{id
 paged and the UI fetches incrementally; README says what FAIL_MODES row 41 says. Record with
 dismissed candidates: `reviews/agentos-v0.12.0-production/DEBATE.md` (workspace).
 
-**Declared bound, not fixed:** `GET /approvals` and the recovery sweep still fold every
-non-terminal run to filter on status. Removing that needs a denormalised `runs.status`
-column maintained on append — a migration and a second copy of a fact the log already
-holds. Do it when a deployment has enough runs for the sweep to matter, and then as its own
-change with the migration hash-pinned like the others.
+**Declared bound, shipped (E-07, migration 4):** `runs.status` is an index row written in the append transaction; `GET /runs` filters and pages on it, and `/approvals` and the sweep fold only the runs it lists (docs/FAIL_MODES.md, "Run index").
 
 ---
 

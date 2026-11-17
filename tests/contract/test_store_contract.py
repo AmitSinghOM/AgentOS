@@ -271,3 +271,107 @@ def test_scheduler_state_defaults_to_running_and_the_newest_row_wins(store):
     store.set_scheduler_state(SchedulerState(paused=True))
     assert store.get_scheduler_state().paused is True
     assert store.get_scheduler_state().changed_at is not None
+
+
+# ----------------------------------------------------------- run index (audit E-07)
+
+def _at(minute: int):
+    from datetime import UTC, datetime
+    return datetime(2026, 11, 17, 10, minute, 0, 123456, tzinfo=UTC)
+
+
+def _start(store, run_id: str, minute: int, workflow: str = "wf", then=()) -> None:
+    store.append_events(run_id, 0, [RunStarted(run_id=run_id, workflow=workflow,
+                                               workflow_version=1, request_id=f"req-{run_id}",
+                                               occurred_at=_at(minute)), *then])
+
+
+def _ids(page) -> list[str]:
+    return [r.run_id for r in page.runs]
+
+
+def test_run_index_row_follows_every_append_and_a_conflict_changes_nothing(store):
+    from dagentos.core.events import ApprovalGranted, ApprovalRequested, RunSuspended
+    from dagentos.core.models import EffectClass
+
+    def row():
+        (r,) = store.list_runs().runs
+        return r
+
+    _start(store, "r1", 1)
+    assert (row().status, row().workflow, row().updated_at) == (RunStatus.running, "wf", _at(1))
+    assert row().created_at == _at(1)
+    spend = [EffectClass.spend]
+    store.append_events("r1", 1, [
+        ApprovalRequested(run_id="r1", approval_id="a1", step_id="s1", effect_classes=spend,
+                          occurred_at=_at(2)),
+        ApprovalRequested(run_id="r1", approval_id="a2", step_id="s2", effect_classes=spend,
+                          occurred_at=_at(2)),
+        RunSuspended(run_id="r1", occurred_at=_at(3))])
+    assert (row().status, row().updated_at) == (RunStatus.suspended, _at(3))
+    store.append_events("r1", 4, [ApprovalGranted(run_id="r1", approval_id="a1", step_id="s1")])
+    assert row().status is RunStatus.suspended                    # a2 still pending
+    with pytest.raises(ConflictError):                            # stale: nothing written
+        store.append_events("r1", 4, [RunCompleted(run_id="r1")])
+    assert row().status is RunStatus.suspended
+    store.append_events("r1", 5, [ApprovalGranted(run_id="r1", approval_id="a2", step_id="s2")])
+    assert row().status is RunStatus.running
+    store.append_events("r1", 6, [RunCompleted(run_id="r1", occurred_at=_at(9))])
+    assert (row().status, row().updated_at) == (RunStatus.completed, _at(9))
+
+
+def test_list_runs_filters_on_the_index_newest_created_first(store):
+    from dagentos.core.events import RunFailed, RunSuspended
+    _start(store, "a", 1, then=[RunCompleted(run_id="a")])
+    _start(store, "b", 2, workflow="other", then=[RunSuspended(run_id="b")])
+    _start(store, "c", 3, then=[RunFailed(run_id="c", error="x")])
+    _start(store, "d", 4, then=[RunSuspended(run_id="d")])
+    _start(store, "e", 5)
+
+    assert _ids(store.list_runs()) == ["e", "d", "c", "b", "a"]
+    assert _ids(store.list_runs(status=[RunStatus.suspended])) == ["d", "b"]
+    assert _ids(store.list_runs(status=[RunStatus.running, RunStatus.failed])) == ["e", "c"]
+    assert _ids(store.list_runs(workflow="other")) == ["b"]
+    assert _ids(store.list_runs(status=[RunStatus.suspended], workflow="wf")) == ["d"]
+    assert _ids(store.list_runs(status=[RunStatus.paused])) == []
+    assert _ids(store.list_runs(limit=None)) == ["e", "d", "c", "b", "a"]
+    assert store.list_runs(limit=None).next_cursor is None
+    assert store.run_status_counts() == {"completed": 1, "suspended": 2, "failed": 1,
+                                         "running": 1}
+    assert store.run_status_counts(workflow="other") == {"suspended": 1}
+
+
+def test_list_runs_cursor_returns_every_run_exactly_once_while_statuses_change(store):
+    """The cursor is (created_at, run_id), which never moves: a run that changes status between
+    two page requests is neither repeated nor skipped. (An updated_at cursor would skip it.)"""
+    for i in range(7):
+        _start(store, f"r{i}", i)
+    seen: list[str] = []
+    page = store.list_runs(limit=3)
+    seen += _ids(page)
+    assert seen == ["r6", "r5", "r4"] and page.next_cursor is not None
+    store.append_events("r5", 1, [RunCompleted(run_id="r5", occurred_at=_at(30))])   # seen
+    store.append_events("r1", 1, [RunCompleted(run_id="r1", occurred_at=_at(31))])   # unseen
+    _start(store, "late", 40)                                      # newer than the cursor
+    while page.next_cursor is not None:
+        page = store.list_runs(limit=3, cursor=page.next_cursor)
+        seen += _ids(page)
+    assert seen == ["r6", "r5", "r4", "r3", "r2", "r1", "r0"]       # once each, no gap
+
+
+def test_list_runs_cursor_pages_a_status_filter_too(store):
+    from dagentos.core.events import RunSuspended
+    for i in range(5):
+        _start(store, f"s{i}", i, then=[RunSuspended(run_id=f"s{i}")])
+        _start(store, f"x{i}", 10 + i)
+    first = store.list_runs(status=[RunStatus.suspended], limit=2)
+    second = store.list_runs(status=[RunStatus.suspended], limit=2, cursor=first.next_cursor)
+    third = store.list_runs(status=[RunStatus.suspended], limit=2, cursor=second.next_cursor)
+    assert _ids(first) + _ids(second) + _ids(third) == ["s4", "s3", "s2", "s1", "s0"]
+    assert third.next_cursor is None
+
+
+def test_list_runs_refuses_a_cursor_it_did_not_issue(store):
+    _start(store, "r1", 1)
+    with pytest.raises(ValueError, match="invalid cursor"):
+        store.list_runs(cursor="not-a-cursor")

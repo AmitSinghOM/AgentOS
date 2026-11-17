@@ -29,6 +29,10 @@ RELEASED = {
         "sqlite": "8003c4e8e08e843a8ef2393d030edcc554a5f406d8143299df75bf188fae4bfb",
         "postgres": "486a53dc26d8c4c0e2ad4825be6bbd5f82bfc00bc069258823427132f3a037b2",
     },
+    4: {
+        "sqlite": "42578579a626bd7ffb4d43dec91c833246bc0c1506aeaaf2ac46beb99851f650",
+        "postgres": "6f13d8f68715d2822edd379579496303ff45cc248d19c480de70982c67c45da4",
+    },
 }
 
 

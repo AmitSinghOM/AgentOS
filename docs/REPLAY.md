@@ -147,6 +147,17 @@ external evaluator can reconstruct a run's state from the file alone.
 Read-only against the store: nothing is appended and nothing enters a run log. Out of scope
 here: a TTL / archive setting and erasure (A7 crypto-shredding), and importing a file back.
 
+## The run index is derived, never replayed (E-07)
+
+`runs.status` (with `pending_approvals`, `indexed_seq`, `updated_at`; migration 4) is an index
+of each run's log, computed by `dagentos.core.run_index.index_events` inside the transaction
+that appends the events. The fold never reads it, so replay is exactly as deterministic as
+before: drop the columns and every run folds to the same state. It only decides *which* runs
+`GET /runs?status=`, `GET /approvals` and the worker's sweep fold; each of them acts on the
+fold. `tests/test_run_index.py` pins `index_events` equal to the fold's status and pending
+approvals at every cut point of the golden corpus and of a seeded log that reaches every
+status, and `agentos doctor` compares the stored rows with the fold on a live store.
+
 ## Related
 
 - Tamper-evidence of those facts: `TRUST_BOUNDARY.md` §2.
