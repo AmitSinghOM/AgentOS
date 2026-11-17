@@ -1,5 +1,10 @@
 # AgentOS
 
+[![CI](https://github.com/AmitSinghOM/AgentOS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AmitSinghOM/AgentOS/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/dagentos)](https://pypi.org/project/dagentos/)
+[![Python](https://img.shields.io/pypi/pyversions/dagentos)](https://pypi.org/project/dagentos/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **A control plane for durable, observable, human-in-the-loop LLM agent workflows.**
 
 Define a workflow as a DAG of agent steps. AgentOS runs it durably — surviving crashes,
@@ -59,6 +64,29 @@ and in-memory adapters. There is no second system to keep consistent. Snapshots 
 replay cost and are only a cache of the fold.
 
 ## Quick start
+
+### Five-minute start
+
+No server, no `.env` edits, no curl — one run from the command line to a terminal state:
+
+```bash
+pip install dagentos
+agentos init demo && cd demo
+agentos run workflow.json --agents agent.json
+# run 07c897b27789430fbbc4dd5d0b82300d: completed, 8 events
+```
+
+`init` writes `.env` (SQLite store, asserted auth, a comment pointing at bearer), the quick
+start's `agent.json` (an `echo` agent) and `workflow.json` (two steps, `b` after `a`), and a
+README with the three commands. `run` registers both on the store and advances the run
+in-process — the same engine path the API uses for `?sync=true`, no process to start. Exit 0
+when the run completed, **3 when it suspended for a human's approval** (it says how many are
+pending), 1 when a step failed or was dead-lettered; `--input topic=rain` reaches steps as
+`{run.topic}`, `--store sqlite:///path` or `memory` picks the store, `--json` gives the facts as
+one document. Everything below — the API, the worker, the inbox — reads the same store, so a
+run started here shows up in `/ui` once you start the API.
+
+### With the API and a worker
 
 Three paths. **With a real model, no API key** (recommended): [`docs/quickstart-llm.md`](docs/quickstart-llm.md) —
 Ollama + the `openai-compat` provider, five minutes, a poet and a critic on your laptop.
@@ -325,6 +353,8 @@ agentos policy explain hello        # what the operator ceiling does to one work
 agentos pause --all --reason "leaked provider key"   # kill switch: in-flight steps finish,
 agentos pause --status              #   nothing new dispatches, runs are not cancelled or paused
 agentos resume --all                #   individually; parked runs continue on the next tick
+agentos init demo                   # a minimal project: .env, agent.json, workflow.json, README
+agentos run workflow.json --agents agent.json   # one run, in-process, to a terminal state (exit 3 = suspended)
 ```
 
 The pause is one store-level fact (`scheduler_state`, an append-only history with who/why/when),
@@ -405,6 +435,15 @@ Each phase produces an article on a distributed-systems problem solved here:
 - The Stream Is the Log
 
 (See [`docs/blog/`](./docs/blog).)
+
+## Contributing
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) sets up a clone exactly as CI does and lists the gate
+(`ruff check .`, `lint-imports`, `pytest -q --ignore=tests/chaos`) and the house rules: a test
+that is red first, a `docs/FAIL_MODES.md` row when a boundary changes, docs checked against
+code. Bugs and feature requests go through the issue forms in
+[`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/) — the bug form asks for the version, the
+store, the auth mode and `agentos doctor --json`, with a reminder to redact.
 
 ## Security
 

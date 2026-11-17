@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/AmitSinghOM/AgentOS/blob/main/SECURITY.md
+    about: Report privately as SECURITY.md describes — not as a public issue.
+  - name: Questions and how-to
+    url: https://github.com/AmitSinghOM/AgentOS/blob/main/docs/tutorial.md
+    about: The ten-minute tutorial, the LLM quick start (docs/quickstart-llm.md) and docs/UI.md answer most first questions.

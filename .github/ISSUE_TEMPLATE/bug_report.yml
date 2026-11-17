@@ -1,0 +1,61 @@
+name: Bug report
+description: Something AgentOS did that its docs or tests say it should not
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Redact before you paste.** Run output, `.env` contents and `agentos doctor --json` can
+        carry tokens, DSNs with passwords, hostnames, prompts and model output. Replace them
+        with `<redacted>`; a report with a live credential in it will be edited and the
+        credential must be rotated. A security issue goes through the private form instead:
+        see [SECURITY.md](../blob/main/SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`pip show dagentos` (Version line) or the image tag; add `pip show agentos-provider-*` for any provider involved"
+      placeholder: "dagentos 0.17.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: store
+    attributes:
+      label: Store backend (AGENTOS_STORE)
+      options:
+        - sqlite (default)
+        - postgres
+        - memory
+    validations:
+      required: true
+  - type: dropdown
+    id: auth
+    attributes:
+      label: Auth mode (AGENTOS_AUTH)
+      description: "`asserted` records principals unverified by design — say so if the report depends on who a request claimed to be"
+      options:
+        - asserted (default)
+        - bearer
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: agentos doctor --json
+      description: Run it with the same environment as the failing API or worker. Redact the store row's path or DSN if it is sensitive.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command or request, the response or log line, and what the docs or a test led you to expect instead. A run id plus `GET /runs/{id}/events?after=0` (redacted) is the best evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: "Ideally `agentos init demo` plus the smallest edit to `workflow.json` / `agent.json` that shows it, or a failing test in the house style (`tests/`)."

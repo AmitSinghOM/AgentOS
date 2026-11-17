@@ -51,3 +51,51 @@ def test_readme_points_at_the_security_policy(path):
     assert (ROOT / path).exists(), path
     readme = (ROOT / "README.md").read_text()
     assert "SECURITY.md" in readme
+
+
+# ------------------------------------------------------------------ community files (audit I-36)
+
+ISSUE_FORMS = [".github/ISSUE_TEMPLATE/bug_report.yml", ".github/ISSUE_TEMPLATE/feature_request.yml"]
+
+
+def test_contributing_describes_the_ci_gate():
+    """CONTRIBUTING.md must set up and gate exactly as ci.yml does, or a first PR learns the
+    rules from a red check instead of the page."""
+    text = (ROOT / "CONTRIBUTING.md").read_text()
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    install = re.search(r"pip install -e \"\.\[dev,observability,providerkit\]\"[^\n]*", ci).group(0)
+    assert install in text, install                       # the same install line as the test job
+    for needle in ("ruff check .", "lint-imports", "pytest -q --ignore=tests/chaos", "-p no:asyncio",
+                   "importorskip", "docs/FAIL_MODES.md", "docs/RELEASING.md", "SECURITY.md",
+                   "Node", "22", "3.11"):
+        assert needle in text, needle
+
+
+@pytest.mark.parametrize("path", ISSUE_FORMS)
+def test_issue_forms_exist_and_ask_for_the_facts_a_report_needs(path):
+    text = (ROOT / path).read_text()
+    assert text.startswith("name:") and "\nbody:\n" in text   # a GitHub issue FORM, not a .md
+    if "bug" in path:
+        for needle in ("pip show dagentos", "AGENTOS_STORE", "AGENTOS_AUTH", "agentos doctor --json",
+                       "redact"):
+            assert needle in text, needle
+
+
+def test_issue_config_disables_blank_issues_and_links_security():
+    text = (ROOT / ".github" / "ISSUE_TEMPLATE" / "config.yml").read_text()
+    assert "blank_issues_enabled: false" in text
+    assert "SECURITY.md" in text
+
+
+def test_pull_request_template_carries_the_house_checklist():
+    text = (ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md").read_text()
+    for needle in ("- [ ]", "red", "FAIL_MODES", "secret"):
+        assert needle in text, needle
+
+
+def test_readme_links_contributing_and_the_issue_forms():
+    readme = (ROOT / "README.md").read_text()
+    assert "CONTRIBUTING.md" in readme
+    assert "ISSUE_TEMPLATE" in readme
+    for path in ["CONTRIBUTING.md", *ISSUE_FORMS]:
+        assert (ROOT / path).exists(), path
