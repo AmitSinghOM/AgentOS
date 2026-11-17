@@ -125,6 +125,27 @@ jobs:
       - run: pytest -q --ignore=tests/chaos
       - run: pytest -q tests/contract -k postgres --no-header -rN | tail -1
 
+  typecheck:
+    # Audit I-24: `Typing :: Typed` + py.typed promise type information, so mypy runs.
+    # Not strict and not count-based: scripts/typecheck_gate.py fails the job only on an
+    # error that is not in the committed mypy-baseline.txt (line numbers ignored). mypy is
+    # pinned like pip-audit is in `audit`: a new mypy release adds checks, and that must
+    # land as a deliberate baseline refresh, not as a red check on an unrelated PR.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,observability,providerkit]" -e providers/openai-compat -e providers/anthropic -e providers/openai-agents -e providers/pydantic-ai -e providers/acp
+      - run: pip install mypy==2.4.1
+      - run: |
+          set -euo pipefail
+          status=0
+          mypy --no-error-summary > /tmp/mypy-current.txt || status=$?
+          test "$status" -le 1   # 1 = type errors (the gate decides); anything else is a mypy crash
+          python scripts/typecheck_gate.py mypy-baseline.txt /tmp/mypy-current.txt
+
   audit:
     # Production pass 2, A3: a known-vulnerable dependency fails the PR instead of shipping.
     # Audits the RESOLVED environment (what `pip install` actually picks under our floors),

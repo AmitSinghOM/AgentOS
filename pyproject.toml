@@ -44,7 +44,7 @@ Documentation = "https://github.com/AmitSinghOM/AgentOS/blob/main/README.md"
 agentos = "dagentos.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.4", "import-linter>=2.0"]
+dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.4", "import-linter>=2.0", "mypy>=1.13"]
 # Observability adapters (docs/DEVELOPMENT_STRUCTURE.md §11 A9). The core never imports
 # these; dagentos.observability does, and only when the extra is installed.
 observability = [
@@ -85,6 +85,19 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["dagentos"]
+
+# Audit I-24: the `Typing :: Typed` classifier and the py.typed markers promise type
+# information, so a type checker has to run. mypy runs non-strict over `dagentos` only.
+# The CI `typecheck` job does not fail on the error COUNT: scripts/typecheck_gate.py
+# compares `mypy`'s sorted output with the committed mypy-baseline.txt and fails only on
+# an error line that is not in the baseline (an existing error fixed is fine; a new one is
+# not). Refresh the baseline with `mypy --no-error-summary | sort > mypy-baseline.txt`
+# only in a PR that fixes types, never to silence a new error.
+[tool.mypy]
+python_version = "3.11"
+packages = ["dagentos"]
+ignore_missing_imports = true
+warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 # The provider's tests live with the provider (its own distribution) but run from the
