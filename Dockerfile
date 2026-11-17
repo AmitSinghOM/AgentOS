@@ -10,7 +10,7 @@
 #   docker build -t agentos:local .
 
 # python:3.12-slim — digest resolved 2026-09-20 from Docker Hub (multi-arch index)
-FROM python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9 AS build
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS build
 WORKDIR /wheels
 COPY dist/ ./dist/
 COPY deploy/constraints.txt ./constraints.txt
@@ -29,7 +29,7 @@ RUN python -m venv /opt/agentos \
  && /opt/agentos/bin/pip check \
  && /opt/agentos/bin/agentos --help > /dev/null
 
-FROM python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 LABEL org.opencontainers.image.source="https://github.com/AmitSinghOM/AgentOS" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.description="AgentOS: durable, observable, human-in-the-loop LLM agent workflows"
