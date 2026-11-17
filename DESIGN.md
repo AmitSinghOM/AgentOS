@@ -3,7 +3,7 @@
 > A control plane for orchestrating multi-step LLM agent workflows with
 > **durable execution**, **human-in-the-loop approvals**, and **full observability**.
 
-Status: written at Phase 0 (`v0.1.0-skeleton`); current release `v0.17.1` (Phase 10, `ROADMAP.md`).
+Status: written at Phase 0 (`v0.1.0-skeleton`); current release `v0.18.0` (Phase 11, `ROADMAP.md`).
 This document drives the build. Its architecture prose is kept as written; where a decision
 was later superseded, a dated banner at the top of the section points at the current source
 rather than rewriting the history.
