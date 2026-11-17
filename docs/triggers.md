@@ -102,8 +102,9 @@ trigger names is not defined.
 The route is listed in `dagentos.api.auth.SELF_AUTHENTICATED_PREFIXES` and is the only
 thing there: in bearer mode the middleware lets it through **to its own verifier**, because
 the credential is the HMAC, not a token. It is not open — `OPEN_PATHS` is still exactly the
-probes and metrics. The OpenAPI document marks it `security: []` and its description carries
-the header names.
+probes and metrics. In bearer mode the OpenAPI document marks it `security: []`
+(`dagentos.api.auth.openapi_security`; in asserted mode the schema is served unchanged) and its
+description carries the header names.
 
 Signing from Python (what a sender does):
 

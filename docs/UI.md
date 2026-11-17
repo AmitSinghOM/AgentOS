@@ -1,8 +1,9 @@
 # The operator UI
 
-Phase 9. A React app served by the API itself at `/ui`. Today it is one screen — the approvals
-inbox — and the rules below are the ones every later screen (run graph, timeline, cost panel)
-inherits.
+Phase 9. A React app served by the API itself at `/ui`. Three screens (`ui/src/router.tsx`):
+the **approvals inbox** (`/ui/`), the **run list** (`/ui/runs`) and the **run page**
+(`/ui/runs/<id>`: graph, timeline with time travel, cost panel, controls). The inbox shipped
+first; the rules below were written for it and every later screen inherits them.
 
 ## Run it
 

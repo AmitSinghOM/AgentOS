@@ -80,7 +80,7 @@ The engine records each as `step.failed` → retries per the node's policy →
 ## Testing (§11 A10)
 
 `tests/` runs against **cassettes recorded from a real Ollama** (`qwen2.5:0.5b`, see each
-file's `source`), never the network. `tests/reference_server.py` fakes specific status
+file's `source`), never the network. `tests/openai_reference_server.py` fakes specific status
 codes. Re-record: `python scripts/record_cassettes.py --live`. The nightly
 [`provider-live`](../../.github/workflows/provider-live.yml) workflow installs Ollama on a
 runner, re-records, and re-runs the replay tests on the fresh recordings. If that job fails
@@ -88,4 +88,5 @@ for 30 days this README gets a `deprecated` banner; the core is unaffected.
 
 ## Status
 
-`0.1.0` — first provider plugin. MIT.
+Versioned with the core (`pyproject.toml` here matches the root; `docs/RELEASING.md`
+"Versions"). First provider plugin. MIT.

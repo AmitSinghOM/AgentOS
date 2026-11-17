@@ -15,7 +15,7 @@ What is right:
 - The five decisions in `DESIGN.md` §4 (event-sourced state, idempotency keys, Postgres
   as truth, approval as a suspended state, one-worker-now-N-later) are the correct
   decisions and are the ones the popular runtimes got wrong (see
-  `Study/AGENTOS_LANDSCAPE.md` C1–C15).
+  `docs/LANDSCAPE.md` §4, C1–C15).
 - The roadmap rule "earn scope by finishing" is the single most important longevity
   practice in the repo. Keep it.
 - Phase 0 shipped small (270 LOC), tested, tagged, with an honest "what I'd do
@@ -141,7 +141,7 @@ the log, not on Python signatures.
 - Events are **append-only and immutable**. Fields are only ever *added*; never renamed,
   removed, or re-typed. A new meaning is a new `event_type`.
 - Reading an old version goes through an **upcaster registry** (`v1 → v2 → … → current`)
-  in `core/events/upcast.py`. Upcasters are pure functions and are tested against the
+  in `dagentos/core/upcast.py`. Upcasters are pure functions and are tested against the
   golden corpus (§5.3).
 - Serialization is JSON with explicit field names. Never pickled Python, never
   library-specific encodings.
@@ -157,9 +157,9 @@ released version can be replayed by any later version.* CI proves it on every PR
 | Layer | Allowed | Policy |
 | --- | --- | --- |
 | `core` | stdlib; pydantic (tolerated until Phase 2, then stdlib dataclasses) | zero runtime third-party deps target |
-| adapters | one library per concern | pinned in lockfile; upgrade in isolated PRs |
-| providers | vendor SDK | separate distribution, separate lockfile |
-| toolchain | `uv` lock, container image digests | reproducible builds; `uv lock --check` in CI |
+| adapters | one library per concern | `>=` floors in `pyproject.toml` (a library must not pin); upgrades arrive as Dependabot PRs, weekly, grouped per distribution (`.github/dependabot.yml`) |
+| providers | vendor SDK | separate distribution, own `pyproject.toml`, own Dependabot group |
+| toolchain | pip in CI (`pip install -e ".[dev,…]"`, `.github/workflows/ci.yml`); container base image pinned by digest (`Dockerfile`) | no committed lockfile — `uv.lock` is gitignored because no job verifies it (PR #116); the daily scheduled CI run on `main` catches a floor drift the day it happens (#134) |
 
 - Python floor moves at most one minor version per year, announced one release ahead.
 - No dependency is adopted without an ADR naming its exit strategy.
@@ -167,16 +167,29 @@ released version can be replayed by any later version.* CI proves it on every PR
 
 ## 5. Testing pyramid
 
-1. **Unit** (`tests/unit/`) — domain logic, upcasters, fold function. Milliseconds.
-2. **Contract** (`tests/contract/`) — every `Store` and `Executor` adapter passes the
-   same port test suite. Adding an adapter = pointing the suite at it.
+The suite is flat under `tests/` with four subdirectories; there is no `tests/unit/` or
+`tests/e2e/` (layout as of `v0.17.1`, `ls tests`).
+
+1. **Unit and API** (`tests/test_*.py`) — domain logic, upcasters, fold function
+   (`tests/test_fold_upcast.py`), and every API surface through the ASGI app. Milliseconds to
+   seconds.
+2. **Contract** (`tests/contract/`) — every `Store`, `Queue` and `Lease` adapter passes the
+   same port test suite (`test_store_contract.py`, `test_coordination_contract.py`). Adding an
+   adapter = pointing the suite at it.
 3. **Golden replay corpus** (`tests/golden/`) — one recorded run log per released version,
-   committed as JSON. Every PR replays every corpus file and asserts the fold is equal to
-   the committed expected state. **This is the seven-year test.** A log from v0.2.0 must
-   fold correctly in v7.
-4. **Chaos** (`tests/chaos/`) — fault points and Toxiproxy per `ROADMAP.md` "Chaos
-   engineering plan"; property tests over random fault schedules.
-5. **End-to-end** (`tests/e2e/`) — README quick start against compose.
+   committed as JSON (`v0.2.0.json` … `v0.10.0.json`). Every PR replays every corpus file and
+   asserts the fold is equal to the committed expected state. **This is the seven-year test.**
+   A log from v0.2.0 must fold correctly in v7.
+4. **Chaos** (`tests/chaos/`) — fault points (`test_fault_points.py`), the real-process
+   `kill -9` (`test_kill9_real_process.py`) and Toxiproxy (`network/`) per `ROADMAP.md` "Chaos
+   engineering plan". The Hypothesis property test over random fault schedules is still open
+   (ROADMAP "Open items").
+5. **Documented paths as tests** — the README quick start, the LLM quickstart and the tutorial
+   are executed by `tests/test_quickstart.py`, `tests/test_quickstart_llm.py` and
+   `tests/test_tutorial.py`; the compose stack is checked by the CI `compose` job, not by a
+   pytest directory.
+6. **Fixtures** (`tests/fixtures/`) — shared truth tables, e.g. the agent-approval matrix that
+   both the Python engine tests and the UI's vitest suite consume.
 
 Coverage is not a target; invariant coverage is. Every C-issue closes only when its
 acceptance test is in the suite.
@@ -184,7 +197,8 @@ acceptance test is in the suite.
 ## 6. Change management
 
 - **ADRs** in `docs/adr/NNNN-title.md` for every decision that would be expensive to
-  reverse. `DESIGN.md` §4 is retroactively ADR 0001–0005; new decisions get their own.
+  reverse. `DESIGN.md` §4 is retroactively ADR 0001–0005; 0006–0009 are in
+  [`docs/adr/`](adr/README.md); new decisions get their own.
 - **SemVer with a compatibility statement per release**: what log versions it reads, what
   Python it runs on, which provider packages it is tested with.
 - **Deprecation window**: one minor release with a warning before removal; never remove an
@@ -201,16 +215,21 @@ acceptance test is in the suite.
   `pip install dagentos && uvicorn dagentos.api.main:app` works with no infrastructure at all; Postgres is
   the production adapter, not the entry ticket.
 - Single binary of truth: the event log. Backup = `pg_dump` (or copy the SQLite file).
-- Health, readiness, and a `agentos doctor` command that replays the golden corpus
-  against the live store to prove the installation can read its own data.
+- Health, readiness, and an `agentos doctor` command (`dagentos/cli.py`) that checks the
+  store is reachable, the schema is at the latest migration, every executor's `health()`,
+  auth mode, policy and keyring, and that every run in the store folds and verifies — proof
+  that the installation can read its own data. (The golden corpus is replayed in CI, not by
+  `doctor`.)
 - No telemetry leaves the host unless configured.
 
 ## 8. Bus factor — a project one person can put down and pick up
 
 - `README.md` quick start is a test (already true). `DESIGN.md`, this document, the ADRs,
   and `ROADMAP.md` are the complete written brain; nothing lives only in chat history.
-- `make bootstrap` (or `uv sync`) from a clean machine to green tests in under five
-  minutes, verified in CI on a fresh runner.
+- From a clean machine to green tests in under five minutes:
+  `pip install -e ".[dev,observability,providerkit]"` plus the `providers/*` editable installs
+  (the exact line is the `test` job in `.github/workflows/ci.yml`), then `pytest`. Verified in
+  CI on a fresh runner on every PR; there is no Makefile and no lockfile (§4).
 - Every phase ends with a writeup in `docs/blog/`. The writeups are the memory of *why*.
 
 ## 9. What this means for Phase 1 concretely

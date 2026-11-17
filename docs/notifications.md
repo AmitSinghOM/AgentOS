@@ -53,7 +53,8 @@ queue on clean shutdown so the last delivery's notice survives the SIGTERM that 
 `AGENTOS_SLACK_WEBHOOK` must be `https://hooks.slack.com/services/…`. Anything else (http,
 another host, a look-alike host) is a `ConfigError` naming the variable at startup — the
 process refuses to start, the same closed-at-startup shape as `AGENTOS_AUTH_TOKENS`. The
-error never echoes the path (the secret part). `GET /executors`-style introspection reports
-`webhook: "set"`, never the value.
+error never echoes the path (the secret part). `SlackNotifier.describe()` reports
+`webhook: "set"`, never the value (no API route exposes the notifier; pinned in
+`tests/test_slack_notifier.py`).
 
 Pinned in `tests/test_slack_notifier.py`; fail modes in [`FAIL_MODES.md`](FAIL_MODES.md).

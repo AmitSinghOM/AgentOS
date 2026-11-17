@@ -41,9 +41,9 @@ and that capability actually executing". Here it is two things you already have:
    Tools are the operator's Python functions, each carrying an `EffectClass`. Agent JSON
    names them; it never contains code. Register yours with the `agentos.tools` entry point
    (a callable returning `Iterable[ToolSpec]`) and every inner harness offers them; this
-   provider also still loads the original `agentos.openai_agents_tools` group for one
-   release. Two harmless built-ins (`utc_now`, `word_count`, class `compute`) ship for the
-   quickstart.
+   provider also still loads the original `agentos.openai_agents_tools` group, kept for
+   compatibility (`tools.py`, `LEGACY_ENTRY_POINT_GROUP`). Two harmless built-ins (`utc_now`,
+   `word_count`, class `compute`) ship for the quickstart.
 2. **The core's declared-effects gate.** At dispatch the model is offered only the tools
    whose class the AgentOS agent *declared*. An undeclared tool is not offered-and-refused;
    it is not there (`tools_withheld` in the output says which). A step declaring an
