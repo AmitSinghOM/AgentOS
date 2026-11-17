@@ -289,6 +289,8 @@ startup warning. Tests: `tests/test_policy.py`.
 
 ### Operator UI
 
+![The run page at /ui: the diamond run suspended with one pending approval — step "pay" declares spend — the ApprovalCard with Approve and Reject, and the DAG with a and b completed, pay awaiting approval, d pending](docs/images/ui-approvals.png)
+
 The API serves a small React app at `/ui` — in the wheel and the image, no Node at runtime —
 with three screens: the **approvals inbox**, the **run list** (status filter held in the URL),
 and the **run page**: the DAG laid out by dagre with each node's state read from the server's
@@ -303,7 +305,9 @@ bodies, and shows the API's errors verbatim. Three runtime dependencies, a ~325 
 strict CSP (`frame-ancestors 'none'`) on every `/ui` response. Building from a checkout:
 `cd ui && npm ci && npm run build`; the contract and what the UI deliberately does not do are
 in [`docs/UI.md`](docs/UI.md), and [`docs/tutorial.md`](docs/tutorial.md) drives all three
-screens in ten minutes.
+screens in ten minutes. The screenshot above is `agentos run examples/diamond_workflow.json
+--agents examples/calc_agent.json examples/payer_agent.json` followed by the API on the same
+store — the run suspends before `pay` and waits for a named human.
 
 ### Triggers: cron and webhooks
 
