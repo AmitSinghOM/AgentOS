@@ -44,7 +44,7 @@ Documentation = "https://github.com/AmitSinghOM/AgentOS/blob/main/README.md"
 agentos = "dagentos.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.4", "import-linter>=2.0"]
+dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.4", "import-linter>=2.0", "mypy>=1.13"]
 # Observability adapters (docs/DEVELOPMENT_STRUCTURE.md §11 A9). The core never imports
 # these; dagentos.observability does, and only when the extra is installed.
 observability = [
@@ -61,6 +61,43 @@ providerkit = ["httpx>=0.27", "jsonschema>=4.20,<5"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+# Audit I-23: with no `select`, ruff ran only its default E4/E7/E9/F set, so the
+# `# noqa: BLE001` comments on every deliberate `except Exception` boundary were inert and
+# nothing said so. BLE is now on (each boundary keeps its noqa + reason), RUF100 flags a
+# noqa that no longer suppresses anything, B/UP/I catch the mechanical mistakes.
+[tool.ruff.lint]
+select = ["E", "F", "B", "BLE", "UP", "I", "RUF100"]
+ignore = [
+    # 148 lines were over 100 columns when E501 first ran (I-23); reflowing them is a
+    # formatting pass, not a lint fix. Drop this line in the PR that reflows them.
+    "E501",
+    # The eight `class X(str, Enum)` models keep `str(X.A)` / f"{X.A}" == "X.A"; StrEnum would
+    # make both return the value. That is a behaviour change, so it is not applied by a linter.
+    "UP042",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# `pytest.importorskip(...)` / `sys.path.insert(...)` must run before the imports they enable.
+"tests/**" = ["E402", "B011"]           # B011: pytest never runs under -O, `assert False` is fine
+"providers/*/tests/**" = ["E402"]
+"providers/*/scripts/**" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dagentos"]
+
+# Audit I-24: the `Typing :: Typed` classifier and the py.typed markers promise type
+# information, so a type checker has to run. mypy runs non-strict over `dagentos` only.
+# The CI `typecheck` job does not fail on the error COUNT: scripts/typecheck_gate.py
+# compares `mypy`'s sorted output with the committed mypy-baseline.txt and fails only on
+# an error line that is not in the baseline (an existing error fixed is fine; a new one is
+# not). Refresh the baseline with `mypy --no-error-summary | sort > mypy-baseline.txt`
+# only in a PR that fixes types, never to silence a new error.
+[tool.mypy]
+python_version = "3.11"
+packages = ["dagentos"]
+ignore_missing_imports = true
+warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 # The provider's tests live with the provider (its own distribution) but run from the

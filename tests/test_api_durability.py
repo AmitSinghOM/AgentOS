@@ -56,7 +56,9 @@ def test_run_survives_app_restart_and_events_page_by_seq(app_factory):
     while True:
         page = c2.get(f"/runs/{run['id']}/events", params={"after": after, "limit": 2}).json()
         assert len(page["data"]) <= 2
-        walked += page["data"]; after = page["last_seq"]; pages += 1
+        walked += page["data"]
+        after = page["last_seq"]
+        pages += 1
         if not page["has_more"]:
             break
     assert walked == events_after["data"] and pages >= 3

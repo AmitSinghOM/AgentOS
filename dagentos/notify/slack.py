@@ -145,7 +145,7 @@ class SlackNotifier:
             return None
         try:
             got = self._resolve(event.run_id)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — a failed lookup degrades the message, never the run
             return None
         return got if isinstance(got, WorkflowRun) else None
 

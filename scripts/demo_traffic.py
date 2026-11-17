@@ -65,7 +65,7 @@ def main(argv=None) -> int:
     call(a.api, "POST", "/workflows", {"name": "haunted", "nodes": [
         {"id": "summon", "agent": "ghost", "retry": {"max_attempts": 2, "backoff_seconds": 1}}]})
 
-    for r in range(a.rounds):
+    for _round in range(a.rounds):
         for topic in TOPICS:
             _, run = call(a.api, "POST", "/workflows/haiku/runs", {"inputs": {"topic": topic}})
             run = wait(a.api, run["id"])
