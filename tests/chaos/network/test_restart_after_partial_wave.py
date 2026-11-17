@@ -25,7 +25,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import time
 from collections import Counter
 
 import pytest
@@ -35,11 +34,18 @@ from dagentos.core.fold import fold
 from dagentos.core.models import Agent, AgentType, WorkflowDefinition
 
 from ..conftest import assert_invariants
-from .conftest import LISTEN, PG_DSN, UPSTREAM, proxied_dsn
+from .conftest import LISTEN, PG_DSN, UPSTREAM, proxied_dsn, wait_until
 
 pytestmark = pytest.mark.network
 
 LATENCY_MS = 150
+# Lease TTL of the worker that gets killed. It must outlive the longest gap between two lease
+# renewals UNDER LAG: the fan-out wave appends three `step.started` (each ~5 lagged round
+# trips inside one transaction) before any step's progress() renews. First CI run of this
+# test (PR #152) used 1.0 s: the lease lapsed during that gap, the heartbeat raised LeaseLost
+# and the worker exited 0 before ever reaching n2's commit — the A5 lease-loss path working,
+# which is scenario 1's subject, not this one's. 8 s leaves ~3x margin over the ~2.5 s gap.
+KILLER_TTL = 8.0
 FAN = WorkflowDefinition(name="fan", version=1, max_parallelism=3, nodes=[
     {"id": "n1", "agent": "g"},
     {"id": "n2", "agent": "g", "depends_on": ["n1"]},
@@ -81,7 +87,7 @@ def test_kill_9_mid_fanout_under_lag_then_restart_replays_committed_steps_only(
     direct.push(run_id)
 
     first = _worker(proxied_dsn(PG_DSN), pg_schema, fault="after_effect_commit:n2",
-                    holder="worker-1", ttl=1.0)
+                    holder="worker-1", ttl=KILLER_TTL)
     assert first.returncode == 137, (first.returncode, first.stderr[-800:])
     toxiproxy.remove_toxic("pg", "lat")
 
@@ -93,8 +99,10 @@ def test_kill_9_mid_fanout_under_lag_then_restart_replays_committed_steps_only(
     assert fold(mid).status.value == "running"
     assert direct.acquire(run_id, "probe", 0.01) is None, "dead worker's lease should still be live"
 
-    time.sleep(1.2)                                        # worker-1's 1 s lease expires
-
+    # worker-1's lease expires by TTL (database clock), as it would in production.
+    wait_until(lambda: direct.acquire(run_id, "probe", 0.01) is not None,
+               timeout=KILLER_TTL + 10, what="the dead worker's lease to expire")
+    direct.release(direct.acquire(run_id, "probe", 0.01))
     second = _worker(PG_DSN, pg_schema, fault=None, holder="worker-2", ttl=30.0)
     assert second.returncode == 0, second.stderr[-800:]
     assert second.stdout.strip() == run_id              # --once prints the run it handled
