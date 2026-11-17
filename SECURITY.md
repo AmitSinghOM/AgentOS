@@ -75,5 +75,7 @@ Out of scope, by design and documented:
 ## Dependencies
 
 Dependabot watches the core, each provider, the UI and the workflow actions weekly;
-CI runs `pip-audit --strict` and `npm audit --audit-level=high` on every pull request, so a
+CI runs `pip-audit --strict` and `npm audit --audit-level=high --omit=dev` (the three runtime
+dependencies that ship in `ui/dist`; the full dev tree is audited too and reported as a
+warning) on every pull request, so a
 known-vulnerable dependency fails the build rather than shipping.
