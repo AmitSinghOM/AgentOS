@@ -168,9 +168,9 @@ Tests: `::test_openai_provider_delimits_upstream_output_and_declares_the_boundar
 ## Not done here
 
 - A `protocols/` adapter layer for tool calling (A8), where tool *results* re-enter the
-  model. When the `tool` agent lands, its results go through `wrap_input` like any other
-  step output; a function-calling round trip needs the same rule at the message level.
-- Signed chain tail (see §2).
+  model. The `tool` agent (`dagentos/agents/tool.py`, v0.7.0) produces step outputs, which
+  downstream model steps receive through `wrap_input` like any other step output; a
+  function-calling round trip inside one step needs the same rule at the message level.
 - Per-step input schemas (`StepRequest` typed by a declared JSON Schema on the node). The
   engine already refuses inputs with unknown top-level keys by construction — upstream
   outputs are keyed by node id and run inputs by the reserved `run` — so the remaining
