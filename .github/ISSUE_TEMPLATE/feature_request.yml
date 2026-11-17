@@ -1,0 +1,35 @@
+name: Feature request
+description: A capability the control plane should have, or a sharp edge it should not
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The situation
+      description: What were you doing with a run, a workflow, an approval or the log, and where did it stop you? One concrete example beats a general wish.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: The command, endpoint, event, field or UI control you imagine. Say which side of the ledger it touches — the engine, an executor, the API, the operator UI, docs.
+    validations:
+      required: true
+  - type: dropdown
+    id: effects
+    attributes:
+      label: Does it change what a step may do or who may approve it?
+      description: Anything that widens an effect class, an approval rule or an open path is a trust-boundary change and will need a `docs/FAIL_MODES.md` row and a pinned test.
+      options:
+        - "No — behaviour inside the existing boundary"
+        - "Yes — it changes the gate, approvals, auth or an open path"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: An existing flag, endpoint or workflow shape that almost did it, and why it was not enough. `ROADMAP.md` lists what is already planned.
