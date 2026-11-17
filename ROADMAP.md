@@ -13,7 +13,7 @@ Every ⏭ checkbox below that is still open, in one place. Each line names the p
 carries the design; the rows stay as history. No GitHub issues exist for these (audit W3-23).
 
 - **A7** `KeyStore` port + crypto-shredding erasure (`RunErased`) — Phase 2; the signed tail half shipped in Phase 8 #3
-- **A8** `protocols/` adapter layer: JSON-Schema tools, MCP / A2A / function-calling round trip — Phase 2, Phase 6
+- **A8** `protocols/` adapter layer: MCP / A2A adapters still open; the function-calling round trip shipped for `openai-compat` ([#148](https://github.com/AmitSinghOM/AgentOS/pull/148)) — Phase 2, Phase 6
 - **A4** filesystem `BlobStore` adapter (SQLite, Postgres, Memory exist) — Phase 1
 - Redaction, general pre-append pass (#7; the `tool` executor's half shipped in #137) — Phase 8
 - Sandbox around the `tool` subprocess (#8) — Phase 8
@@ -150,7 +150,7 @@ cancel/pause, agent versioning. Items marked ⏭ carried forward — see the dat
   - [ ] ⏭ `coordination_partition_mid_run` → run resumes via recovery sweep once the link returns
   - [ ] ⏭ `pg_latency_under_fanout` → fan-in waits, no branch output lost (C4)
 - [ ] ⏭ **A7** crypto-shredding: per-run data key in a `KeyStore` port; erasure = destroy key + `RunErased` event; log stays append-only
-- [ ] ⏭ **A8** `agentos/protocols/`: tools described by JSON Schema; MCP / A2A / vendor function-calling are adapters; tool results are data, never prompt
+- [~] **A8** `agentos/protocols/`: tools described by JSON Schema; MCP / A2A / vendor function-calling are adapters; tool results are data, never prompt. Function-calling round trip shipped for `openai-compat` ([#148](https://github.com/AmitSinghOM/AgentOS/pull/148)): registry tools offered by declared effect class, a call outside that set rejected (never run) and recorded `rejected: true`, results wrapped as data, bounded by `max_tool_rounds`, recorded like the SDK harnesses. ⏭ MCP / `protocols/` adapter still open
 - [x] **A12** global pause (shipped 2026-11-16, [#138](https://github.com/AmitSinghOM/AgentOS/pull/138)): `agentos pause --all` / `resume --all` / `pause --status`. Not `SchedulerPaused` run events as first sketched — a deployment-wide fact in a run log would break per-run replay — but a store-level append-only `scheduler_state` history (migration 3; who / why / when; newest row is the state). The engine reads it before every wave, so in-flight steps finish and nothing new dispatches (`?sync=true` included); the worker pulls nothing and the sweep re-enqueues nothing; runs are neither cancelled nor individually paused; an unreadable flag counts as paused (fail-closed); `GET /scheduler` is read-only
 
 **Demo:** a fan-out/fan-in workflow (1 → [2,3,4 parallel] → 5) with one branch failing
@@ -285,7 +285,7 @@ locking test.
 - [x] Versioned schema migrations (`dagentos/store/migrations.py`) for SQLite + Postgres; every released migration's SQL is SHA-256-pinned per dialect (editing one fails with "add migration N+1"); a pre-ledger v0.6 database adopts the ledger without losing rows
 - [x] Unused `sqlalchemy` + `redis` dependencies and the compose redis service removed (queue and lease have been SQL adapters since Phase 1); import-linter still forbids them in the core
 - [x] Four-seat review (Staff / Product / Security / CTO) + code-reviewer skill + cqa-analyzer on the snapshot PR: 10 findings, 9 fixed each with a test, 1 cosmetic declined with reason; Design score 8.96 → 8.98
-- [ ] ⏭ A8 `protocols/` function-calling round trip
+- [~] A8 function-calling round trip shipped for `openai-compat` ([#148](https://github.com/AmitSinghOM/AgentOS/pull/148)); ⏭ MCP / `protocols/` adapter still open
 - [x] A11 `agentos export-run --format jsonl` — shipped 2026-11-17 ([#149](https://github.com/AmitSinghOM/AgentOS/pull/149); Phase 3 row has the design)
 - [x] A12 global pause — shipped 2026-11-16 as the store-level `scheduler_state` flag ([#138](https://github.com/AmitSinghOM/AgentOS/pull/138); Phase 2 row has the design)
 - [ ] ⏭ A7 KeyStore + signed chain tail (tail: done Phase 8 #3, `dagentos/core/seal.py`; KeyStore / crypto-shredding open)

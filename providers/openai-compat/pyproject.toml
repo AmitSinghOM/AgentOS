@@ -12,6 +12,7 @@ license = { text = "MIT" }
 dependencies = [
     "dagentos[providerkit]>=0.11,<1.0",
     "httpx>=0.27",
+    "pydantic>=2.6",          # tool argument schemas + validation (function calling)
 ]
 
 [project.urls]

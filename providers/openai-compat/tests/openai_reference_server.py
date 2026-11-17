@@ -25,9 +25,49 @@ def _reply(prompt: str, model: str) -> str:
     return f"[{model}] You said: {prompt[:80]}"
 
 
+# The function-calling trajectory the committed `tool_round_trip` cassette was recorded from
+# (`scripts/record_cassettes.py --tools`): the model calls word_count once, then answers.
+TOOL_ROUND_TRIP_CONFIG = {"model": "chat.fast", "system": "Count words with the tool.",
+                          "prompt": "How many words are in {run.topic}?", "tools": ["word_count"]}
+TOOL_ROUND_TRIP_INPUTS = {"run": {"topic": "event logs"}}
+TOOL_ROUND_TRIP_SCRIPT = [[("word_count", {"text": "event logs"})]]
+
+
+def _tool_turn(body: dict, script: list[list[tuple[str, dict]]], model: str,
+               usage: tuple[int, int]) -> dict:
+    """One scripted function-calling turn. Stateless, as a real server is: the round is the
+    number of assistant tool-call messages already in the request. While the script lasts the
+    model asks for its calls (OpenAI shape: `content: null`, `finish_reason: "tool_calls"`);
+    after it, the model answers with text quoting the last tool result it was sent. Usage
+    grows per round so a test can tell a sum from the first or last round's numbers."""
+    done = sum(1 for m in body["messages"] if m["role"] == "assistant" and m.get("tool_calls"))
+    pin, pout = usage[0] + 10 * done, usage[1] + 10 * done
+    if done < len(script):
+        message: dict = {"role": "assistant", "content": None, "tool_calls": [
+            {"id": f"call_{done}_{i}", "type": "function",
+             "function": {"name": name, "arguments": json.dumps(args)}}
+            for i, (name, args) in enumerate(script[done])]}
+        finish = "tool_calls"
+    else:
+        results = [m["content"] for m in body["messages"] if m["role"] == "tool"]
+        message = {"role": "assistant",
+                   "content": f"[{model}] after {len(results)} tool result(s): "
+                              f"{results[-1][:200] if results else ''}"}
+        finish = "stop"
+    return {"id": f"chatcmpl-ref-tool-{done}", "object": "chat.completion",
+            "created": 1757800000, "model": model, "system_fingerprint": "fp_ollama",
+            "choices": [{"index": 0, "finish_reason": finish, "message": message}],
+            "usage": {"prompt_tokens": pin, "completion_tokens": pout,
+                      "total_tokens": pin + pout}}
+
+
 def make_handler(*, require_key: bool = False, fail_with: int | None = None,
-                 usage: tuple[int, int] = (12, 9)):
-    """Build a handler. `fail_with` makes /chat/completions answer that status."""
+                 usage: tuple[int, int] = (12, 9),
+                 tool_script: list[list[tuple[str, dict]]] | None = None,
+                 seen: list[dict] | None = None):
+    """Build a handler. `fail_with` makes /chat/completions answer that status.
+    `tool_script` scripts a function-calling trajectory (`_tool_turn`); `seen` collects
+    every chat-completions request body, so a test can read what the model was sent."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -49,6 +89,10 @@ def make_handler(*, require_key: bool = False, fail_with: int | None = None,
                 return httpx.Response(404, json={"error": {
                     "message": f"model '{model}' not found",
                     "type": "not_found_error", "param": None, "code": None}})
+            if seen is not None:
+                seen.append(body)
+            if tool_script is not None:
+                return httpx.Response(200, json=_tool_turn(body, tool_script, model, usage))
             user = next((m["content"] for m in reversed(body["messages"])
                          if m["role"] == "user"), "")
             content = _reply(user, model)

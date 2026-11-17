@@ -17,12 +17,13 @@ from dagentos.providerkit import (
 )
 
 from .config import from_env
-from .executor import OpenAICompatExecutor
+from .executor import OpenAICompatExecutor, ToolError
 
 __all__ = [
     "AuthenticationFailed", "BadResponse", "ConfigError", "ModelNotFound",
     "OpenAICompatExecutor", "ProviderConfig", "ProviderError", "ProviderRateLimited",
-    "ProviderServerError", "ProviderUnreachable", "TemplateError", "from_env", "load",
+    "ProviderServerError", "ProviderUnreachable", "TemplateError", "ToolError", "from_env",
+    "load",
 ]
 
 
