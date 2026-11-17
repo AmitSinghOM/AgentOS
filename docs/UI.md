@@ -42,7 +42,15 @@ Development: `cd ui && npm run dev` serves the app on `:5173` and proxies API pa
 ## The run graph (`/ui/runs/<id>`)
 
 - **Landing** (`/ui/runs`): `GET /runs` newest-first — status, cost, event count, pending
-  approvals linking to the inbox; each row links to its graph.
+  approvals linking to the inbox; each row links to its graph. The status chips and the
+  workflow filter are **server-side** (`?status=`, `?workflow=`, on the store's run index, E-07):
+  a chip's number is `counts` from the API — every run in the store with that status, not
+  the loaded page — and clicking it asks the API for that status. **Load more** follows the
+  API's `next_cursor`, which never repeats or skips a run even when runs change status between
+  pages. The text box (`?q=`, run-id prefix or workflow name) filters only the loaded rows and
+  says so. The URL holds `?status=&workflow=&q=`, so a narrowed list survives reload. The page
+  refreshes every 5 s, re-reading as many rows as are loaded (up to the API's 500); past 500
+  loaded rows the live refresh stops until reload.
 - **The DAG** is the current `GET /workflows/{name}` definition, laid out left-to-right by
   [dagre](https://github.com/dagrejs/dagre) (`@dagrejs/dagre`, MIT): each column is the wave the
   scheduler runs those steps in (longest path from a source), rows are ordered to minimise edge
@@ -147,8 +155,8 @@ from the package version.
 
 ## Not yet
 
-A UI kit (deliberately none while the pages are tables and SVG), a store index behind
-`GET /runs` and `GET /approvals`, assignment or routing of a pending decision to a person,
+A UI kit (deliberately none while the pages are tables and SVG), free-text search on the
+server (`q` stays client-side over the loaded rows), assignment or routing of a pending decision to a person,
 declared choices or a form at the gate, and versioned workflow definitions so the graph of an
 old run can be drawn from the definition it pinned. The CSP on `/ui` responses (`default-src
 'self'`, `frame-ancestors 'none'`) has shipped since `v0.11.1` and is asserted by

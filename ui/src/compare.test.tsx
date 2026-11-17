@@ -41,6 +41,21 @@ let me: unknown;
 let runs: RunSummary[];
 let control: (url: string) => Response | null;
 
+/** The API's `GET /runs` over `runs` (newest first, E-07): status and workflow filtered on the
+ *  server, `counts` per status for the workflow scope, an opaque cursor (an offset here). */
+function listRuns(url: string) {
+  const p = new URL(url, "http://ui.test").searchParams;
+  const limit = Number(p.get("limit") ?? 50);
+  const status = p.get("status"), workflow = p.get("workflow");
+  const scoped = runs.filter((r) => !workflow || r.workflow === workflow);
+  const counts: Record<string, number> = {};
+  for (const r of scoped) counts[r.status] = (counts[r.status] ?? 0) + 1;
+  const match = scoped.filter((r) => !status || r.status === status);
+  const from = Number(p.get("cursor") ?? 0);
+  return { data: match.slice(from, from + limit), counts,
+           next_cursor: from + limit < match.length ? String(from + limit) : null };
+}
+
 beforeEach(() => {
   seen = [];
   me = { mode: "bearer", principal: { kind: "human", id: "amit" } };
@@ -55,7 +70,7 @@ beforeEach(() => {
     seen.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url === "/me") return json(200, me);
     if (url === "/approvals") return json(200, { data: [] });
-    if (url.startsWith("/runs?")) return json(200, { data: runs });
+    if (url.startsWith("/runs?")) return json(200, listRuns(url));
     if (url === "/runs/run1") return json(200, state);
     if (url.startsWith("/runs/run1/events")) return json(200, { data: EVENTS, last_seq: 5, has_more: false });
     if (url === "/workflows/w") return json(200, DEF);
@@ -261,5 +276,67 @@ describe("A4 runs list filters", () => {
     const table = await screen.findByRole("table", { name: "runs" });
     expect(within(table).getAllByRole("row")).toHaveLength(1 + 1);
     expect(screen.getByRole("button", { name: /^failed/ })).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+describe("E-07 runs list on the server's run index", () => {
+  const summary = (over: Partial<RunSummary>): RunSummary => ({ id: "x", workflow: "w", workflow_version: 1, status: "completed",
+    total_cost: "0", last_seq: 1, started_at: "2026-09-20T00:00:00Z", pending_approvals: 0, ...over });
+  const many = (n: number, over: Partial<RunSummary>, tag: string) =>
+    Array.from({ length: n }, (_, i) => summary({ id: `${tag}${String(i).padStart(7, "0")}`, ...over }));
+  const runCalls = () => seen.filter((s) => s.url.startsWith("/runs?")).map((s) => new URL(s.url, "http://ui.test").searchParams);
+
+  it("chip numbers are the store's counts, not the loaded page's", async () => {
+    window.history.pushState(null, "", "/ui/runs");
+    runs = [...many(2, { status: "failed" }, "f"), ...many(130, { status: "completed" }, "c")];
+    render(<App />);
+    const table = await screen.findByRole("table", { name: "runs" });
+    expect(within(table).getAllByRole("row")).toHaveLength(100 + 1);          // one page loaded
+    const chips = screen.getByRole("group", { name: "filter by status" });
+    expect(within(chips).getByRole("button", { name: /^all/ })).toHaveTextContent("132");
+    expect(within(chips).getByRole("button", { name: /^completed/ })).toHaveTextContent("130");
+    expect(within(chips).getByRole("button", { name: /^failed/ })).toHaveTextContent("2");
+  });
+
+  it("a chip asks the API for that status; the text box never does", async () => {
+    window.history.pushState(null, "", "/ui/runs");
+    runs = [...many(120, { status: "completed" }, "c"), ...many(3, { status: "failed" }, "f")];   // failed are past page 1
+    render(<App />);
+    await screen.findByRole("table", { name: "runs" });
+    await userEvent.click(within(screen.getByRole("group", { name: "filter by status" })).getByRole("button", { name: /^failed/ }));
+    await waitFor(() => expect(within(screen.getByRole("table", { name: "runs" })).getAllByRole("row")).toHaveLength(3 + 1));
+    expect(runCalls().some((p) => p.get("status") === "failed")).toBe(true);
+    expect(window.location.search).toContain("status=failed");
+    await userEvent.type(screen.getByRole("searchbox", { name: "filter runs" }), "f00");
+    expect(runCalls().every((p) => !p.has("q"))).toBe(true);
+  });
+
+  it("load more follows next_cursor until the last page", async () => {
+    window.history.pushState(null, "", "/ui/runs");
+    runs = many(130, { status: "completed" }, "c");
+    render(<App />);
+    const table = await screen.findByRole("table", { name: "runs" });
+    expect(within(table).getAllByRole("row")).toHaveLength(100 + 1);
+    await userEvent.click(screen.getByRole("button", { name: /load more/i }));
+    await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(130 + 1));
+    expect(runCalls().some((p) => p.get("cursor") === "100")).toBe(true);
+    expect(screen.queryByRole("button", { name: /load more/i })).not.toBeInTheDocument();
+    const ids = within(table).getAllByRole("row").slice(1).map((r) => r.textContent);
+    expect(new Set(ids).size).toBe(130);                                       // no row twice
+  });
+
+  it("filters by workflow on the server, from a row or the URL, and clears", async () => {
+    window.history.pushState(null, "", "/ui/runs");
+    runs = [summary({ id: "aaaa00000000", workflow: "haiku" }), summary({ id: "bbbb00000000", workflow: "diamond", status: "failed" })];
+    render(<App />);
+    const table = await screen.findByRole("table", { name: "runs" });
+    await userEvent.click(within(table).getByRole("button", { name: "only haiku runs" }));
+    await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(1 + 1));
+    expect(runCalls().some((p) => p.get("workflow") === "haiku")).toBe(true);
+    expect(window.location.search).toContain("workflow=haiku");
+    expect(within(screen.getByRole("group", { name: "filter by status" })).getByRole("button", { name: /^all/ })).toHaveTextContent("1");
+    await userEvent.click(screen.getByRole("button", { name: "clear workflow filter" }));
+    await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(2 + 1));
+    expect(window.location.search).not.toContain("workflow=");
   });
 });

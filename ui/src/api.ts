@@ -67,7 +67,18 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export interface RunSummary {
   id: string; workflow: string; workflow_version: number; status: string; total_cost: string;
-  last_seq: number; started_at: string; pending_approvals: number;
+  last_seq: number; started_at: string; pending_approvals: number; updated_at?: string | null;
+}
+/** GET /runs (E-07): `status` / `workflow` filter on the store's run index; `next_cursor` is
+ *  opaque and null on the last page; `counts` is runs per indexed status (for `workflow` when set). */
+export interface RunPage { data: RunSummary[]; next_cursor: string | null; counts: Record<string, number> }
+export interface RunQuery { limit?: number; status?: string | null; workflow?: string | null; cursor?: string | null }
+export function runsPath(q: RunQuery): string {
+  const p = new URLSearchParams({ limit: String(q.limit ?? 50) });
+  if (q.status) p.set("status", q.status);
+  if (q.workflow) p.set("workflow", q.workflow);
+  if (q.cursor) p.set("cursor", q.cursor);
+  return `/runs?${p.toString()}`;
 }
 
 /** GET /runs/{id}/integrity: the chain and seal verdict (C12, Phase 8 #3). `error` is set and
@@ -85,7 +96,7 @@ export interface PolicyDoc { sha256: string | null; policy: { agent_approval_all
 export const api = {
   me: () => request<Me>("GET", "/me"),
   approvals: () => request<{ data: Approval[] }>("GET", "/approvals"),
-  runs: (limit = 50) => request<{ data: RunSummary[] }>("GET", `/runs?limit=${limit}`),
+  runs: (q: RunQuery = {}) => request<RunPage>("GET", runsPath(q)),
   run: <T>(id: string) => request<T>("GET", `/runs/${encodeURIComponent(id)}`),
   /** Time travel: the SERVER folds the log prefix through `at` (same fold, fewer events). */
   runAt: <T>(id: string, at: number) => request<T>("GET", `/runs/${encodeURIComponent(id)}?at=${at}`),
