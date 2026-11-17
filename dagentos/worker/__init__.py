@@ -6,10 +6,10 @@ per run at a time), and the fence (a stale holder cannot write). The queue may d
 run id twice, late, or to two workers — all of those are safe.
 
 Crash recovery is a *sweep*, not queue magic: on start (and every `sweep_interval`) the
-worker folds every non-terminal run and re-enqueues it. A worker that was SIGKILLed
-mid-run leaves a lease that expires; the next sweep or delivery finds the run
-non-terminal, takes a new lease with a higher fence, and `advance()` continues from the
-last committed step.
+worker folds every run the run index lists as pending or running and re-enqueues the ones
+the fold says need a worker. A worker that was SIGKILLed mid-run leaves a lease that
+expires; the next sweep or delivery finds the run non-terminal, takes a new lease with a
+higher fence, and `advance()` continues from the last committed step.
 """
 from __future__ import annotations
 
@@ -23,7 +23,9 @@ from dagentos.core import faults
 from dagentos.core.coordination import Lease, LeaseToken, Queue
 from dagentos.core.engine import Engine, LeaseLost
 from dagentos.core.faults import FaultInjector, NoFaults
+from dagentos.core.models import RunStatus
 from dagentos.core.ports import ConflictError, Store
+from dagentos.core.run_index import NEEDS_WORKER
 
 log = logging.getLogger("agentos.worker")
 
@@ -74,20 +76,27 @@ class Worker:
     def recover(self) -> list[str]:
         """Re-enqueue every run that needs a worker (not terminal, not paused, not
         suspended). Also expires timed-out approvals (C7). Idempotent. Does nothing
-        while the scheduler is paused (A12): the deployment is frozen, not drained."""
+        while the scheduler is paused (A12): the deployment is frozen, not drained.
+        The run index names the candidates (E-07) — suspended runs for expiry, pending or
+        running ones for re-enqueue — so a sweep folds those, not every run ever recorded;
+        each candidate is still re-checked against its fold before anything acts on it."""
         if self._dispatch_blocked():
             return []
-        expired = self._engine.expire_approvals()
+        expired = self._engine.expire_approvals(self._run_ids(RunStatus.suspended))
         if expired:
             log.info("expired %d approval(s)", len(expired))
         found = []
-        for run_id in self._store.list_run_ids():
+        for run_id in self._run_ids(*NEEDS_WORKER):
             if self._engine.needs_worker(run_id):
                 self._queue.push(run_id)
                 found.append(run_id)
         if found:
             log.info("recovery sweep re-enqueued %d run(s)", len(found))
         return found
+
+    def _run_ids(self, *status: RunStatus) -> list[str]:
+        """Indexed runs in `status`, oldest first (the order the sweep always enqueued in)."""
+        return [r.run_id for r in reversed(self._store.list_runs(status=status, limit=None).runs)]
 
     # ------------------------------------------------------------------- loop
     def run_once(self, timeout: float = 1.0) -> str | None:

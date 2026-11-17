@@ -8,7 +8,9 @@ project does not otherwise use. A 2033 reader can understand this file in one si
 
 Rules: a migration is never edited once released — add the next number. Every statement
 must be idempotent (`IF NOT EXISTS`) so a database created before the ledger existed
-(v0.2–v0.6) adopts it by simply running everything; nothing is dropped or rewritten.
+(v0.2–v0.6) adopts it by simply running everything; nothing is dropped or rewritten. The one
+statement SQLite cannot make idempotent is `ALTER TABLE ... ADD COLUMN` (migration 4), so the
+SQLite adapter commits each migration together with its ledger row: it runs once or not at all.
 """
 from __future__ import annotations
 
@@ -63,6 +65,29 @@ CREATE TABLE IF NOT EXISTS scheduler_state (
     reason     TEXT    NOT NULL DEFAULT '',
     changed_at TIMESTAMPTZ NOT NULL
 );
+""",
+    }),
+    (4, "runs index: status, pending_approvals, indexed_seq, updated_at (E-07)", {
+        # A rebuildable index of each run's log (dagentos.core.run_index), written in the
+        # append transaction. NULL until indexed: the adapter's migrate() indexes every run whose
+        # row is behind its log, which on this upgrade is every run (the backfill). `workflow`
+        # and `created_at` were already columns. SQLite has no ADD COLUMN IF NOT EXISTS, so its
+        # adapter runs each migration and its ledger row in one transaction instead.
+        "sqlite": """
+ALTER TABLE runs ADD COLUMN status TEXT;
+ALTER TABLE runs ADD COLUMN pending_approvals TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE runs ADD COLUMN indexed_seq INTEGER;
+ALTER TABLE runs ADD COLUMN updated_at TEXT;
+CREATE INDEX IF NOT EXISTS runs_by_status ON runs (status, created_at, run_id);
+CREATE INDEX IF NOT EXISTS runs_by_created ON runs (created_at, run_id);
+""",
+        "postgres": """
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS status TEXT;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS pending_approvals JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS indexed_seq INTEGER;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS runs_by_status ON runs (status, created_at, run_id);
+CREATE INDEX IF NOT EXISTS runs_by_created ON runs (created_at, run_id);
 """,
     }),
 ]

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -26,9 +27,19 @@ from typing import Any
 
 from dagentos.core.coordination import LeaseToken
 from dagentos.core.events import Event, RunStarted, SchedulerState, from_record
-from dagentos.core.models import Agent, BlobRef, Principal, WorkflowDefinition
+from dagentos.core.models import Agent, BlobRef, Principal, RunStatus, WorkflowDefinition
 from dagentos.core.ports import ConflictError
+from dagentos.core.run_index import (
+    RunIndex,
+    RunPage,
+    RunSummary,
+    decode_cursor,
+    encode_cursor,
+    index_events,
+)
 from dagentos.store import migrations
+
+_log = logging.getLogger("agentos.store")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_versions (
@@ -89,6 +100,42 @@ def _create_owner_only(path: str) -> None:
     os.close(os.open(path, os.O_CREAT | os.O_RDWR, 0o600))
 
 
+def _status(value: str | None) -> RunStatus | None:
+    try:
+        return RunStatus(value) if value is not None else None
+    except ValueError:                     # a hand-edited row lists as unindexed, never a 500
+        return None
+
+
+def _decode_index(row: tuple) -> RunIndex | None:
+    """(status, pending_approvals, indexed_seq, updated_at) → RunIndex, or None when the row is
+    not indexed yet or unreadable — the caller then rebuilds it from the whole log."""
+    status = _status(row[0])
+    if status is None or row[2] is None:
+        return None
+    try:
+        pending = json.loads(row[1])
+        updated = datetime.fromisoformat(row[3]) if row[3] else None
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(pending, list) or not all(isinstance(p, str) for p in pending):
+        return None
+    return RunIndex(status=status, pending_approvals=tuple(pending), indexed_seq=int(row[2]),
+                    updated_at=updated)
+
+
+def _run_filter(status: Sequence[RunStatus] | None, workflow: str | None) -> tuple[list[str], list]:
+    where: list[str] = []
+    params: list = []
+    if status:
+        where.append(f"status IN ({', '.join('?' for _ in status)})")
+        params += [s.value for s in status]
+    if workflow is not None:
+        where.append("workflow = ?")
+        params.append(workflow)
+    return where, params
+
+
 class SqliteStore:
     def __init__(self, path: str | Path = ":memory:") -> None:
         self._path = str(path)
@@ -122,14 +169,125 @@ class SqliteStore:
 
         Held under the lock end to end: the version SELECT, each script and each version
         INSERT are statements on the shared connection, and a re-run overlapping a locked
-        read otherwise gets that read's rows (four-seat review v0.16.0, A3)."""
+        read otherwise gets that read's rows (four-seat review v0.16.0, A3).
+
+        One IMMEDIATE transaction around the ledger read, every pending script and its ledger
+        row: SQLite's `ALTER TABLE ... ADD COLUMN` (migration 4) has no IF NOT EXISTS, so DDL
+        committed without its ledger row could never be re-run, and an API and a worker
+        starting together on one file must not both apply it. Scripts run statement by
+        statement because `executescript` commits the open transaction. Then every run whose
+        index row is behind its log is caught up (the migration-4 backfill, see run_index).
+        A database already at the latest version is only read: no write lock at open."""
         with self._lock:
-            return migrations.apply(
-                "sqlite", SCHEMA, self._conn.executescript,
-                lambda: {r[0] for r in self._conn.execute(
-                    "SELECT version FROM schema_migrations").fetchall()},
-                lambda v, d, at: self._conn.execute(
-                    "INSERT OR IGNORE INTO schema_migrations VALUES (?, ?, ?)", (v, d, at)))
+            if not self._migrations_pending():
+                applied: list[int] = []
+            else:
+                self._conn.execute("BEGIN IMMEDIATE")
+                try:
+                    applied = migrations.apply(
+                        "sqlite", SCHEMA, self._script,
+                        lambda: {r[0] for r in self._conn.execute(
+                            "SELECT version FROM schema_migrations").fetchall()},
+                        lambda v, d, at: self._conn.execute(
+                            "INSERT OR IGNORE INTO schema_migrations VALUES (?, ?, ?)", (v, d, at)))
+                    self._conn.execute("COMMIT")
+                except BaseException:
+                    self._conn.execute("ROLLBACK")
+                    raise
+        self._catch_up_index()
+        return applied
+
+    def _migrations_pending(self) -> bool:
+        """Read-only pre-check; `apply` re-reads the ledger inside the write transaction."""
+        try:
+            done = {r[0] for r in self._conn.execute("SELECT version FROM schema_migrations")}
+        except sqlite3.OperationalError:          # no ledger yet
+            return True
+        return any(v not in done for v, _d, _by in migrations.MIGRATIONS)
+
+    def _script(self, sql: str) -> None:
+        """Run a multi-statement script inside the caller's transaction."""
+        stmt = ""
+        for line in sql.splitlines(keepends=True):
+            stmt += line
+            if sqlite3.complete_statement(stmt):
+                self._conn.execute(stmt)
+                stmt = ""
+        if stmt.strip():
+            self._conn.execute(stmt)
+
+    # run index (E-07): a rebuildable index of each run's log, see dagentos.core.run_index
+    def _write_index(self, run_id: str, last_seq: int, new: Sequence[Event] = ()) -> None:
+        """Inside the caller's transaction: bring the run's row from what it reflects up to
+        `last_seq` (reading any events a pre-migration-4 process appended behind it), then
+        through `new`. No row (events for a run that never started) is left alone."""
+        row = self._conn.execute(
+            "SELECT status, pending_approvals, indexed_seq, updated_at FROM runs WHERE run_id = ?",
+            (run_id,)).fetchone()
+        if row is None:
+            return
+        prev = _decode_index(row)
+        seen = prev.indexed_seq if prev is not None else 0
+        behind = [] if seen == last_seq else [from_record(json.loads(r[0])) for r in self._conn.execute(
+            "SELECT record FROM run_events WHERE run_id = ? AND seq > ? AND seq <= ? ORDER BY seq",
+            (run_id, seen, last_seq)).fetchall()]
+        idx = index_events(prev, [*behind, *new])
+        self._conn.execute(
+            "UPDATE runs SET status = ?, pending_approvals = ?, indexed_seq = ?, updated_at = ? "
+            "WHERE run_id = ?",
+            (idx.status.value, json.dumps(list(idx.pending_approvals)), idx.indexed_seq,
+             idx.updated_at.isoformat() if idx.updated_at else None, run_id))
+
+    def _catch_up_index(self) -> None:
+        stale = self._all(
+            "SELECT r.run_id FROM runs r WHERE r.indexed_seq IS NULL OR r.indexed_seq < "
+            "(SELECT COALESCE(MAX(seq), 0) FROM run_events e WHERE e.run_id = r.run_id)")
+        for (run_id,) in stale:
+            with self._lock:
+                self._conn.execute("BEGIN IMMEDIATE")
+                try:
+                    (last,) = self._conn.execute(
+                        "SELECT COALESCE(MAX(seq), 0) FROM run_events WHERE run_id = ?", (run_id,)
+                    ).fetchone()
+                    self._write_index(run_id, last)
+                    self._conn.execute("COMMIT")
+                except BaseException:
+                    self._conn.execute("ROLLBACK")
+                    raise
+        if stale:
+            _log.info("run index: caught up %d run(s) behind their log", len(stale))
+
+    def list_runs(self, *, status: Sequence[RunStatus] | None = None,
+                  workflow: str | None = None, cursor: str | None = None,
+                  limit: int | None = 50) -> RunPage:
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be >= 1 or None")
+        if status is not None and not status:
+            return RunPage()
+        where, params = _run_filter(status, workflow)
+        if cursor is not None:
+            key, after = decode_cursor(cursor)
+            where.append("(created_at, run_id) < (?, ?)")
+            params += [key, after]
+        rows = self._all(
+            "SELECT run_id, workflow, status, created_at, updated_at FROM runs"
+            + (" WHERE " + " AND ".join(where) if where else "")
+            + " ORDER BY created_at DESC, run_id DESC LIMIT ?",
+            (*params, -1 if limit is None else limit + 1))
+        more = limit is not None and len(rows) > limit
+        rows = rows[:limit] if more else rows
+        return RunPage(
+            runs=[RunSummary(run_id=r[0], workflow=r[1], status=_status(r[2]),
+                             created_at=datetime.fromisoformat(r[3]),
+                             updated_at=datetime.fromisoformat(r[4]) if r[4] else None)
+                  for r in rows],
+            next_cursor=encode_cursor(rows[-1][3], rows[-1][0]) if more else None)
+
+    def run_status_counts(self, *, workflow: str | None = None) -> dict[str, int]:
+        where, params = _run_filter(None, workflow)
+        rows = self._all("SELECT status, COUNT(*) FROM runs WHERE status IS NOT NULL"
+                         + "".join(f" AND {w}" for w in where) + " GROUP BY status", tuple(params))
+        return {r[0]: int(r[1]) for r in rows}
 
     def schema_version(self) -> int:
         (v,) = self._one("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
@@ -271,6 +429,9 @@ class SqliteStore:
                     except sqlite3.IntegrityError as exc:  # PRIMARY KEY(run_id, seq)
                         raise ConflictError(f"run {run_id!r}: seq {i} already exists") from exc
                     out.append(stamped)
+                # The index row moves in this transaction, so it never disagrees with the fold
+                # at a commit boundary (E-07); a conflict above rolls it back with the events.
+                self._write_index(run_id, expected_seq, out)
                 if fence is not None:
                     self._conn.execute(
                         "UPDATE runs SET max_fence = ? WHERE run_id = ?", (fence, run_id)

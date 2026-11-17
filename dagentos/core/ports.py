@@ -14,11 +14,13 @@ from dagentos.core.events import Event, SchedulerState
 from dagentos.core.models import (
     Agent,
     BlobRef,
+    RunStatus,
     StepRequest,
     StepResult,
     WorkflowDefinition,
     WorkflowRun,
 )
+from dagentos.core.run_index import RunPage
 
 
 class ConflictError(Exception):
@@ -62,10 +64,24 @@ class Store(Protocol):
         psycopg_pool) is longer than any probe. Reads nothing; writes nothing."""
         ...
     def list_run_ids(self) -> list[str]:
-        """Every run id, oldest first (creation order). `GET /runs` walks it from the end
-        and stops when its page is full, so the order is part of the contract."""
+        """Every run id, oldest first (creation order)."""
         ...
     def run_id_for_request(self, request_id: str) -> str | None: ...
+
+    # Run index (audit E-07, dagentos.core.run_index): a derived row per run, written by
+    # `append_events` in the same transaction as the events from `index_events`, so it never
+    # disagrees with the fold at a commit boundary. Nothing that decides reads it — callers
+    # fold each run it returns and act on the fold.
+    def list_runs(self, *, status: Sequence[RunStatus] | None = None,
+                  workflow: str | None = None, cursor: str | None = None,
+                  limit: int | None = 50) -> RunPage:
+        """Runs newest-created first (created_at, then run_id, descending), filtered on the
+        index. `cursor` is a previous page's `next_cursor`; ValueError if it is not one.
+        `limit=None` returns every match in one page (the sweep and the inbox)."""
+        ...
+    def run_status_counts(self, *, workflow: str | None = None) -> dict[str, int]:
+        """Runs per indexed status; a row not indexed yet is not counted (doctor reports it)."""
+        ...
 
     # Snapshots (C15): a folded WorkflowRun at `seq`, so a resume reads only the events
     # after it. A bounded OPTIMIZATION of the fold, never the source of truth: the engine

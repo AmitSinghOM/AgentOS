@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -28,8 +29,16 @@ from psycopg_pool import ConnectionPool
 
 from dagentos.core.coordination import LeaseToken
 from dagentos.core.events import Event, RunStarted, SchedulerState, from_record
-from dagentos.core.models import Agent, BlobRef, Principal, WorkflowDefinition
+from dagentos.core.models import Agent, BlobRef, Principal, RunStatus, WorkflowDefinition
 from dagentos.core.ports import ConflictError
+from dagentos.core.run_index import (
+    RunIndex,
+    RunPage,
+    RunSummary,
+    decode_cursor,
+    encode_cursor,
+    index_events,
+)
 from dagentos.store import migrations
 
 SCHEMA = """
@@ -80,6 +89,48 @@ CREATE TABLE IF NOT EXISTS blobs (
 );
 """
 
+_log = logging.getLogger("agentos.store")
+
+
+def _status(value: str | None) -> RunStatus | None:
+    try:
+        return RunStatus(value) if value is not None else None
+    except ValueError:                     # a hand-edited row lists as unindexed, never a 500
+        return None
+
+
+def _decode_index(row) -> RunIndex | None:
+    """(status, pending_approvals, indexed_seq, updated_at) → RunIndex, or None when the row is
+    not indexed yet or unreadable — the caller then rebuilds it from the whole log."""
+    status, pending = _status(row[0]), row[1]
+    if status is None or row[2] is None or not isinstance(pending, list) \
+            or not all(isinstance(p, str) for p in pending):
+        return None
+    return RunIndex(status=status, pending_approvals=tuple(pending), indexed_seq=int(row[2]),
+                    updated_at=row[3])
+
+
+def _behind(conn, run_id: str, prev: RunIndex | None, upto: int) -> list[Event]:
+    """Events a row has not seen yet, up to `upto` (written by a pre-migration-4 process)."""
+    seen = prev.indexed_seq if prev is not None else 0
+    if seen >= upto:
+        return []
+    rows = conn.execute("SELECT record FROM run_events WHERE run_id = %s AND seq > %s "
+                        "AND seq <= %s ORDER BY seq", (run_id, seen, upto)).fetchall()
+    return [from_record(r[0]) for r in rows]
+
+
+def _run_filter(status: Sequence[RunStatus] | None, workflow: str | None) -> tuple[list[str], list]:
+    where: list[str] = []
+    params: list = []
+    if status:
+        where.append("status = ANY(%s)")
+        params.append([s.value for s in status])
+    if workflow is not None:
+        where.append("workflow = %s")
+        params.append(workflow)
+    return where, params
+
 
 class PostgresStore:
     def __init__(self, dsn: str, *, schema: str | None = None, min_size: int = 1,
@@ -93,17 +144,21 @@ class PostgresStore:
         self.migrate()
 
     def migrate(self) -> list[int]:
-        """Apply pending schema migrations (dagentos/store/migrations.py); idempotent."""
+        """Apply pending schema migrations (dagentos/store/migrations.py); idempotent. All of
+        them run in this connection's one transaction. Then every run whose index row is behind
+        its log is caught up (the migration-4 backfill, see run_index)."""
         with self._pool.connection() as conn:
             if self._schema:
                 conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{self._schema}"')
-            return migrations.apply(
+            applied = migrations.apply(
                 "postgres", SCHEMA, conn.execute,
                 lambda: {r[0] for r in conn.execute(
                     "SELECT version FROM schema_migrations").fetchall()},
                 lambda v, d, at: conn.execute(
                     "INSERT INTO schema_migrations VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                     (v, d, at)))
+        self._catch_up_index()
+        return applied
 
     def schema_version(self) -> int:
         with self._pool.connection() as conn:
@@ -220,7 +275,8 @@ class PostgresStore:
             # Serialize appenders on the run row. A brand-new run has no row yet, so
             # concurrent creators race on runs.request_id / PRIMARY KEY instead.
             row = conn.execute(
-                "SELECT last_seq, max_fence FROM runs WHERE run_id = %s FOR UPDATE", (run_id,)
+                "SELECT last_seq, max_fence, status, pending_approvals, indexed_seq, updated_at "
+                "FROM runs WHERE run_id = %s FOR UPDATE", (run_id,)
             ).fetchone()
             current, seen_fence = (row[0], row[1]) if row else (0, 0)
             if fence is not None and fence < seen_fence:   # fence first (see MemoryStore)
@@ -257,10 +313,16 @@ class PostgresStore:
                 except errors.UniqueViolation as exc:  # PRIMARY KEY(run_id, seq)
                     raise ConflictError(f"run {run_id!r}: seq {i} already exists") from exc
                 out.append(stamped)
+            # The index row moves in this transaction, so it never disagrees with the fold at
+            # a commit boundary (E-07); a conflict above rolls it back with the events.
+            prev = _decode_index(row[2:]) if row else None
+            idx = index_events(prev, [*_behind(conn, run_id, prev, expected_seq), *out])
             conn.execute(
-                "UPDATE runs SET last_seq = %s, max_fence = GREATEST(max_fence, %s) "
+                "UPDATE runs SET last_seq = %s, max_fence = GREATEST(max_fence, %s), "
+                "status = %s, pending_approvals = %s::jsonb, indexed_seq = %s, updated_at = %s "
                 "WHERE run_id = %s",
-                (expected_seq + len(out), fence if fence is not None else 0, run_id),
+                (expected_seq + len(out), fence if fence is not None else 0, idx.status.value,
+                 json.dumps(list(idx.pending_approvals)), idx.indexed_seq, idx.updated_at, run_id),
             )
             return out
 
@@ -282,6 +344,65 @@ class PostgresStore:
         with self._pool.connection() as conn:
             rows = conn.execute("SELECT run_id FROM runs ORDER BY created_at, run_id").fetchall()
         return [r[0] for r in rows]
+
+    # run index (E-07): a rebuildable index of each run's log, see dagentos.core.run_index
+    def _catch_up_index(self) -> None:
+        """Index every run whose row is behind its log: on the migration-4 upgrade that is
+        every run (the backfill); afterwards only runs a pre-migration-4 process appended to.
+        One short transaction per run, holding the run row like an append does."""
+        with self._pool.connection() as conn:
+            stale = conn.execute(
+                "SELECT run_id FROM runs WHERE indexed_seq IS DISTINCT FROM last_seq").fetchall()
+        for (run_id,) in stale:
+            with self._pool.connection() as conn, conn.transaction():
+                row = conn.execute(
+                    "SELECT last_seq, status, pending_approvals, indexed_seq, updated_at "
+                    "FROM runs WHERE run_id = %s FOR UPDATE", (run_id,)).fetchone()
+                if row is None:                    # runs rows are never deleted; defensive
+                    continue
+                prev = _decode_index(row[1:])
+                idx = index_events(prev, _behind(conn, run_id, prev, row[0]))
+                conn.execute(
+                    "UPDATE runs SET status = %s, pending_approvals = %s::jsonb, "
+                    "indexed_seq = %s, updated_at = %s WHERE run_id = %s",
+                    (idx.status.value, json.dumps(list(idx.pending_approvals)), idx.indexed_seq,
+                     idx.updated_at, run_id))
+        if stale:
+            _log.info("run index: caught up %d run(s) behind their log", len(stale))
+
+    def list_runs(self, *, status: Sequence[RunStatus] | None = None,
+                  workflow: str | None = None, cursor: str | None = None,
+                  limit: int | None = 50) -> RunPage:
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be >= 1 or None")
+        if status is not None and not status:
+            return RunPage()
+        where, params = _run_filter(status, workflow)
+        if cursor is not None:
+            key, after = decode_cursor(cursor)
+            where.append("(created_at, run_id) < (%s::timestamptz, %s)")
+            params += [key, after]
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT run_id, workflow, status, created_at, updated_at FROM runs"
+                + (" WHERE " + " AND ".join(where) if where else "")
+                + " ORDER BY created_at DESC, run_id DESC LIMIT %s",
+                (*params, None if limit is None else limit + 1)).fetchall()
+        more = limit is not None and len(rows) > limit
+        rows = rows[:limit] if more else rows
+        return RunPage(
+            runs=[RunSummary(run_id=r[0], workflow=r[1], status=_status(r[2]), created_at=r[3],
+                             updated_at=r[4]) for r in rows],
+            next_cursor=encode_cursor(rows[-1][3].isoformat(), rows[-1][0]) if more else None)
+
+    def run_status_counts(self, *, workflow: str | None = None) -> dict[str, int]:
+        where, params = _run_filter(None, workflow)
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) FROM runs WHERE status IS NOT NULL"
+                + "".join(f" AND {w}" for w in where) + " GROUP BY status", tuple(params)
+            ).fetchall()
+        return {r[0]: int(r[1]) for r in rows}
 
     def run_id_for_request(self, request_id: str) -> str | None:
         with self._pool.connection() as conn:

@@ -216,17 +216,29 @@ def _configured_keyring(report: Report) -> HmacKeyring | None:
 
 
 def _check_runs(store, run_ids: list[str], keyring: HmacKeyring | None, report: Report) -> None:
+    indexed = {r.run_id: r.status for r in store.list_runs(limit=None).runs}
     bad_fold = bad_chain = 0
+    drifted: list[str] = []
     for run_id in run_ids:
         try:
-            fold(store.read_events(run_id))
+            if fold(store.read_events(run_id)).status is not indexed.get(run_id):
+                drifted.append(run_id)
         except FoldError:
-            bad_fold += 1
+            bad_fold += 1                 # counted here; its index row is not judged
         if _verify_run(store, run_id, keyring).status == FAIL:
             bad_chain += 1
     n = len(run_ids)
     report.add("runs fold", OK if not bad_fold else FAIL, f"{n - bad_fold}/{n}")
     report.add("runs verify", OK if not bad_chain else FAIL, f"{n - bad_chain}/{n} (chain + seals)")
+    # E-07: read-only. A disagreeing row can hide a run from a status filter, the approvals
+    # inbox or the sweep; every per-run view still serves the fold (docs/FAIL_MODES.md).
+    judged = n - bad_fold
+    report.add("runs index", OK if not drifted else FAIL,
+               f"{judged - len(drifted)}/{judged} runs.status rows agree with the fold"
+               + (f"; disagree: {', '.join(r[:8] for r in drifted[:5])}"
+                  + (f" (+{len(drifted) - 5} more)" if len(drifted) > 5 else "")
+                  + " (API and worker still act on the fold; docs/FAIL_MODES.md, run index)"
+                  if drifted else ""))
 
 
 # ------------------------------------------------------------------ policy explain
