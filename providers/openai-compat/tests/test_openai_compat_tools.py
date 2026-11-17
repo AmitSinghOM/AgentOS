@@ -6,8 +6,9 @@ rejected, never run, and the refusal goes back to the model as the tool result; 
 results go back as delimited data; the loop is bounded by `max_tool_rounds`; usage is
 summed across rounds; and each call is recorded in the shape the SDK harnesses record
 (`name, call_id, arguments_sha256, output_sha256, rejected?`). Every test drives the
-in-process reference server's scripted trajectory (`openai_reference_server._tool_turn`)
-or the committed cassette recorded from it — never the network.
+in-process reference server's scripted trajectory (`openai_reference_server._tool_turn`),
+the committed cassette recorded from it, or the committed cassette recorded from a real
+Ollama (`tool_round_trip_live.json`) — never the network.
 """
 from __future__ import annotations
 
@@ -36,8 +37,17 @@ import openai_reference_server as ref
 
 CASSETTES = HERE / "cassettes"
 TOOL_CASSETTE = "tool_round_trip"
+TOOL_LIVE_CASSETTE = "tool_round_trip_live"
 RECORD_SCRIPT = HERE.parent / "scripts" / "record_cassettes.py"
 QUICKSTART_LLM = HERE.parents[2] / "docs" / "quickstart-llm.md"
+
+
+def _record_script():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("openai_compat_record_cassettes", RECORD_SCRIPT)
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    return script
 
 
 def _sha(text: str) -> str:
@@ -280,10 +290,7 @@ def test_tool_round_trip_replays_from_the_committed_cassette_without_the_network
 def test_the_committed_tool_cassette_is_what_the_record_script_produces(tmp_path):
     """The fixture is reproducible: `scripts/record_cassettes.py --tools` against the
     reference server writes the same interactions (keys and bodies) as the committed file."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("openai_compat_record_cassettes", RECORD_SCRIPT)
-    script = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(script)
+    script = _record_script()
     assert script.record_tools(tmp_path) == 0
     fresh = json.loads((tmp_path / f"{TOOL_CASSETTE}.json").read_text())
     committed = json.loads((CASSETTES / f"{TOOL_CASSETTE}.json").read_text())
@@ -293,6 +300,53 @@ def test_the_committed_tool_cassette_is_what_the_record_script_produces(tmp_path
 
     assert len(committed["interactions"]) == 2 and exchanges(fresh) == exchanges(committed)
     assert committed["source"] == "http://reference-server/v1"     # labelled as the fake
+
+
+def test_the_live_cassette_replays_a_real_models_tool_call_round_trip():
+    """`tool_round_trip_live.json` is the one fixture recorded from a REAL model: the
+    quickstart's `counter` agent against Ollama (`scripts/record_cassettes.py --tools --live`;
+    the nightly `provider-live` job re-records it). Replaying it drives the executor's
+    handling of a real server's `tool_calls` shape — the id, the stringified `arguments`, the
+    `finish_reason`, the per-round `usage` — not the reference server's imitation of it.
+    Model-agnostic on purpose: the model is read from the recording, so the same test passes
+    on the nightly's fresh re-record against whichever model the job pulled."""
+    class Boom(httpx.BaseTransport):
+        def handle_request(self, request):
+            raise AssertionError("network used during replay")
+
+    script = _record_script()
+    cassette = json.loads((CASSETTES / f"{TOOL_LIVE_CASSETTE}.json").read_text())
+    assert len(cassette["interactions"]) == 2
+    first = next(i for i in cassette["interactions"] if not any(
+        m["role"] == "tool" for m in json.loads(i["request"]["body"])["messages"]))
+    model = json.loads(first["request"]["body"])["model"]
+    round_1 = json.loads(first["response"]["body"])["usage"]
+    assert not cassette["source"].startswith("http://reference-server")      # labelled live
+    assert f"model={model}" in cassette["source"] and "ollama=" in cassette["source"]
+
+    agent = script.quickstart_tool_agent()
+    cfg = from_env({"AGENTOS_OPENAI_ALIASES": json.dumps({agent["config"]["model"]: model}),
+                    "AGENTOS_OPENAI_CASSETTES": "replay",
+                    "AGENTOS_OPENAI_CASSETTE_DIR": str(CASSETTES)})
+    ex = OpenAICompatExecutor(cfg, registry=registry(), transport=Boom(),
+                              cassette_name=TOOL_LIVE_CASSETTE)
+    declared = tuple(EffectClass(e) for e in agent["declared_effects"])
+    res = ex.execute(request(agent["config"], declared=declared,
+                             inputs=script.TOOL_LIVE_INPUTS), noop)
+
+    [rec] = res.output["tool_calls"]
+    assert rec["name"] == "word_count" and "rejected" not in rec
+    assert len(rec["arguments_sha256"]) == 64
+    topic = script.TOOL_LIVE_INPUTS["run"]["topic"]
+    count = str(len(topic.split()))
+    assert rec["output_sha256"] == _sha(count)                     # the tool really ran
+    assert res.output["turns"] == 2 and res.output["model"] == model
+    assert res.output["finish_reason"] == "stop" and count in res.output["text"]
+    assert [(e.effect_class, e.description) for e in res.effects][1:] == \
+        [(EffectClass.compute, "tool word_count")]
+    # Summed over both rounds, so strictly more than round 1 alone reported.
+    assert res.output["usage"]["input_tokens"] > round_1["prompt_tokens"]
+    assert res.output["usage"]["output_tokens"] > round_1["completion_tokens"]
 
 
 # ------------------------------------------------------------------ parity and docs

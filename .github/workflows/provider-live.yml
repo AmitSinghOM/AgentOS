@@ -5,6 +5,12 @@
 # recordings are uploaded as an artifact, never committed automatically: a human looks at
 # the diff and opens a PR. If this job fails for 30 days, the provider README marks the
 # plugin `deprecated`; the core is unaffected.
+#
+# The function-calling round trip (ROADMAP A8, #148) runs LIVE here too, on a second, larger
+# model: qwen2.5:0.5b never emits a tool call (0/3 on the quickstart phrase, measured
+# 2026-11-18 on Ollama 0.40.16), qwen2.5:1.5b does (3/3; 9/10 on
+# providers/openai-compat/scripts/probe_tool_boundary.py). The live cassette
+# `tool_round_trip_live.json` is re-recorded from that model and uploaded with the rest.
 name: provider-live
 on:
   schedule:
@@ -14,6 +20,9 @@ on:
       model:
         description: "Ollama model to record against"
         default: "qwen2.5:0.5b"
+      model_tools:
+        description: "Ollama model for the live function-calling round trip (must emit tool calls)"
+        default: "qwen2.5:1.5b"
 
 permissions:
   contents: read
@@ -48,18 +57,36 @@ jobs:
           nohup ollama serve > ollama.log 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:11434/v1/models && break; sleep 2; done
           ollama pull "$MODEL"
+      - name: Live function-calling round trip on the runner's Ollama (the tool path, for real)
+        # Closes the second gap from #148: the tool tests below replay recordings, so a
+        # real-model regression in the tool path had no nightly to fail. One extra pull;
+        # the model name reaches the shell only through `env:`, as above.
+        env:
+          TOOL_MODEL: ${{ github.event.inputs.model_tools || 'qwen2.5:1.5b' }}
+          AGENTOS_LIVE_TOOLS: "1"
+        run: |
+          set -euo pipefail
+          ollama pull "$TOOL_MODEL"
+          export AGENTOS_OPENAI_ALIASES="{\"chat.default\": \"$TOOL_MODEL\"}"
+          pytest -q providers/openai-compat/tests -k live_tool -p no:cacheprovider
       - name: Re-record cassettes against the live server (both wire formats)
         env:
           MODEL: ${{ github.event.inputs.model || 'qwen2.5:0.5b' }}
+          TOOL_MODEL: ${{ github.event.inputs.model_tools || 'qwen2.5:1.5b' }}
         run: |
           set -euo pipefail
           export AGENTOS_OPENAI_ALIASES="{\"chat.fast\": \"$MODEL\"}"
           export AGENTOS_ANTHROPIC_ALIASES="{\"chat.fast\": \"$MODEL\"}"
           python providers/openai-compat/scripts/record_cassettes.py --live
           python providers/anthropic/scripts/record_cassettes.py --live
+          # The live tool cassette comes from the tool model (the quickstart agent's
+          # `chat.default`); the scripted `tool_round_trip.json` stays as committed.
+          AGENTOS_OPENAI_ALIASES="{\"chat.default\": \"$TOOL_MODEL\"}" \
+            python providers/openai-compat/scripts/record_cassettes.py --tools --live
       - name: Replay tests pass on the fresh recordings; every other provider suite runs too
         # Audit I-11: this job used to replay only openai-compat and anthropic, so a floor
-        # drift in pydantic-ai, openai-agents or acp had no nightly to fail.
+        # drift in pydantic-ai, openai-agents or acp had no nightly to fail. Includes the
+        # replay of the just-recorded tool_round_trip_live.json.
         run: pytest -q providers tests/test_quickstart_llm.py -p no:cacheprovider
       - name: Show what changed
         run: git -P diff --stat -- providers/*/tests/cassettes
