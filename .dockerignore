@@ -1,4 +1,6 @@
-# Only the built wheels reach the image build context (Dockerfile installs from dist/).
+# Only the built wheels reach the image build context (Dockerfile installs from dist/),
+# plus the hash-pinned list of their third-party dependencies.
 *
 !dist/
 !dist/*.whl
+!deploy/constraints.txt

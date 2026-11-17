@@ -13,15 +13,20 @@
 FROM python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9 AS build
 WORKDIR /wheels
 COPY dist/ ./dist/
+COPY deploy/constraints.txt ./constraints.txt
 RUN python -m venv /opt/agentos \
- && /opt/agentos/bin/pip install --no-cache-dir --upgrade pip \
- # our own packages by wheel PATH (never resolved from an index); their third-party
- # dependencies come from PyPI as usual
- && /opt/agentos/bin/pip install --no-cache-dir \
+ # every third-party distribution in the image (and pip itself) comes from deploy/constraints.txt:
+ # one exact version each, verified against the sha256 of the file PyPI serves; anything not on
+ # that list is refused (audit I-21/E-20; regenerate with scripts/refresh_constraints.py)
+ && /opt/agentos/bin/pip install --no-cache-dir --require-hashes -r ./constraints.txt \
+ # our own packages by wheel PATH (never resolved from an index); --no-deps because every
+ # dependency is already installed from the constraints above, so nothing else can slip in
+ && /opt/agentos/bin/pip install --no-cache-dir --no-deps \
       "$(ls ./dist/dagentos-*.whl)[providerkit,observability]" \
       ./dist/agentos_provider_openai_compat-*.whl ./dist/agentos_provider_anthropic-*.whl \
       ./dist/agentos_provider_openai_agents-*.whl ./dist/agentos_provider_pydantic_ai-*.whl \
       ./dist/agentos_provider_acp-*.whl \
+ && /opt/agentos/bin/pip check \
  && /opt/agentos/bin/agentos --help > /dev/null
 
 FROM python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9

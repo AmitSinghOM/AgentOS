@@ -14,6 +14,8 @@ import re
 import tomllib
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 CORE = tomllib.loads((ROOT / "pyproject.toml").read_text())
 PROVIDERS = sorted((ROOT / "providers").glob("*/pyproject.toml"))
@@ -57,6 +59,118 @@ def test_publish_workflow_is_sha_pinned_and_pypi_is_an_explicit_switch():
     assert "vars.PYPI_PUBLISH == 'true'" in wf and "PyPI upload not enabled" in wf
     assert "scripts/release_smoke.py" in wf and "twine check --strict" in wf
     assert "attest-build-provenance" in wf and "subject-digest" in wf
+
+
+WORKFLOWS = sorted(p.name for p in (ROOT / ".github" / "workflows").glob("*.yml"))
+
+
+@pytest.mark.parametrize("name", WORKFLOWS)
+def test_every_workflow_pins_every_action_by_commit_sha(name):
+    """Audit I-22: publish.yml was SHA-pinned because it holds `id-token: write`, but ci.yml and
+    provider-live.yml still ran `actions/*@v7` — a moved tag on any of them runs foreign code
+    with the repository's read token and the PR's secrets. Every `uses:` in every workflow is a
+    40-hex commit followed by a `# vN.N.N` comment, the shape Dependabot understands and bumps."""
+    wf = (ROOT / ".github" / "workflows" / name).read_text()
+    lines = [ln for ln in wf.splitlines() if re.search(r"^\s*-?\s*uses:\s", ln)]
+    assert lines, f"{name} has no `uses:` lines"
+    for ln in lines:
+        m = re.search(r"uses:\s*(\S+)@([0-9a-f]{40})\s+#\s*(v\d+\.\d+\.\d+|release/v\d+)\s*$", ln)
+        assert m, f"{name}: not `owner/action@<40-hex> # vN.N.N`: {ln.strip()}"
+
+
+def test_provider_live_verifies_the_ollama_installer_and_quotes_the_model_input():
+    """Audit I-22: `curl https://ollama.com/install.sh | sh` ran whatever the CDN served; the
+    step now downloads the script, checks its recorded sha256 and only then runs it. The
+    operator-supplied `model` input reaches the shell through `env:` only, never substituted
+    into a `run:` block (GitHub's script-injection shape)."""
+    live = (ROOT / ".github" / "workflows" / "provider-live.yml").read_text()
+    assert "install.sh | sh" not in live, "installer is still piped straight into sh"
+    assert re.search(r"curl -fsSL -o install\.sh https://ollama\.com/install\.sh", live)
+    assert re.search(r'OLLAMA_INSTALL_SHA256: "[0-9a-f]{64}"', live), "no recorded sha256"
+    assert 'echo "$OLLAMA_INSTALL_SHA256  install.sh" | sha256sum -c -' in live
+    assert "\n          sh install.sh\n" in live
+    for ln in live.splitlines():
+        if "github.event.inputs" in ln:
+            assert re.fullmatch(r"\s+[A-Z_]+: \$\{\{ github\.event\.inputs\.model[^}]*\}\}", ln), \
+                f"input used outside an env: entry: {ln.strip()}"
+    assert 'ollama pull "$MODEL"' in live
+
+
+def test_dependabot_watches_the_image_base():
+    """Audit I-21: the Dockerfile pins python:3.12-slim by digest, so without the docker
+    ecosystem the digest only ever moves by hand (last 2026-09-20)."""
+    text = (ROOT / ".github" / "dependabot.yml").read_text()
+    blocks = re.split(r"\n(?=  - package-ecosystem:)", text)
+    docker = [b for b in blocks if 'package-ecosystem: "docker"' in b]
+    assert len(docker) == 1, "exactly one docker ecosystem entry expected"
+    assert 'directory: "/"' in docker[0] and 'interval: "weekly"' in docker[0], docker[0]
+
+
+CONSTRAINTS = ROOT / "deploy" / "constraints.txt"
+
+
+def _logical_lines(text: str) -> list[str]:
+    """Requirements-file lines with `\\` continuations joined, comments and blanks dropped."""
+    out, cur = [], ""
+    for raw in text.splitlines():
+        line = raw.split(" #", 1)[0].rstrip() if not raw.lstrip().startswith("#") else ""
+        if not line.strip():
+            continue
+        if line.endswith("\\"):
+            cur += line[:-1] + " "
+            continue
+        out.append((cur + line).strip())
+        cur = ""
+    return out
+
+
+def test_image_installs_third_party_deps_from_hash_pinned_constraints():
+    """Audit I-21/E-20: the image installed `[providerkit,observability]` plus five providers
+    and let pip resolve every third-party dependency from the index at build time, so two builds
+    of one tag could differ. Every third-party distribution now comes from deploy/constraints.txt
+    (`==` + `--hash=sha256:` on every line, pip in `--require-hashes` mode) and our own wheels
+    go in with `--no-deps`, so nothing outside that list can reach the image."""
+    df = (ROOT / "Dockerfile").read_text()
+    assert "deploy/constraints.txt" in df, "Dockerfile does not copy the constraints file"
+    assert re.search(r"pip install [^\n]*--require-hashes [^\n]*-r \./constraints\.txt", df), df
+    assert re.search(r"pip install [^\n]*--no-deps [^\n]*\\\n\s+\"\$\(ls \./dist/dagentos-\*\.whl\)", df)
+    assert "--upgrade pip" not in df, "pip must come from the constraints file too, not `latest`"
+    ignore = [ln.strip() for ln in (ROOT / ".dockerignore").read_text().splitlines()]
+    assert "!deploy/constraints.txt" in ignore, "the build context never sees the constraints"
+
+    assert CONSTRAINTS.is_file(), "deploy/constraints.txt missing: run scripts/refresh_constraints.py"
+    pinned = _logical_lines(CONSTRAINTS.read_text())
+    assert pinned, "constraints file is empty"
+    names = set()
+    for ln in pinned:
+        assert "==" in ln, f"not an exact pin: {ln}"
+        assert "--hash=sha256:" in ln, f"no sha256 hash: {ln}"
+        names.add(re.match(r"([A-Za-z0-9_.\-]+)", ln).group(1).lower().replace("_", "-"))
+    assert "pip" in names, "pip itself is upgraded in the image, so it must be pinned too"
+
+    # every direct third-party requirement of what the image installs is on the list, so a new
+    # dependency in any pyproject without a refresh fails here instead of at `docker build`
+    wanted = list(CORE["project"]["dependencies"])
+    wanted += CORE["project"]["optional-dependencies"]["providerkit"]
+    wanted += CORE["project"]["optional-dependencies"]["observability"]
+    for p in PROVIDERS:
+        wanted += tomllib.loads(p.read_text())["project"]["dependencies"]
+    for req in wanted:
+        dist = re.match(r"([A-Za-z0-9_.\-]+)", req).group(1).lower().replace("_", "-")
+        if dist == "dagentos":
+            continue                     # our own wheel, installed by path
+        assert dist in names, f"{req!r} is not pinned in deploy/constraints.txt (refresh it)"
+
+
+def test_constraints_refresh_is_scripted_and_documented():
+    script = ROOT / "scripts" / "refresh_constraints.py"
+    assert script.is_file()
+    body = script.read_text()
+    assert "deploy/constraints.in" in body and "deploy/constraints.txt" in body
+    assert "--generate-hashes" in body and "--universal" in body
+    releasing = (ROOT / "docs" / "RELEASING.md").read_text()
+    assert "## Reproducible image" in releasing
+    assert "scripts/refresh_constraints.py" in releasing and "deploy/constraints.txt" in releasing
 
 
 def test_pypi_matrix_lists_every_distribution_the_build_job_builds():

@@ -23,24 +23,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       # Same install line as ci.yml's `test` job: every provider, so the replay step below
       # exercises all five suites (each importorskips when its distribution is absent).
       - run: pip install -e ".[dev,observability,providerkit]" -e providers/openai-compat -e providers/anthropic -e providers/openai-agents -e providers/pydantic-ai -e providers/acp
       - name: Install and start Ollama
+        # Audit I-22: `curl ... | sh` ran whatever ollama.com served that night. The installer
+        # is now fetched to a file and checked against a recorded sha256 before it runs; when
+        # Ollama changes the script this step fails closed and the hash below must be re-recorded
+        # (`curl -fsSL -o install.sh https://ollama.com/install.sh && sha256sum install.sh`).
+        # The operator-supplied model name reaches the shell only through `env:`, never by
+        # expression substitution inside `run:` (script-injection shape).
+        env:
+          OLLAMA_INSTALL_SHA256: "25f64b810b947145095956533e1bdf56eacea2673c55a7e586be4515fc882c9f"  # recorded 2026-11-17
+          MODEL: ${{ github.event.inputs.model || 'qwen2.5:0.5b' }}
         run: |
-          curl -fsSL https://ollama.com/install.sh | sh
+          set -euo pipefail
+          curl -fsSL -o install.sh https://ollama.com/install.sh
+          echo "$OLLAMA_INSTALL_SHA256  install.sh" | sha256sum -c -
+          sh install.sh
           nohup ollama serve > ollama.log 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:11434/v1/models && break; sleep 2; done
-          ollama pull "${{ github.event.inputs.model || 'qwen2.5:0.5b' }}"
+          ollama pull "$MODEL"
       - name: Re-record cassettes against the live server (both wire formats)
         env:
-          AGENTOS_OPENAI_ALIASES: '{"chat.fast": "${{ github.event.inputs.model || ''qwen2.5:0.5b'' }}"}'
-          AGENTOS_ANTHROPIC_ALIASES: '{"chat.fast": "${{ github.event.inputs.model || ''qwen2.5:0.5b'' }}"}'
+          MODEL: ${{ github.event.inputs.model || 'qwen2.5:0.5b' }}
         run: |
+          set -euo pipefail
+          export AGENTOS_OPENAI_ALIASES="{\"chat.fast\": \"$MODEL\"}"
+          export AGENTOS_ANTHROPIC_ALIASES="{\"chat.fast\": \"$MODEL\"}"
           python providers/openai-compat/scripts/record_cassettes.py --live
           python providers/anthropic/scripts/record_cassettes.py --live
       - name: Replay tests pass on the fresh recordings; every other provider suite runs too
@@ -49,7 +63,7 @@ jobs:
         run: pytest -q providers tests/test_quickstart_llm.py -p no:cacheprovider
       - name: Show what changed
         run: git -P diff --stat -- providers/*/tests/cassettes
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cassettes-${{ github.run_id }}
           path: providers/*/tests/cassettes
