@@ -76,6 +76,51 @@ class Toxiproxy:
         except urllib.error.HTTPError:
             pass
 
+    def toxics(self, proxy: str) -> list[str]:
+        """Names of the toxics currently on `proxy` (so a test can prove one was in effect)."""
+        return [t["name"] for t in self._req("GET", f"/proxies/{proxy}/toxics") or []]
+
+    def disable(self, proxy: str) -> None:
+        """Full partition: Toxiproxy closes every open connection through `proxy` and stops
+        accepting new ones. The client side sees a dropped socket, then connection refused."""
+        self._req("POST", f"/proxies/{proxy}", {"enabled": False})
+
+    def enable(self, proxy: str) -> None:
+        """Heal the partition; clients reconnect on their next attempt."""
+        self._req("POST", f"/proxies/{proxy}", {"enabled": True})
+
+
+class CutLinkAt:
+    """A `FaultInjector` that partitions instead of crashing: the first time `point` is
+    reached for `step_id`, the Toxiproxy proxy is disabled, so the worker's NEXT store call
+    fails on the wire. Deterministic placement of a network fault at an engine boundary — the
+    Layer 2 counterpart of `dagentos.core.faults.CrashAt`."""
+
+    def __init__(self, toxiproxy: Toxiproxy, proxy: str, point: str, step_id: str) -> None:
+        self.toxiproxy, self.proxy, self.point, self.step_id = toxiproxy, proxy, point, step_id
+        self.fired = False
+
+    def at(self, point: str, **ctx: object) -> None:
+        if point == self.point and ctx.get("step_id") == self.step_id and not self.fired:
+            self.fired = True
+            self.toxiproxy.disable(self.proxy)
+
+
+def wait_until(predicate, *, timeout: float, every: float = 0.2, what: str = "condition") -> None:
+    """Poll `predicate()` until it returns truthy or `timeout` seconds pass (AssertionError).
+    Exceptions from the predicate count as 'not yet' — a reconnecting pool raises until it
+    reconnects, which is exactly what is being waited for."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            if predicate():
+                return
+        except Exception:  # noqa: BLE001 — see docstring
+            pass
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"{what} did not hold within {timeout}s")
+        time.sleep(every)
+
 
 @pytest.fixture(scope="session")
 def toxiproxy():
@@ -112,3 +157,32 @@ def proxied_dsn(dsn: str, client: str = CLIENT) -> str:
     userinfo, _, _ = parts.netloc.rpartition("@")
     netloc = f"{userinfo}@{client}" if userinfo else client
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+# ---- shared by scenarios 2–5 (scenario 1, test_lease_expiry_race.py, keeps its own fixtures)
+
+@pytest.fixture
+def pg_schema(tmp_path) -> str:
+    """One Postgres schema per test, so scenarios never share runs, leases or queue rows.
+    Also a valid AGENTOS_PG_SCHEMA (dagentos/store/factory.py) for a worker subprocess."""
+    return f"n_{tmp_path.name.lower().replace('-', '_')}"[:60]
+
+
+@pytest.fixture
+def pg_direct(toxiproxy, pg_schema):
+    """A PostgresStore on the DIRECT link in the test's schema; the schema is dropped after.
+    Depends on `toxiproxy` so it skips with the same message when the wire is not there."""
+    from dagentos.store.postgres import PostgresStore
+    store = PostgresStore(PG_DSN, schema=pg_schema, max_size=4)
+    try:
+        yield store
+    finally:
+        with store.connection() as conn:
+            conn.execute(f'DROP SCHEMA IF EXISTS "{pg_schema}" CASCADE')
+        store.close()
+
+
+def proxied_store(pg_schema: str, *, max_size: int = 2):
+    """A PostgresStore that reaches the same schema THROUGH Toxiproxy. The caller closes it."""
+    from dagentos.store.postgres import PostgresStore
+    return PostgresStore(proxied_dsn(PG_DSN), schema=pg_schema, max_size=max_size)

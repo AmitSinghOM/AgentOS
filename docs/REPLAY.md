@@ -160,6 +160,11 @@ status, and `agentos doctor` compares the stored rows with the fold on a live st
 
 ## Related
 
+- Executable form of this guarantee over *random* logs: `tests/property/` (Hypothesis) drives
+  random DAGs through the engine with random executor outcomes and operator interleavings and
+  asserts `fold(events[:k]) == GET /runs/{id}?at=k` at every k, snapshot + tail == full fold,
+  and that any single edit/insert/remove of the log is refused (`tests/property/conftest.py`
+  documents the strategies).
 - Tamper-evidence of those facts: `TRUST_BOUNDARY.md` §2.
 - Snapshots (C15, #15): see the section above.
 - Taking a run away as a file: "Exporting a run (A11)" above.

@@ -44,7 +44,8 @@ Documentation = "https://github.com/AmitSinghOM/AgentOS/blob/main/README.md"
 agentos = "dagentos.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.4", "import-linter>=2.0", "mypy>=1.13"]
+dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.4", "import-linter>=2.0", "mypy>=1.13",
+       "hypothesis>=6"]           # tests/property: the executable form of the replay guarantee
 # Observability adapters (docs/DEVELOPMENT_STRUCTURE.md §11 A9). The core never imports
 # these; dagentos.observability does, and only when the extra is installed.
 observability = [
