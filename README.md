@@ -117,7 +117,11 @@ A whole coding agent as a step: [`providers/acp`](providers/acp/README.md) runs 
 [Agent Client Protocol](https://agentclientprotocol.com) turn (`kiro-cli acp` by default, any
 ACP agent by config) under the same gate — the agent's permission prompts are answered from
 the step's declared effect classes, never `allow_always`, and an unasked undeclared tool
-dead-letters the step.
+dead-letters the step. An MCP server as a step: [`providers/mcp`](providers/mcp/README.md)
+runs one tool call on a stdio [Model Context Protocol](https://modelcontextprotocol.io)
+server — the operator maps each tool to an effect class, a call outside the map or the
+declaration is rejected before the server is spawned, the tool list is hash-pinned, and the
+result enters the run as data.
 
 No Docker needed for the default SQLite store. For Postgres (needs the `.env` from above —
 the compose file reads `POSTGRES_PASSWORD` from it and refuses to start without one):
@@ -181,6 +185,7 @@ there. Each use case below is one declared workflow; the files named are in
 | **Research, then write** — pull facts from an API, hand them to a model | a `tool` step (`kind: http`, effect `read`) feeding an `llm` step ([`research_workflow.json`](examples/research_workflow.json)); the URL is the operator's and inputs reach the tool as values only, never as URL or argv | the response body (capped at 1 MiB, header values redacted) is the step's recorded output, so the writer's prompt is reproducible after the API changes |
 | **Anything that spends or ships** — payment, deploy, outbound email | any node whose agent declares `spend`, `write_external`, `send_message` or `execute_code` ([`diamond_workflow.json`](examples/diamond_workflow.json) with `payer_agent.json`) | the run **suspends before the step runs**; a named human approves from the inbox or the API; who, when and why are in the hash-chained log; the step's completion is then committed once |
 | **A coding agent as one step** — fix a failing test, open a change | one `llm` step with `executor: acp` declaring `[compute, read, execute_code]` ([`providers/acp`](providers/acp/README.md)); the agent's permission prompts are answered from that declaration | an unasked edit outside the declaration dead-letters the step; every tool call is recorded by SHA-256; no `allow_always` ever |
+| **An MCP server's tool as one step** — read a file, file a ticket, post to a channel through a server you already run | one `tool` step with `executor: mcp` ([`providers/mcp`](providers/mcp/README.md)): `config.server.command` is the operator's, `config.tools` maps each tool to an effect class, `config.call` fixes the one call and fills its arguments from inputs | a call outside the map or the declaration is rejected before the server is spawned; the server's tool list is hash-pinned (`tools_sha256`) so a changed schema fails closed; the result is recorded by SHA-256 and enters the next step as data |
 | **Scheduled and event-driven runs** — nightly reports, "on every push" | `python -m dagentos.triggers` with cron slots (IANA time zones) and HMAC-signed webhooks ([`triggers.json`](examples/triggers.json)) | every trigger goes through the public run-start API with a derived `Idempotency-Key`, so a redelivered webhook or a retried slot is one run |
 | **Comparing models or harnesses** — same task, different backend | one workflow, `executor` swapped between `openai-compat`, `anthropic`, `openai-agents`, `pydantic-ai` and `acp`; the two API providers share one output shape and the two SDK harnesses another, each pinned by a test | the cost panel and `provenance.model_id` make the comparison a query over runs, not a spreadsheet |
 
@@ -204,6 +209,7 @@ the same workflow can use two vendors.
 | **vLLM / LM Studio / any OpenAI-compatible server** | `openai-compat` | `AGENTOS_OPENAI_BASE_URL=http://host:8000/v1` (vLLM) or `http://127.0.0.1:1234/v1` (LM Studio) | whatever the server reports at `GET /models` |
 | **An agent SDK with tools** (OpenAI Agents SDK, PydanticAI) | `openai-agents` / `pydantic-ai` | same shape with the `AGENTOS_OPENAI_AGENTS_*` / `AGENTOS_PYDANTIC_AI_*` prefix; both default to local Ollama | alias or id; `tools` names registered operator functions, each with an effect class |
 | **A whole coding agent** (Kiro CLI, Gemini CLI, Claude Code via its ACP adapter, …) | `acp` | `AGENTOS_ACP_COMMAND='["kiro-cli","acp"]'` (default) plus the agent's own login | ignored — the agent brings its model |
+| **An MCP server** (filesystem, GitHub, your own stdio server) | `mcp` | none — `config.server.command` names the program (`npx -y @modelcontextprotocol/server-…`), `config.server.env` plus `PATH` is its whole environment | ignored — `config.tools` maps tool names to effect classes and `config.call` picks the one tool |
 
 The same poet, three ways. Only `executor` (and the environment above) changes:
 

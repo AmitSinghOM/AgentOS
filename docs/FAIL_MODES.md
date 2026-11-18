@@ -11,7 +11,7 @@ policy, no keyring) and **not detectable in-log** (the one gap no in-log scheme 
 truncation after the last seal; the tool reports the uncovered tail). A chokepoint in none
 of these is a bug.
 
-Each row names the test that pins the direction (91 rows). `tests/test_fail_modes.py` checks that
+Each row names the test that pins the direction (96 rows). `tests/test_fail_modes.py` checks that
 every cited test exists, so this table cannot quietly outlive the code. Phase 8 #11;
 the operator policy ceiling (#2) is scoped against this table.
 
@@ -33,6 +33,10 @@ the operator policy ceiling (#2) is scoped against this table.
 | Definition resolution | Named executor plugin not installed | **closed** | Run fails with an install hint in the log | `tests/test_plugins.py::test_missing_named_executor_fails_the_run_with_install_hint` |
 | Executor `resolve()` hook | Plugin's resolver raises | **open** | Treated as "cannot resolve now"; the step still dispatches and the executor reports the real error at its own boundary | `tests/test_plugins.py::test_resolver_that_raises_does_not_stop_the_engine` |
 | Plugin discovery | One entry point fails to import | **open** | Skipped and logged; the others load | `tests/test_plugins.py::test_discover_executors_loads_good_skips_broken_and_dedupes` |
+| `mcp` executor, before spawn | `config.call.tool` names a tool not in the operator's `config.tools` map | **closed** | `ProviderError` naming the tool and the mapped names; the server is never spawned, nothing is sent; `step.failed` → retry policy → `step.dead_lettered` with the cause | `providers/mcp/tests/test_mcp.py::test_unmapped_tool_is_rejected_before_the_server_is_spawned` |
+| `mcp` executor, before spawn | The mapped effect class is not in the step's declared effects | **closed** | Rejected before send, naming the tool, its class and the declared set; never spawned (a rejected call never ran, so it is not an effect and not a "successful" step) | `providers/mcp/tests/test_mcp.py::test_mapped_tool_outside_the_declared_effects_is_rejected_before_spawn` |
+| `mcp` executor, `tools/list` | `config.tools_sha256` pin does not match the server's tool list, or a mapped tool is no longer offered | **closed** | `ProviderError` before `tools/call`, listing each mapped tool's current hash (or the missing name); the operator re-pins deliberately | `providers/mcp/tests/test_mcp.py::test_tools_sha256_pin_matches_the_recorded_hash_and_a_changed_schema_fails_closed` |
+| `mcp` executor, stdio | A frame over `max_bytes` (even one that never ends) or no answer by the deadline | **closed** | Reading stops at the cap / the deadline, `notifications/cancelled` is sent on timeout, the server's process group is SIGKILLed, the step fails naming the cap or the timeout | `providers/mcp/tests/test_mcp.py::test_a_frame_that_never_ends_is_capped_while_streaming_not_at_the_newline`, `providers/mcp/tests/test_mcp.py::test_a_server_that_never_answers_is_killed_at_the_timeout` |
 
 ## Durability (store, lease, process)
 
@@ -90,6 +94,7 @@ the operator policy ceiling (#2) is scoped against this table.
 | Authentication startup | `bearer` with no token file / plaintext token in the file | **closed** | Process refuses to start, naming the variable or entry and the fix | `tests/test_auth.py::test_bearer_without_a_token_file_fails_startup_naming_the_variable` |
 | Authentication (asserted mode) | — | **not a boundary** | Body principal recorded unverified; one WARNING at startup | `tests/test_auth.py::test_default_mode_is_asserted_and_warns_once` |
 | Authentication (asserted mode) | `POST /agents` with a `tool` agent that is `kind: subprocess`, has a `${NAME}` reference in `headers`/`env`, or sets `allow_private_networks` | **closed** | 403 before the store, naming the shape and the opt-in `AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS=1`; the quickstart's http tool with literal headers still registers | `tests/test_auth.py::test_asserted_mode_refuses_unsafe_tool_agents_unless_opted_in` |
+| Authentication (asserted mode) | `POST /agents` with `executor: mcp` (any `type`): `config.server.command` is argv the API would spawn under `?sync=true` | **closed** | 403 before the store, naming the executor and the same opt-in; bearer mode is unchanged | `tests/test_auth.py::test_asserted_mode_refuses_mcp_agents_unless_opted_in` |
 | Authorization | Non-human approves `spend` / `write_external` | **closed** | 403 from the engine; nothing appended | `tests/test_approvals.py::test_spend_requires_human_unless_workflow_allows_agent_approval` |
 | Authorization | `agent`-kind token registers an agent / defines a workflow | **closed** | 403 before the store | `tests/test_auth.py::test_agent_token_cannot_register_agents_or_define_workflows` |
 | Operator policy, gate | Workflow allows a class outside `effect_ceiling` | **closed** | Refused before dispatch; `governance.policy_applied` records the narrowing | `tests/test_policy.py::test_free_spend_outside_the_ceiling_is_refused_before_dispatch_and_audited` |

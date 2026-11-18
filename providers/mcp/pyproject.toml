@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentos-provider-mcp"
+version = "0.18.0"
+description = "AgentOS executor that runs one Model Context Protocol (MCP) tool call on a stdio server as one governed step — operator effect mapping, schema pinning, data-wrapped results"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+# No SDK: MCP is newline-delimited JSON-RPC 2.0 over the server's stdio, spoken with the
+# standard library (spec 2025-11-25). The only dependency is the kit the other providers share.
+dependencies = [
+    "dagentos[providerkit]>=0.11,<1.0",
+]
+
+[project.urls]
+Repository = "https://github.com/AmitSinghOM/AgentOS"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.entry-points."agentos.executors"]
+mcp = "agentos_provider_mcp:load"
+
+[tool.setuptools]
+packages = ["agentos_provider_mcp"]

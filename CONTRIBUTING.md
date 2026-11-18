@@ -13,10 +13,10 @@ Python **3.11 or newer** (`requires-python = ">=3.11"` in `pyproject.toml`; CI r
 ```bash
 git clone https://github.com/AmitSinghOM/AgentOS && cd AgentOS
 python -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev,observability,providerkit]" -e providers/openai-compat -e providers/anthropic -e providers/openai-agents -e providers/pydantic-ai -e providers/acp
+pip install -e ".[dev,observability,providerkit]" -e providers/openai-compat -e providers/anthropic -e providers/openai-agents -e providers/pydantic-ai -e providers/acp -e providers/mcp
 ```
 
-That is the `test` job's install line: the core with every extra plus all five provider
+That is the `test` job's install line: the core with every extra plus all six provider
 distributions as editable installs. The providers are separate PyPI distributions that live in
 this repository; their tests only run when they are installed (below).
 
@@ -56,7 +56,7 @@ Three things that bite on a laptop:
   in `[tool.pytest.ini_options] testpaths`, so a root `pytest` collects them all. Each provider
   test module therefore starts with `pytest.importorskip("agentos_provider_<name>")` and must
   keep doing so — a new provider test that imports its package at module top without it aborts
-  the whole run for anyone who did not install that provider. CI installs all five, so the
+  the whole run for anyone who did not install that provider. CI installs all six, so the
   skip never hides a failure there.
 - **The Postgres leg.** `tests/contract` has a Postgres variant that is skipped unless
   `AGENTOS_TEST_PG_DSN` is set (CI sets it against a `postgres:16` service and runs

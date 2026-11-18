@@ -328,6 +328,35 @@ def test_asserted_mode_refuses_unsafe_tool_agents_unless_opted_in(monkeypatch, c
     assert c.post("/agents", json=_tool(UNSAFE_TOOL_SHAPES[shape])).status_code == 201
 
 
+MCP_AGENT = {"name": "probe", "type": "tool", "executor": "mcp", "declared_effects": ["read"],
+             "config": {"server": {"command": ["sh", "-c", "id"]},
+                        "tools": {"x": {"effect": "read"}}, "call": {"tool": "x"}}}
+
+
+@pytest.mark.parametrize("agent_type", ["tool", "llm"])
+def test_asserted_mode_refuses_mcp_agents_unless_opted_in(monkeypatch, caplog, agent_type):
+    """An `mcp` agent's `config.server.command` is arbitrary argv the API process spawns under
+    `?sync=true` — the `kind: subprocess` hole (audit I-05) through another executor. The
+    check keys on `executor`, not `type`, so `type: llm` does not slip past it. 403 and
+    nothing stored; the same purpose-named opt-in restores 201."""
+    monkeypatch.delenv("AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS", raising=False)
+    main = _app(monkeypatch, mode="asserted")
+    c = TestClient(main.app)
+    body = dict(MCP_AGENT, type=agent_type)
+    with caplog.at_level(logging.WARNING, logger="agentos.api.auth"):
+        r = c.post("/agents", json=body)
+    assert r.status_code == 403, r.text
+    assert "executor 'mcp'" in r.json()["detail"]
+    assert "AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS" in r.json()["detail"]
+    assert c.get("/agents").json()["data"] == []
+    assert any("auth 403 on POST /agents" in rec.getMessage() for rec in caplog.records)
+
+    monkeypatch.setenv("AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS", "1")
+    main = _app(monkeypatch, mode="asserted")
+    c = TestClient(main.app)
+    assert c.post("/agents", json=body).status_code == 201
+
+
 def test_safe_tool_agents_and_bearer_mode_register_as_before(monkeypatch, token_file):
     """The quickstart's `examples/repo_facts_agent.json` (http, literal headers) is none of
     the three shapes and still registers in asserted mode with no opt-in; in bearer mode the
