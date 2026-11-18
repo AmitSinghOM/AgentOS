@@ -25,7 +25,7 @@ RUN python -m venv /opt/agentos \
       "$(ls ./dist/dagentos-*.whl)[providerkit,observability]" \
       ./dist/agentos_provider_openai_compat-*.whl ./dist/agentos_provider_anthropic-*.whl \
       ./dist/agentos_provider_openai_agents-*.whl ./dist/agentos_provider_pydantic_ai-*.whl \
-      ./dist/agentos_provider_acp-*.whl \
+      ./dist/agentos_provider_acp-*.whl ./dist/agentos_provider_mcp-*.whl \
  && /opt/agentos/bin/pip check \
  && /opt/agentos/bin/agentos --help > /dev/null
 

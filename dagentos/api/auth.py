@@ -17,7 +17,8 @@ Two modes, selected by `AGENTOS_AUTH`:
 
 In asserted mode `POST /agents` also refuses (403) a `tool` agent that would let the
 unverified caller run code or read this process's environment — `kind: subprocess`, a
-`${NAME}` reference in `headers`/`env`, or `allow_private_networks: true` — unless
+`${NAME}` reference in `headers`/`env`, or `allow_private_networks: true` — and any agent
+whose executor spawns the argv in its definition (`executor: mcp`), unless
 `AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS=1` (`refuse_unsafe_tool_definition`).
 
 The token file holds SHA-256 hashes, never tokens:
@@ -232,13 +233,26 @@ def unsafe_tool_reason(config: dict) -> str | None:
     return None
 
 
+#: Executors whose agent definition names a program to spawn (`config.server.command` for
+#: `agentos-provider-mcp`): the same shape as `kind: subprocess`, reached through another
+#: executor. Keyed on `executor`, not `type`, so `type: llm` cannot slip past the check.
+SPAWNING_EXECUTORS: frozenset[str] = frozenset({"mcp"})
+
+
 def refuse_unsafe_tool_definition(agent: Agent, *, config: AuthConfig) -> None:
     """Called by `POST /agents` before the store. In asserted mode (no credential) a `tool`
-    agent with an unsafe shape is 403 unless AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS=1; bearer
-    mode is unchanged (the token already names an operator)."""
-    if config.enforced or config.allow_unsafe_tools or agent.type is not AgentType.tool:
+    agent with an unsafe shape — or any agent whose executor spawns the argv in its
+    definition — is 403 unless AGENTOS_ASSERTED_ALLOW_UNSAFE_TOOLS=1; bearer mode is
+    unchanged (the token already names an operator)."""
+    if config.enforced or config.allow_unsafe_tools:
         return
-    reason = unsafe_tool_reason(agent.config)
+    if agent.executor in SPAWNING_EXECUTORS:
+        reason: str | None = (f"executor {agent.executor!r} (config.server.command is arbitrary "
+                              f"argv spawned as the API's user)")
+    elif agent.type is AgentType.tool:
+        reason = unsafe_tool_reason(agent.config)
+    else:
+        return
     if reason is None:
         return
     logger.warning("auth 403 on POST /agents %r: AGENTOS_AUTH=asserted refuses %s; set %s=1 "

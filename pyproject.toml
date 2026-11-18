@@ -105,7 +105,7 @@ warn_unused_ignores = true
 # root too; they importorskip when the provider is not installed.
 testpaths = ["tests", "providers/openai-compat/tests", "providers/anthropic/tests",
              "providers/openai-agents/tests", "providers/pydantic-ai/tests",
-             "providers/acp/tests"]
+             "providers/acp/tests", "providers/mcp/tests"]
 markers = [
     "network: needs real Postgres + Toxiproxy (tests/chaos/network); skipped without AGENTOS_TEST_PG_DSN",
 ]
@@ -147,6 +147,7 @@ forbidden_modules = [
     "agents", "agentos_provider_openai_agents",  # the inner harnesses are plugins too
     "pydantic_ai", "agentos_provider_pydantic_ai",
     "agentos_provider_acp",                        # the ACP harness is a plugin too
+    "agentos_provider_mcp", "mcp",                 # MCP stays out of the core: adapter + SDK
 ]
 allow_indirect_imports = true
 

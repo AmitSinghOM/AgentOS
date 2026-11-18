@@ -10,7 +10,7 @@ commit SHA because it holds `id-token: write`.
 | --- | --- | --- |
 | PyPI distribution (core) | `dagentos` | `agentos` on PyPI belongs to agentos.org and `agenticos` to another project — both with the same import names, both checked live on 2026-09-20. `dagentos` was free on PyPI and npm |
 | Import package | `dagentos` | same as the distribution since v0.11.0 (`pip install dagentos` → `import dagentos`). v0.9.0–v0.10.0 shipped as `agentos-durable` with import package `agentos`; those releases stay as published |
-| PyPI distributions (providers) | `agentos-provider-openai-compat`, `-anthropic`, `-openai-agents`, `-pydantic-ai`, `-acp` | each depends on `dagentos[providerkit]` |
+| PyPI distributions (providers) | `agentos-provider-openai-compat`, `-anthropic`, `-openai-agents`, `-pydantic-ai`, `-acp`, `-mcp` | each depends on `dagentos[providerkit]` |
 | Image | `ghcr.io/amitsinghom/agentos:{version,latest}` | GitHub namespace; multi-arch (amd64, arm64) |
 | Console script | `agentos` | `verify` / `doctor` / `policy explain` / `pause` / `resume` / `init` / `run` / `export-run` / `archive` |
 
@@ -80,7 +80,7 @@ pip download --no-deps dagentos==0.18.0 -d /tmp/dl && (cd /tmp/dl && sha256sum *
 ## What the image is
 
 `python:3.12-slim` pinned by digest; a venv with the core (`[providerkit,observability]`) and all
-five providers installed **from the wheels the same run built** (by path, never from an index);
+six providers installed **from the wheels the same run built** (by path, never from an index);
 non-root user `agentos` (uid 10001); `/var/lib/agentos` volume for the default SQLite store;
 `CMD` is the API; `python -m dagentos.worker` is the worker; the `agentos` CLI is on `PATH`.
 

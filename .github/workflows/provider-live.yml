@@ -37,8 +37,8 @@ jobs:
         with:
           python-version: "3.12"
       # Same install line as ci.yml's `test` job: every provider, so the replay step below
-      # exercises all five suites (each importorskips when its distribution is absent).
-      - run: pip install -e ".[dev,observability,providerkit]" -e providers/openai-compat -e providers/anthropic -e providers/openai-agents -e providers/pydantic-ai -e providers/acp
+      # exercises all six suites (each importorskips when its distribution is absent).
+      - run: pip install -e ".[dev,observability,providerkit]" -e providers/openai-compat -e providers/anthropic -e providers/openai-agents -e providers/pydantic-ai -e providers/acp -e providers/mcp
       - name: Install and start Ollama
         # Audit I-22: `curl ... | sh` ran whatever ollama.com served that night. The installer
         # is now fetched to a file and checked against a recorded sha256 before it runs; when
