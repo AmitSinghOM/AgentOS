@@ -14,6 +14,6 @@ opentelemetry-sdk>=1.25
 opentelemetry-exporter-otlp-proto-http>=1.25
 opentelemetry-semantic-conventions>=0.46b0
 prometheus-client>=0.20
-openai-agents>=0.22,<1.0
-pydantic-ai-slim[openai]>=2.46,<3
+openai-agents>=0.25.0,<1.0
+pydantic-ai-slim[openai]>=2.71.0,<3
 pip
